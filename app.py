@@ -286,7 +286,7 @@ with left:
         except:
             return ''
 
-    styled = df_comp.style.applymap(color_score, subset=['Score'])
+    styled = df_comp.style.map(color_score, subset=['Score'])
     st.dataframe(styled, use_container_width=True, hide_index=True)
 
     # ── Phi explanation note
