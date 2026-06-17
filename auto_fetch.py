@@ -114,7 +114,7 @@ def fetch_b20() -> float:
     Equivalent to the CBOE S5TW index (the same source used in TradingView).
 
     Downloads the current S&P 500 list from Wikipedia, then downloads 45 days
-    of close prices via yfinance (batch call, single request).
+    of close prices via yfinance in batches of 100 to avoid timeouts.
 
     Returns percentage as a float (e.g. 63.4), or np.nan on failure.
     """
@@ -129,20 +129,34 @@ def fetch_b20() -> float:
         # yfinance uses '-' not '.' for BRK.B, BF.B etc.
         tickers = [t.replace('.', '-') for t in tickers]
 
-        # Step 2: batch download 45 days of close prices
-        print(f'  B20: downloading {len(tickers)} tickers (45d)...')
-        prices = yf.download(
-            tickers,
-            period='45d',
-            auto_adjust=True,
-            progress=False,
-            threads=True
-        )
-        if isinstance(prices.columns, pd.MultiIndex):
-            closes = prices['Close']
-        else:
-            closes = prices
+        # Step 2: batch download 45 days of close prices in chunks of 100
+        print(f'  B20: downloading {len(tickers)} tickers in batches...')
+        batch_size = 100
+        all_closes = []
+        for i in range(0, len(tickers), batch_size):
+            batch = tickers[i:i + batch_size]
+            try:
+                prices = yf.download(
+                    batch,
+                    period='45d',
+                    auto_adjust=True,
+                    progress=False,
+                    threads=True
+                )
+                if isinstance(prices.columns, pd.MultiIndex):
+                    closes_batch = prices['Close']
+                else:
+                    closes_batch = prices
+                all_closes.append(closes_batch)
+            except Exception as e:
+                print(f'  [WARN] B20 batch {i//batch_size+1} failed: {e}')
+                continue
 
+        if not all_closes:
+            print('  [WARN] B20: all batches failed')
+            return np.nan
+
+        closes = pd.concat(all_closes, axis=1)
         closes = closes.dropna(axis=1, how='all')   # drop tickers with no data
 
         if closes.shape[0] < 21:
@@ -161,6 +175,32 @@ def fetch_b20() -> float:
 
     except Exception as e:
         print(f'  [WARN] B20 fetch failed: {e}')
+        return np.nan
+
+
+# ── SKEW — CBOE SKEW Index ─────────────────────────────────────────────────────
+def fetch_skew() -> float:
+    """
+    Fetch the latest CBOE SKEW index value from yfinance (^SKEW).
+    SKEW measures tail risk / left-tail demand in SPX options.
+    Typical range: 100–170. Values >140 indicate elevated tail risk.
+
+    Returns the latest SKEW value as a float, or np.nan on failure.
+    """
+    try:
+        raw = yf.download('^SKEW', period='5d', auto_adjust=True, progress=False)
+        if raw.empty:
+            print('  [WARN] SKEW: ^SKEW returned no data')
+            return np.nan
+        if isinstance(raw.columns, pd.MultiIndex):
+            s = raw['Close']['^SKEW']
+        else:
+            s = raw['Close']
+        val = float(s.dropna().iloc[-1])
+        print(f'  SKEW fetched: {val:.2f}')
+        return val
+    except Exception as e:
+        print(f'  [WARN] SKEW fetch failed: {e}')
         return np.nan
 
 
@@ -198,13 +238,16 @@ def build_inp_map(hist: pd.DataFrame) -> dict:
     # ── B20% ────────────────────────────────────────────────────────────────
     b20_today = fetch_b20()
 
+    # ── SKEW — fallback in case yfinance returns NaN for ^SKEW today ────────
+    skew_today = fetch_skew()
+
     inp_map = {
         today_ts: {
             'adl_level':  adl_today,
             'b20_pct':    b20_today,
             'zero_gamma': zg,
-            'pc_ratio':   np.nan,   # always auto-fetched from CBOE
-            'skew':       np.nan,   # always auto-fetched from yfinance
+            'pc_ratio':   np.nan,    # auto-fetched from CBOE in pipeline
+            'skew':       skew_today, # fallback if ^SKEW yfinance NaN
         }
     }
 
@@ -212,5 +255,6 @@ def build_inp_map(hist: pd.DataFrame) -> dict:
     print(f'    ADL        = {adl_today:,.0f}' if not np.isnan(adl_today) else '    ADL        = NaN (neutral)')
     print(f'    B20%       = {b20_today:.1f}%' if not np.isnan(b20_today) else '    B20%       = NaN (neutral)')
     print(f'    Zero Gamma = {zg:.2f}' if not np.isnan(zg) else '    Zero Gamma = NaN (neutral)')
+    print(f'    SKEW       = {skew_today:.2f}' if not np.isnan(skew_today) else '    SKEW       = NaN (pipeline fallback)')
 
     return inp_map

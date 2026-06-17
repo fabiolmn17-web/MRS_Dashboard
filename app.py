@@ -4,7 +4,7 @@ app.py — MRS Live Dashboard (Streamlit)
 Password-protected. Reads mrs_history.csv and displays:
   • Current regime score + signal quality
   • 8-component breakdown table
-  • VIX velocity hazard layer
+  • VIX lifecycle state layer (paper-grounded: compression / mid / spike-zone)
   • Zero Gamma position
   • 90-day MRS history chart
   • Regime duration counter
@@ -301,46 +301,45 @@ with left:
 # ── RIGHT: VIX Hazard + Gamma + 90-day chart ──────────────────────────────────
 with right:
 
-    # VIX Velocity Hazard Layer
-    st.markdown('<div class="section-header">VIX Velocity Hazard Layer</div>', unsafe_allow_html=True)
+    # VIX Lifecycle State (empirically grounded — VIX paper, June 2026)
+    st.markdown('<div class="section-header">VIX Lifecycle State</div>', unsafe_allow_html=True)
 
-    vix_phi    = last.get('vix_phi', np.nan)
-    spike_flag = int(last.get('spike_flag', 0) or 0)
-    compressed = int(last.get('compressed', 0) or 0)
-    trig_days  = float(last.get('trigger_days', 0) or 0)
+    vix_phi   = last.get('vix_phi', np.nan)
+    trig_days = float(last.get('trigger_days', 0) or 0)
 
     try: vix_phi_f = float(vix_phi)
     except: vix_phi_f = np.nan
 
-    # Compression status
+    # Phase classification based on empirically validated thresholds (paper Module 2 & 4a)
     if not np.isnan(vix_phi_f) and vix_phi_f < 0.30:
+        # Compression: latent fragility — VIX forward return distribution concentrated rightward on exit
         vix_row_cls = 'hazard-row'
-        vix_txt = f'🔴 COMPRESSED — VIX Phi = {vix_phi_f:.3f} (below 0.300 threshold). Monitor for expansion trigger.'
+        vix_txt = (f'🔴 COMPRESSION — VIX Phi = {vix_phi_f:.3f}. Latent fragility state. '
+                   f'Exit events historically elevate VIX +8% (5D, d=+0.46) and suppress SPY (d=−0.32).')
+    elif not np.isnan(vix_phi_f) and vix_phi_f > 0.70:
+        # Spike zone: post-peak SPY recovery historically +2.91% vs +0.38% baseline (10D, p=0.018)
+        vix_row_cls = 'neutral-row'
+        vix_txt = (f'🟡 SPIKE ZONE — VIX Phi = {vix_phi_f:.3f}. Elevated VIX. '
+                   f'Post-spike SPY recovery: mean +2.91% vs +0.38% baseline (10D). Left-tail contracted.')
     elif not np.isnan(vix_phi_f):
-        vix_row_cls = 'safe-row' if vix_phi_f < 0.60 else 'hazard-row'
-        label  = 'Mid' if vix_phi_f < 0.60 else ('High' if vix_phi_f < 0.80 else 'Stress')
-        emoji  = '🟢' if vix_phi_f < 0.60 else '🟡' if vix_phi_f < 0.80 else '🔴'
-        vix_txt = f'{emoji} VIX regime: {label} — Phi = {vix_phi_f:.3f}'
+        # Mid range: no structural signal
+        vix_row_cls = 'safe-row'
+        vix_txt = f'🟢 MID RANGE — VIX Phi = {vix_phi_f:.3f}. Normal expansion phase. No structural signal.'
     else:
         vix_row_cls = 'neutral-row'
         vix_txt = '⚪ VIX Phi: no data'
 
     st.markdown(f'<div class="{vix_row_cls}">{vix_txt}</div>', unsafe_allow_html=True)
 
-    # Spike flag
-    if spike_flag:
-        st.markdown('<div class="hazard-row">🔴 VIX SPIKE FLAG — 1-day expansion >30%. Elevated short-term downside velocity.</div>', unsafe_allow_html=True)
-    else:
-        st.markdown('<div class="safe-row">🟢 No VIX spike (1-day change &lt;30%)</div>', unsafe_allow_html=True)
-
-    # Trigger
+    # Compression exit window (trigger_days 1–7): active SPY suppression period
     if trig_days > 0:
         days_left = int(7 - trig_days)
-        st.markdown(f'<div class="hazard-row">🔴 EXPANSION TRIGGER ACTIVE — Day {int(trig_days)} of 7. '
-                    f'T+21D downside velocity elevated (TRR- ~2.1×). {days_left}d remaining in hazard window.</div>',
+        st.markdown(f'<div class="hazard-row">🔴 COMPRESSION EXIT — Day {int(trig_days)} of 7. '
+                    f'Active SPY suppression window (d=−0.32 at 5D, persists to ~21D). '
+                    f'{days_left}d remaining in tracking window.</div>',
                     unsafe_allow_html=True)
     else:
-        st.markdown('<div class="safe-row">🟢 No active expansion trigger</div>', unsafe_allow_html=True)
+        st.markdown('<div class="safe-row">🟢 No active compression exit event</div>', unsafe_allow_html=True)
 
     # Zero Gamma position
     st.markdown('<div class="section-header" style="margin-top:16px;">Zero Gamma Position</div>', unsafe_allow_html=True)
