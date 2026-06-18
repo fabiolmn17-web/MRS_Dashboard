@@ -97,43 +97,83 @@ def fetch_adl(last_adl: float, last_adl_date: pd.Timestamp) -> dict:
         print(f'  [WARN] ADL fetch failed: {e}')
     return result
 
-# ── B20% — ^S5TW from Yahoo Finance (CBOE index) ──────────────────────────────
+# ── B20% — computed from individual yfinance downloads (100-stock sample) ──────
+# S&P 500 representative sample — 10 stocks per sector, avoids bulk endpoint
+_SP500_SAMPLE = [
+    # Tech
+    'AAPL','MSFT','NVDA','AVGO','ORCL','CRM','AMD','QCOM','TXN','AMAT',
+    # Financials
+    'JPM','BAC','WFC','GS','MS','BLK','SCHW','AXP','PGR','CB',
+    # Healthcare
+    'LLY','UNH','JNJ','ABBV','MRK','TMO','ABT','DHR','SYK','ISRG',
+    # Consumer Discretionary
+    'AMZN','TSLA','HD','MCD','NKE','BKNG','LOW','TJX','SBUX','GM',
+    # Industrials
+    'CAT','RTX','HON','UPS','BA','GE','LMT','DE','ETN','EMR',
+    # Communication
+    'META','GOOGL','GOOG','NFLX','DIS','T','VZ','CMCSA','EA','TTWO',
+    # Consumer Staples
+    'PG','KO','PEP','COST','WMT','PM','MO','CL','GIS','KHC',
+    # Energy
+    'XOM','CVX','COP','SLB','EOG','MPC','PSX','VLO','OXY','HAL',
+    # Materials
+    'LIN','APD','ECL','SHW','FCX','NEM','ALB','PPG','VMC','MLM',
+    # Real Estate + Utilities
+    'PLD','AMT','EQIX','NEE','SO','DUK','AEP','D','EXC','SRE',
+]
+
 def fetch_b20() -> float:
     try:
-        print('  B20: fetching ^S5TW from Yahoo Finance...')
-        raw = yf.download('^S5TW', period='5d', auto_adjust=True, progress=False)
-        if raw.empty:
-            print('  [WARN] B20: ^S5TW returned no data')
+        print(f'  B20: computing from {len(_SP500_SAMPLE)}-stock S&P 500 sample...')
+        above = 0
+        valid = 0
+        for ticker in _SP500_SAMPLE:
+            try:
+                hist = yf.Ticker(ticker).history(period='45d', auto_adjust=True)
+                if hist.empty or len(hist) < 21:
+                    continue
+                close = hist['Close'].dropna()
+                if len(close) < 21:
+                    continue
+                ma20 = close.rolling(20).mean()
+                if close.iloc[-1] > ma20.iloc[-1]:
+                    above += 1
+                valid += 1
+            except Exception:
+                continue
+        if valid < 20:
+            print(f'  [WARN] B20: only {valid} valid stocks — insufficient')
             return np.nan
-        if isinstance(raw.columns, pd.MultiIndex):
-            s = raw['Close']['^S5TW']
-        else:
-            s = raw['Close']
-        val = float(s.dropna().iloc[-1])
-        print(f'  B20 (^S5TW): {val:.2f}%')
-        return val
+        pct = round(above / valid * 100, 2)
+        print(f'  B20: {pct:.1f}% ({above}/{valid} stocks above 20-day MA)')
+        return pct
     except Exception as e:
         print(f'  [WARN] B20 fetch failed: {e}')
         return np.nan
 
-# ── PC Ratio — ^CPC from Yahoo Finance (CBOE index) ───────────────────────────
+# ── PC Ratio — ^CPCE from Yahoo Finance (CBOE equity put/call ratio) ───────────
 def fetch_pc_ratio() -> float:
-    try:
-        print('  PC: fetching ^CPC from Yahoo Finance...')
-        raw = yf.download('^CPC', period='5d', auto_adjust=True, progress=False)
-        if raw.empty:
-            print('  [WARN] PC: ^CPC returned no data')
-            return np.nan
-        if isinstance(raw.columns, pd.MultiIndex):
-            s = raw['Close']['^CPC']
-        else:
-            s = raw['Close']
-        val = float(s.dropna().iloc[-1])
-        print(f'  PC Ratio (^CPC): {val:.3f}')
-        return val
-    except Exception as e:
-        print(f'  [WARN] PC fetch failed: {e}')
-        return np.nan
+    for ticker in ['^CPCE', '^CPC', '^CPCI']:
+        try:
+            print(f'  PC: trying {ticker} from Yahoo Finance...')
+            raw = yf.download(ticker, period='5d', auto_adjust=True, progress=False)
+            if raw.empty:
+                continue
+            if isinstance(raw.columns, pd.MultiIndex):
+                s = raw['Close'][ticker]
+            else:
+                s = raw['Close']
+            s = s.dropna()
+            if s.empty:
+                continue
+            val = float(s.iloc[-1])
+            print(f'  PC Ratio ({ticker}): {val:.3f}')
+            return val
+        except Exception as e:
+            print(f'  [WARN] {ticker} failed: {e}')
+            continue
+    print('  [WARN] PC Ratio: all tickers failed')
+    return np.nan
 
 # ── SKEW — CBOE SKEW Index ─────────────────────────────────────────────────────
 def fetch_skew() -> float:
@@ -158,10 +198,8 @@ def build_inp_map(hist: pd.DataFrame) -> dict:
     today_ts = pd.Timestamp(date.today())
     print('\n=== Auto-fetching manual inputs ===')
 
-    # ── Zero Gamma ─────────────────────────────────────────────────────────
     zg = fetch_zero_gamma()
 
-    # ── ADL — extend from last known value ─────────────────────────────────
     adl_series = hist['adl_level'].dropna()
     if adl_series.empty:
         print('  [WARN] ADL: no historical ADL data — scoring as neutral')
@@ -176,13 +214,8 @@ def build_inp_map(hist: pd.DataFrame) -> dict:
             adl_today = last_adl
             print(f'  ADL: using carry-forward value {adl_today:,.0f}')
 
-    # ── B20% via ^S5TW on Yahoo Finance ────────────────────────────────────
-    b20_today = fetch_b20()
-
-    # ── PC Ratio via ^CPC on Yahoo Finance ─────────────────────────────────
-    pc_today = fetch_pc_ratio()
-
-    # ── SKEW ────────────────────────────────────────────────────────────────
+    b20_today  = fetch_b20()
+    pc_today   = fetch_pc_ratio()
     skew_today = fetch_skew()
 
     inp_map = {
