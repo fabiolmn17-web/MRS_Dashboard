@@ -25,7 +25,10 @@ jobs:
 
       - name: Run MRS update
         run: python update_data.py
-
+        env:
+          TV_USERNAME: ${{ secrets.TV_USERNAME }}
+          TV_PASSWORD: ${{ secrets.TV_PASSWORD }}
+          
       - name: Commit updated history
         run: |
           git config user.name  "MRS Bot"
