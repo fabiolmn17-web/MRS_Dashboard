@@ -1,25 +1,15 @@
 """
 auto_fetch.py — Automatic data fetching for the three previously-manual inputs
-===============================================================================
-Replaces the daily MRS_Inputs_v4.xlsx entry with fully automated sources:
-  Zero Gamma  →  InsiderFinance /gamma-exposure/SPX  (static HTML scrape)
-  ADL Level   →  yfinance ^NYAD  (daily net advances, cumulated from last known)
-  B20%        →  TradingView S5TW via tvdatafeed
-  PC Ratio    →  TradingView PC/USI via tvdatafeed
-All return NaN on failure — the pipeline scores them as neutral, which
-is conservative and safe (neutral = 0 contribution, not a false signal).
 """
 import re
 import warnings
 import numpy as np
-import os
 import pandas as pd
 import yfinance as yf
 import requests
 from datetime import date, timedelta
 warnings.filterwarnings('ignore')
 
-# ── Cloud-safe browser session (bypasses 403 on Yahoo Finance / CBOE) ──────────
 _BROWSER_HEADERS = {
     'User-Agent': (
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
@@ -107,35 +97,39 @@ def fetch_adl(last_adl: float, last_adl_date: pd.Timestamp) -> dict:
         print(f'  [WARN] ADL fetch failed: {e}')
     return result
 
-# ── B20% — S5TW from TradingView ──────────────────────────────────────────────
-def fetch_b20(tv_user: str = '', tv_pass: str = '') -> float:
+# ── B20% — ^S5TW from Yahoo Finance (CBOE index) ──────────────────────────────
+def fetch_b20() -> float:
     try:
-        from tvdatafeed import TvDatafeed, Interval
-        print('  B20: fetching S5TW from TradingView...')
-        tv = TvDatafeed(username=tv_user, password=tv_pass) if tv_user else TvDatafeed()
-        data = tv.get_hist('S5TW', 'CBOE', interval=Interval.in_daily, n_bars=5)
-        if data is None or data.empty:
-            print('  [WARN] B20: S5TW returned no data')
+        print('  B20: fetching ^S5TW from Yahoo Finance...')
+        raw = yf.download('^S5TW', period='5d', auto_adjust=True, progress=False)
+        if raw.empty:
+            print('  [WARN] B20: ^S5TW returned no data')
             return np.nan
-        val = float(data['close'].dropna().iloc[-1])
-        print(f'  B20 (S5TW): {val:.2f}%')
+        if isinstance(raw.columns, pd.MultiIndex):
+            s = raw['Close']['^S5TW']
+        else:
+            s = raw['Close']
+        val = float(s.dropna().iloc[-1])
+        print(f'  B20 (^S5TW): {val:.2f}%')
         return val
     except Exception as e:
         print(f'  [WARN] B20 fetch failed: {e}')
         return np.nan
 
-# ── PC Ratio — PUT/CALL from TradingView ──────────────────────────────────────
-def fetch_pc_tv(tv_user: str = '', tv_pass: str = '') -> float:
+# ── PC Ratio — ^CPC from Yahoo Finance (CBOE index) ───────────────────────────
+def fetch_pc_ratio() -> float:
     try:
-        from tvdatafeed import TvDatafeed, Interval
-        print('  PC: fetching PUT/CALL from TradingView...')
-        tv = TvDatafeed(username=tv_user, password=tv_pass) if tv_user else TvDatafeed()
-        data = tv.get_hist('PC', 'USI', interval=Interval.in_daily, n_bars=5)
-        if data is None or data.empty:
-            print('  [WARN] PC: returned no data')
+        print('  PC: fetching ^CPC from Yahoo Finance...')
+        raw = yf.download('^CPC', period='5d', auto_adjust=True, progress=False)
+        if raw.empty:
+            print('  [WARN] PC: ^CPC returned no data')
             return np.nan
-        val = float(data['close'].dropna().iloc[-1])
-        print(f'  PC Ratio (TV): {val:.3f}')
+        if isinstance(raw.columns, pd.MultiIndex):
+            s = raw['Close']['^CPC']
+        else:
+            s = raw['Close']
+        val = float(s.dropna().iloc[-1])
+        print(f'  PC Ratio (^CPC): {val:.3f}')
         return val
     except Exception as e:
         print(f'  [WARN] PC fetch failed: {e}')
@@ -182,17 +176,13 @@ def build_inp_map(hist: pd.DataFrame) -> dict:
             adl_today = last_adl
             print(f'  ADL: using carry-forward value {adl_today:,.0f}')
 
-    # ── TradingView credentials from environment ────────────────────────────
-    tv_user = os.environ.get('TV_USERNAME', '')
-    tv_pass = os.environ.get('TV_PASSWORD', '')
+    # ── B20% via ^S5TW on Yahoo Finance ────────────────────────────────────
+    b20_today = fetch_b20()
 
-    # ── B20% via TradingView S5TW ───────────────────────────────────────────
-    b20_today = fetch_b20(tv_user=tv_user, tv_pass=tv_pass)
+    # ── PC Ratio via ^CPC on Yahoo Finance ─────────────────────────────────
+    pc_today = fetch_pc_ratio()
 
-    # ── PC Ratio via TradingView ────────────────────────────────────────────
-    pc_today = fetch_pc_tv(tv_user=tv_user, tv_pass=tv_pass)
-
-    # ── SKEW — fallback if yfinance returns NaN for ^SKEW today ────────────
+    # ── SKEW ────────────────────────────────────────────────────────────────
     skew_today = fetch_skew()
 
     inp_map = {
