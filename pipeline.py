@@ -16,6 +16,17 @@ from pathlib import Path
 
 warnings.filterwarnings('ignore')
 
+# ── Cloud-safe browser headers (bypasses 403 on CBOE/Yahoo in GitHub Actions) ─
+_BROWSER_HEADERS = {
+    'User-Agent': (
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+        'AppleWebKit/537.36 (KHTML, like Gecko) '
+        'Chrome/120.0.0.0 Safari/537.36'
+    ),
+    'Accept': 'text/csv,application/csv,*/*',
+    'Referer': 'https://www.cboe.com/',
+}
+
 # ── Constants ──────────────────────────────────────────────────────────────────
 PHI_W    = 756   # 3-year rolling window (~756 trading days)
 CBOE_URL = ('https://cdn.cboe.com/data/us/options/market_statistics/'
@@ -56,7 +67,7 @@ def rolling_phi(series: pd.Series, window: int = PHI_W) -> pd.Series:
 # ── CBOE PC ratio fetch ────────────────────────────────────────────────────────
 def fetch_cboe_pc() -> pd.Series:
     try:
-        r = requests.get(CBOE_URL, timeout=15)
+        r = requests.get(CBOE_URL, headers=_BROWSER_HEADERS, timeout=15)
         r.raise_for_status()
         df = pd.read_csv(StringIO(r.text))
         df.columns = [c.strip().lower().replace(' ', '_') for c in df.columns]

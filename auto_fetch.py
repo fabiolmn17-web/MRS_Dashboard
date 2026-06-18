@@ -21,6 +21,20 @@ from datetime import date, timedelta
 
 warnings.filterwarnings('ignore')
 
+# ── Cloud-safe browser session (bypasses 403 on Yahoo Finance / CBOE) ──────────
+_BROWSER_HEADERS = {
+    'User-Agent': (
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+        'AppleWebKit/537.36 (KHTML, like Gecko) '
+        'Chrome/120.0.0.0 Safari/537.36'
+    ),
+    'Accept': '*/*',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Referer': 'https://finance.yahoo.com/',
+}
+_CLOUD_SESSION = requests.Session()
+_CLOUD_SESSION.headers.update(_BROWSER_HEADERS)
+
 IF_URL = 'https://www.insiderfinance.io/gamma-exposure/SPX'
 
 # ── Zero Gamma ─────────────────────────────────────────────────────────────────
@@ -72,17 +86,34 @@ def fetch_adl(last_adl: float, last_adl_date: pd.Timestamp) -> dict:
     Returns a dict of  pd.Timestamp -> adl_level  for all NEW dates
     (i.e., after last_adl_date).
     """
+    # Yahoo Finance has retired ^NYAD — try fallback tickers
+    _ADL_TICKERS = ['^NYAD', '^ADD', 'NYAD', 'ADD']
+
     result = {}
     try:
         fetch_start = (last_adl_date - timedelta(days=5)).strftime('%Y-%m-%d')
-        raw = yf.download('^NYAD', start=fetch_start, progress=False, auto_adjust=True)
+        raw = pd.DataFrame()
+        used_ticker = None
+        for adl_ticker in _ADL_TICKERS:
+            try:
+                raw = yf.download(
+                    adl_ticker, start=fetch_start, progress=False,
+                    auto_adjust=True, session=_CLOUD_SESSION
+                )
+                if not raw.empty:
+                    used_ticker = adl_ticker
+                    print(f'  ADL: using ticker {adl_ticker}')
+                    break
+            except Exception:
+                continue
+
         if raw.empty:
-            print('  [WARN] ADL: ^NYAD returned no data')
+            print('  [WARN] ADL: all tickers returned no data')
             return result
 
         # Handle multi-index vs flat columns
         if isinstance(raw.columns, pd.MultiIndex):
-            s = raw['Close']['^NYAD']
+            s = raw['Close'][used_ticker]
         else:
             s = raw['Close']
 
@@ -141,7 +172,8 @@ def fetch_b20() -> float:
                     period='45d',
                     auto_adjust=True,
                     progress=False,
-                    threads=True
+                    threads=True,
+                    session=_CLOUD_SESSION   # bypass 403 in GitHub Actions
                 )
                 if isinstance(prices.columns, pd.MultiIndex):
                     closes_batch = prices['Close']
