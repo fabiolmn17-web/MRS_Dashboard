@@ -4,7 +4,6 @@ pipeline.py — MRS core scoring engine (web edition)
 Extracted from run_mrs.py.  No Excel / openpyxl dependencies.
 Import this module from update_data.py (daily batch) and app.py (dashboard).
 """
-
 import warnings
 import numpy as np
 import pandas as pd
@@ -91,13 +90,11 @@ def score_vix(phi: float):
     if phi < 0.80:    return -0.5, 'High'
     return -1.5, 'Stress'
 
-
 def score_extension(phi: float):
     if np.isnan(phi): return 0.0, 'No data'
     if phi < 0.30:    return -0.5, 'Compressed'
     if phi < 0.70:    return  0.0, 'Normal'
     return -0.5, 'Extended'
-
 
 def score_momentum(phi: float):
     if np.isnan(phi): return 0.0, 'No data'
@@ -105,13 +102,11 @@ def score_momentum(phi: float):
     if phi < 0.70:    return  0.0, 'Normal'
     return 0.5, 'Strong'
 
-
 def score_adl(phi: float):
     if np.isnan(phi): return 0.0, 'No data'
     if phi < 0.30:    return -1.0, 'Weak'
     if phi < 0.70:    return  0.0, 'Normal'
     return 0.0, 'Strong'
-
 
 def score_b20(phi: float, adl_phi: float):
     if np.isnan(phi): return 0.0, 'No data'
@@ -120,7 +115,6 @@ def score_b20(phi: float, adl_phi: float):
         return s, 'Low'
     if phi < 0.70: return 0.0, 'Normal'
     return 0.5, 'High'
-
 
 def score_pc(pc: float, pc_sma10: float):
     """Five-Zone Model — June 2026 calibration (Studies 7 & 8)."""
@@ -131,7 +125,6 @@ def score_pc(pc: float, pc_sma10: float):
     if pc_sma10 < 1.003:   return  0.5, 'Moderate HIGH (fear building)'
     return                         1.0, 'Extreme HIGH (contrarian)'
 
-
 def score_skew(phi: float, pc: float):
     if np.isnan(phi): return 0.0, 'No data'
     if phi < 0.30 and not np.isnan(pc) and pc > 1.00:
@@ -141,7 +134,6 @@ def score_skew(phi: float, pc: float):
     if phi < 0.30: return -1.0, 'Low'
     if phi < 0.70: return  0.0, 'Mid'
     return 0.5, 'High'
-
 
 def score_gamma(spx: float, zero_gamma: float):
     if np.isnan(spx) or np.isnan(zero_gamma) or zero_gamma <= 0:
@@ -160,15 +152,13 @@ def regime_label(mrs: float) -> str:
     if mrs >= -1.5: return 'MILD RISK-OFF'
     return 'RISK-OFF'
 
-
 def regime_color(mrs: float) -> str:
     """Hex color for regime band (web display)."""
-    if mrs >= 1.5:  return '#1a7f37'   # deep green
-    if mrs >= 0.5:  return '#57a66b'   # mild green
-    if mrs >= -0.5: return '#6b7280'   # grey
-    if mrs >= -1.5: return '#d97706'   # amber
-    return '#b91c1c'                   # red
-
+    if mrs >= 1.5:  return '#1a7f37'
+    if mrs >= 0.5:  return '#57a66b'
+    if mrs >= -0.5: return '#6b7280'
+    if mrs >= -1.5: return '#d97706'
+    return '#b91c1c'
 
 def compute_regime_duration(hist: pd.DataFrame, ref_date) -> int:
     df = hist[hist['date'] <= pd.Timestamp(ref_date)].sort_values('date')
@@ -186,7 +176,6 @@ def compute_regime_duration(hist: pd.DataFrame, ref_date) -> int:
         except Exception:
             break
     return count
-
 
 def compute_signal_quality(last: dict, hist: pd.DataFrame, ref_date) -> tuple:
     """Returns (label, description, hex_color). See run_mrs.py for full docs."""
@@ -255,7 +244,6 @@ def compute_signal_quality(last: dict, hist: pd.DataFrame, ref_date) -> tuple:
         if sc != 0:
             driver_parts.append(f'{name} ({sc:+.1f})')
     drivers_str = ', '.join(driver_parts) if driver_parts else 'all at zero'
-
     fragile_str = ('⚠ FRAGILE: ' + '; '.join(at_risk)) if at_risk else ''
 
     if is_neut:
@@ -295,7 +283,6 @@ def load_history(path: Path) -> pd.DataFrame:
             df[col] = np.nan
     return df.sort_values('date').reset_index(drop=True)
 
-
 def save_history(df: pd.DataFrame, path: Path):
     df.to_csv(path, index=False)
 
@@ -308,25 +295,27 @@ def update_history(hist: pd.DataFrame, inp_map: dict) -> pd.DataFrame:
     inp_map: dict of pd.Timestamp -> {adl_level, b20_pct, zero_gamma, pc_ratio, skew}
              Built by auto_fetch.py (web) or MRS_Inputs_v4.xlsx (local).
     """
-    today_dt = date.today()
+    today_dt  = date.today()
     last_date = hist['date'].max()
 
-    # ── 1. Fetch market data ──────────────────────────────────────────────────
+    # ── 1. Fetch market data (individual calls — avoids GitHub Actions 403) ───
     print('  Fetching SPY / SPX / VIX / SKEW...')
     start_fetch = (last_date - timedelta(days=10)).strftime('%Y-%m-%d')
-    raw = yf.download(
-        ['SPY', '^GSPC', '^VIX', '^SKEW'],
-        start=start_fetch,
-        progress=False, auto_adjust=True
-    )
-    if isinstance(raw.columns, pd.MultiIndex):
-        close = raw['Close'].copy()
-    else:
-        close = raw[['Close']].copy()
-    close.index = pd.to_datetime(close.index).normalize()
-    close.columns = [c.lower().replace('^', '') for c in close.columns]
-    if 'gspc' in close.columns:
-        close = close.rename(columns={'gspc': 'spx'})
+    _ticker_map = {'spy': 'SPY', 'spx': '^GSPC', 'vix': '^VIX', 'skew': '^SKEW'}
+    _frames = {}
+    for field, ticker in _ticker_map.items():
+        try:
+            h = yf.Ticker(ticker).history(start=start_fetch, auto_adjust=True)
+            if not h.empty:
+                h.index = pd.to_datetime(h.index).normalize().tz_localize(None)
+                _frames[field] = h['Close'].rename(field)
+        except Exception as e:
+            print(f'  [WARN] {ticker}: {e}')
+    if not _frames:
+        print('  [ERROR] No market data fetched — aborting.')
+        return hist
+    close = pd.concat(_frames.values(), axis=1)
+    close.index = close.index.normalize()
 
     # ── 2. Fetch CBOE PC ratio ────────────────────────────────────────────────
     print('  Fetching CBOE PC ratio...')
@@ -362,11 +351,11 @@ def update_history(hist: pd.DataFrame, inp_map: dict) -> pd.DataFrame:
         elif not np.isnan(m['pc_ratio']):
             row['pc_ratio'] = m['pc_ratio']
 
-        row['adl_level']  = m['adl_level']
-        row['b20_pct']    = m['b20_pct']
-        row['zero_gamma'] = m['zero_gamma']
-        row['spike_flag'] = 0
-        row['compressed'] = 0
+        row['adl_level']    = m['adl_level']
+        row['b20_pct']      = m['b20_pct']
+        row['zero_gamma']   = m['zero_gamma']
+        row['spike_flag']   = 0
+        row['compressed']   = 0
         row['trigger_days'] = 0.0
         new_rows.append(row)
 
@@ -429,7 +418,6 @@ def update_history(hist: pd.DataFrame, inp_map: dict) -> pd.DataFrame:
     # ── 7. VIX flags ──────────────────────────────────────────────────────────
     vix_chg = vix.pct_change(fill_method=None)
     hist['spike_flag'] = (vix_chg > 0.30).fillna(False).astype(int)
-
     vix_phi_s       = hist['vix_phi']
     compressed_flag = (vix_phi_s < 0.30).fillna(False).astype(int)
     crossed         = ((compressed_flag.shift(1) == 1) & (vix_phi_s >= 0.30)).fillna(False).astype(int)
