@@ -360,4 +360,206 @@ with right:
         st.markdown('<div class="safe-row">🟢 No active compression exit event</div>', unsafe_allow_html=True)
 
     # Zero Gamma position
-    st.markdown('<div
+    st.markdown('<div class="section-header" style="margin-top:16px;">Zero Gamma Position</div>', unsafe_allow_html=True)
+    try:
+        spx_v = float(last.get('spx', np.nan))
+        zg_v  = float(last.get('zero_gamma', np.nan))
+        if not np.isnan(spx_v) and not np.isnan(zg_v) and zg_v > 0:
+            dist_pct = (spx_v - zg_v) / spx_v * 100
+            if dist_pct > 1:
+                gcls = 'safe-row'
+                gtxt = f'🟢 SPX {spx_v:,.0f} is {dist_pct:.1f}% ABOVE zero-gamma ({zg_v:,.0f}). Dealers short gamma — dampening environment.'
+            elif dist_pct > -1:
+                gcls = 'neutral-row'
+                gtxt = f'🟡 SPX {spx_v:,.0f} is NEAR zero-gamma ({zg_v:,.0f}, {dist_pct:+.1f}%). Transition zone — regime could flip.'
+            else:
+                gcls = 'hazard-row'
+                gtxt = f'🔴 SPX {spx_v:,.0f} is {abs(dist_pct):.1f}% BELOW zero-gamma ({zg_v:,.0f}). Dealers long gamma — amplifying moves.'
+            st.markdown(f'<div class="{gcls}">{gtxt}</div>', unsafe_allow_html=True)
+        else:
+            try:
+                zg_only = float(last.get('zero_gamma', np.nan))
+                if not np.isnan(zg_only) and zg_only > 0:
+                    st.markdown(f'<div class="neutral-row">⚪ Zero Gamma level: <b>{zg_only:,.0f}</b> — SPX close pending (run after market close)</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown('<div class="neutral-row">⚪ Zero Gamma: no data today</div>', unsafe_allow_html=True)
+            except:
+                st.markdown('<div class="neutral-row">⚪ Zero Gamma: no data today</div>', unsafe_allow_html=True)
+    except:
+        try:
+            zg_only = float(last.get('zero_gamma', np.nan))
+            if not np.isnan(zg_only) and zg_only > 0:
+                st.markdown(f'<div class="neutral-row">⚪ Zero Gamma level: <b>{zg_only:,.0f}</b> — SPX close pending (run after market close)</div>', unsafe_allow_html=True)
+            else:
+                st.markdown('<div class="neutral-row">⚪ Zero Gamma: no data today</div>', unsafe_allow_html=True)
+        except:
+            st.markdown('<div class="neutral-row">⚪ Zero Gamma: no data today</div>', unsafe_allow_html=True)
+
+
+st.divider()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 90-DAY MRS HISTORY CHART
+# ══════════════════════════════════════════════════════════════════════════════
+st.markdown('<div class="section-header">90-Day MRS History</div>', unsafe_allow_html=True)
+
+hist90 = hist.dropna(subset=['mrs_score']).tail(90).copy()
+
+fig = go.Figure()
+
+# Regime band fills
+band_defs = [
+    (1.5,  5.0,  'rgba(26,127,55,0.12)',  'RISK-ON'),
+    (0.5,  1.5,  'rgba(87,166,107,0.10)', 'MILD RISK-ON'),
+    (-0.5, 0.5,  'rgba(107,114,128,0.08)','NEUTRAL'),
+    (-1.5, -0.5, 'rgba(217,119,6,0.10)',  'MILD RISK-OFF'),
+    (-5.0, -1.5, 'rgba(185,28,28,0.12)',  'RISK-OFF'),
+]
+for y0, y1, fill, label in band_defs:
+    fig.add_hrect(y0=y0, y1=y1, fillcolor=fill, line_width=0,
+                  annotation_text=label,
+                  annotation_position='right',
+                  annotation_font_size=10,
+                  annotation_font_color='#6b7280')
+
+# MRS line
+fig.add_trace(go.Scatter(
+    x=hist90['date'],
+    y=hist90['mrs_score'],
+    mode='lines+markers',
+    name='MRS',
+    line=dict(color='#60a5fa', width=2.5),
+    marker=dict(size=4, color='#60a5fa'),
+    hovertemplate='<b>%{x|%b %d}</b><br>MRS: %{y:+.2f}<extra></extra>',
+))
+
+# Zero line
+fig.add_hline(y=0, line_dash='dash', line_color='rgba(255,255,255,0.25)', line_width=1)
+
+# Today marker
+fig.add_vline(
+    x=last_dt,
+    line_dash='dot',
+    line_color='rgba(250,204,21,0.6)',
+    line_width=1.5,
+    annotation_text='Today',
+    annotation_font_color='#facc15',
+    annotation_font_size=10,
+)
+
+fig.update_layout(
+    template='plotly_dark',
+    paper_bgcolor='rgba(0,0,0,0)',
+    plot_bgcolor='rgba(0,0,0,0)',
+    margin=dict(l=10, r=80, t=10, b=30),
+    height=300,
+    showlegend=False,
+    xaxis=dict(showgrid=False, tickformat='%b %d', tickfont_size=11),
+    yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.06)',
+               tickformat='+.1f', range=[-4.5, 4.5], tickfont_size=11),
+)
+
+st.plotly_chart(fig, use_container_width=True)
+
+
+# ── SPX Close panel ────────────────────────────────────────────────────────────
+st.markdown('<div class="section-header" style="margin-top:0; margin-bottom:4px;">SPX Close</div>', unsafe_allow_html=True)
+
+hist90_spx = hist.tail(90).dropna(subset=['spx']).copy()
+
+if len(hist90_spx) > 0:
+    fig_spx = go.Figure()
+
+    fig_spx.add_trace(go.Scatter(
+        x=hist90_spx['date'],
+        y=hist90_spx['spx'],
+        mode='lines',
+        name='SPX',
+        line=dict(color='#a78bfa', width=2),
+        fill='tozeroy',
+        fillcolor='rgba(167,139,250,0.06)',
+        hovertemplate='<b>%{x|%b %d}</b><br>SPX: %{y:,.0f}<extra></extra>',
+    ))
+
+    fig_spx.add_vline(
+        x=last_dt,
+        line_dash='dot',
+        line_color='rgba(250,204,21,0.6)',
+        line_width=1.5,
+    )
+
+    fig_spx.update_layout(
+        template='plotly_dark',
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        margin=dict(l=10, r=80, t=4, b=30),
+        height=180,
+        showlegend=False,
+        xaxis=dict(showgrid=False, tickformat='%b %d', tickfont_size=11),
+        yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.06)',
+                   tickformat=',.0f', tickfont_size=11),
+    )
+
+    st.plotly_chart(fig_spx, use_container_width=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PC RATIO CONTEXT (collapsible)
+# ══════════════════════════════════════════════════════════════════════════════
+with st.expander('PC Ratio — Five-Zone Context'):
+    pc_sma10 = last.get('pc_sma10', np.nan)
+    pc_daily = last.get('pc_ratio', np.nan)
+
+    try:
+        pc10 = float(pc_sma10)
+        if pc10 < 0.686:
+            zone, note = 'Extreme LOW', 'Complacency. Both tails compressed. T+63 TRR+=1.26×, TRR-=0.75×.'
+            zcol = '#f97316'
+        elif pc10 < 0.732:
+            zone, note = 'Moderate LOW — TRANSITION ZONE', 'EXIT from complacency is the danger. T+63 TRR-=1.49× (p=0.007).'
+            zcol = '#ef4444'
+        elif pc10 < 0.944:
+            zone, note = 'Mid', 'No distributional edge. Baseline.'
+            zcol = '#6b7280'
+        elif pc10 < 1.003:
+            zone, note = 'Moderate HIGH', 'Early contrarian signal. Fear building.'
+            zcol = '#22c55e'
+        else:
+            zone, note = 'Extreme HIGH', 'Sustained fear fully priced. T+21 TRR+=1.67× (p<0.0001).'
+            zcol = '#22c55e'
+
+        col1, col2, col3 = st.columns(3)
+        col1.metric('PC SMA-10', f'{pc10:.3f}')
+        col2.metric('Daily PC', f'{float(pc_daily):.3f}' if not np.isnan(float(pc_daily)) else '—')
+        col3.metric('Zone', zone)
+
+        st.markdown(f"""
+        <div style="background:#1e1e2e;border-left:3px solid {zcol};border-radius:6px;
+                    padding:10px 16px;font-size:0.86rem;margin-top:8px;">
+        <b style="color:{zcol};">{zone}</b><br>{note}
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("""
+        | Zone | SMA-10 | Score | T+63 TRR+ | T+63 TRR- |
+        |------|--------|-------|-----------|-----------|
+        | Extreme LOW | < 0.686 | +0.5 | 1.26× | 0.75× |
+        | Moderate LOW ⚠ | 0.686–0.732 | **−0.5** | 0.82× | **1.49×** |
+        | Mid | 0.732–0.944 | 0.0 | baseline | baseline |
+        | Moderate HIGH | 0.944–1.003 | +0.5 | — | — |
+        | Extreme HIGH | > 1.003 | +1.0 | **1.67×** | — |
+        """)
+    except:
+        st.write('PC SMA-10 data not available.')
+
+
+# ── Footer ────────────────────────────────────────────────────────────────────
+last_upd = hist['date'].max()
+st.markdown(f"""
+<div style="text-align:center;font-size:0.72rem;color:#4b5563;margin-top:24px;">
+  Epistruct — Invariant Research &nbsp;|&nbsp;
+  Data through {last_upd.strftime('%B %d, %Y')} &nbsp;|&nbsp;
+  Updates daily at 4:30 PM ET
+</div>
+""", unsafe_allow_html=True)
