@@ -234,7 +234,7 @@ st.divider()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TWO-COLUMN LAYOUT: Components (left) | VIX Hazard + Gamma (right)
+# TWO-COLUMN LAYOUT
 # ══════════════════════════════════════════════════════════════════════════════
 left, right = st.columns([1.4, 1], gap='large')
 
@@ -254,10 +254,10 @@ with left:
 
     rows = []
     for name, phi_key, sc_key, st_key, raw_key in COMP_DEF:
-        phi_v  = last.get(phi_key, np.nan) if phi_key else np.nan
-        sc_v   = last.get(sc_key, 0) or 0
-        st_v   = last.get(st_key, '—') or '—'
-        raw_v  = last.get(raw_key, np.nan)
+        phi_v = last.get(phi_key, np.nan) if phi_key else np.nan
+        sc_v  = last.get(sc_key, 0) or 0
+        st_v  = last.get(st_key, '—') or '—'
+        raw_v = last.get(raw_key, np.nan)
 
         try: phi_f = f'{float(phi_v):.3f}' if not np.isnan(float(phi_v)) else '—'
         except: phi_f = '—'
@@ -268,21 +268,16 @@ with left:
         try: raw_f = f'{float(raw_v):,.2f}' if not np.isnan(float(raw_v)) else '—'
         except: raw_f = '—'
 
-        rows.append({
-            'Component': name,
-            'Raw Value': raw_f,
-            'Phi': phi_f,
-            'State': str(st_v),
-            'Score': sc_f,
-        })
+        rows.append({'Component': name, 'Raw Value': raw_f,
+                     'Phi': phi_f, 'State': str(st_v), 'Score': sc_f})
 
     df_comp = pd.DataFrame(rows)
 
     def color_score(val):
         try:
             v = float(val)
-            if v > 0:  return 'color: #22c55e; font-weight: 700'
-            if v < 0:  return 'color: #ef4444; font-weight: 700'
+            if v > 0: return 'color: #22c55e; font-weight: 700'
+            if v < 0: return 'color: #ef4444; font-weight: 700'
             return 'color: #6b7280'
         except:
             return ''
@@ -299,7 +294,6 @@ with left:
 
 
 with right:
-
     st.markdown('<div class="section-header">VIX Lifecycle State</div>', unsafe_allow_html=True)
 
     vix_phi   = last.get('vix_phi', np.nan)
@@ -334,7 +328,8 @@ with right:
     else:
         st.markdown('<div class="safe-row">🟢 No active compression exit event</div>', unsafe_allow_html=True)
 
-    st.markdown('<div class="section-header" style="margin-top:16px;">Zero Gamma Position</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header" style="margin-top:16px;">Zero Gamma Position</div>',
+                unsafe_allow_html=True)
     try:
         spx_v = float(last.get('spx', np.nan))
         zg_v  = float(last.get('zero_gamma', np.nan))
@@ -351,13 +346,10 @@ with right:
                 gtxt = f'🔴 SPX {spx_v:,.0f} is {abs(dist_pct):.1f}% BELOW zero-gamma ({zg_v:,.0f}). Dealers long gamma — amplifying moves.'
             st.markdown(f'<div class="{gcls}">{gtxt}</div>', unsafe_allow_html=True)
         else:
-            try:
-                zg_only = float(last.get('zero_gamma', np.nan))
-                if not np.isnan(zg_only) and zg_only > 0:
-                    st.markdown(f'<div class="neutral-row">⚪ Zero Gamma level: <b>{zg_only:,.0f}</b> — SPX close pending</div>', unsafe_allow_html=True)
-                else:
-                    st.markdown('<div class="neutral-row">⚪ Zero Gamma: no data today</div>', unsafe_allow_html=True)
-            except:
+            zg_only = float(last.get('zero_gamma', np.nan))
+            if not np.isnan(zg_only) and zg_only > 0:
+                st.markdown(f'<div class="neutral-row">⚪ Zero Gamma level: <b>{zg_only:,.0f}</b> — SPX close pending</div>', unsafe_allow_html=True)
+            else:
                 st.markdown('<div class="neutral-row">⚪ Zero Gamma: no data today</div>', unsafe_allow_html=True)
     except:
         try:
@@ -377,10 +369,9 @@ st.divider()
 # CHARTS — shared x-axis range so all panels align perfectly
 # ══════════════════════════════════════════════════════════════════════════════
 
-hist90 = hist.dropna(subset=['mrs_score']).tail(90).copy()
-# Anchor x-range to the full 90-row window (including today even if no SPX close)
-x_min  = hist.tail(90)['date'].min()
-x_max  = hist.tail(90)['date'].max()
+hist90  = hist.dropna(subset=['mrs_score']).tail(90).copy()
+x_min   = hist.tail(90)['date'].min()
+x_max   = hist.tail(90)['date'].max()
 x_range = [x_min, x_max]
 
 VLINE_STYLE = dict(line_dash='dot', line_color='rgba(250,204,21,0.6)', line_width=1.5)
@@ -398,6 +389,7 @@ st.markdown('<div class="section-header">90-Day MRS History</div>', unsafe_allow
 
 fig = go.Figure()
 
+# Regime bands — no annotation here; labels placed in right margin via add_annotation
 band_defs = [
     (1.5,  5.0,  'rgba(26,127,55,0.12)',  'RISK-ON'),
     (0.5,  1.5,  'rgba(87,166,107,0.10)', 'MILD RISK-ON'),
@@ -406,9 +398,16 @@ band_defs = [
     (-5.0, -1.5, 'rgba(185,28,28,0.12)',  'RISK-OFF'),
 ]
 for y0, y1, fill, label in band_defs:
-    fig.add_hrect(y0=y0, y1=y1, fillcolor=fill, line_width=0,
-                  annotation_text=label, annotation_position='right',
-                  annotation_font_size=10, annotation_font_color='#6b7280')
+    fig.add_hrect(y0=y0, y1=y1, fillcolor=fill, line_width=0)
+    # Place label in right margin, beyond the Today vline
+    fig.add_annotation(
+        x=1.01, xref='paper',
+        y=(y0 + y1) / 2, yref='y',
+        text=label,
+        showarrow=False,
+        font=dict(size=9, color='#6b7280'),
+        xanchor='left',
+    )
 
 fig.add_trace(go.Scatter(
     x=hist90['date'], y=hist90['mrs_score'],
@@ -420,10 +419,12 @@ fig.add_trace(go.Scatter(
 
 fig.add_hline(y=0, line_dash='dash', line_color='rgba(255,255,255,0.25)', line_width=1)
 fig.add_vline(x=last_dt, annotation_text='Today',
-              annotation_font_color='#facc15', annotation_font_size=10, **VLINE_STYLE)
+              annotation_position='top right',
+              annotation_font_color='#facc15', annotation_font_size=10,
+              **VLINE_STYLE)
 
 fig.update_layout(**LAYOUT_BASE,
-    margin=dict(l=10, r=80, t=10, b=30), height=300,
+    margin=dict(l=10, r=130, t=10, b=30), height=300,
     yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.06)',
                tickformat='+.1f', range=[-4.5, 4.5], tickfont_size=11),
 )
@@ -431,7 +432,8 @@ st.plotly_chart(fig, use_container_width=True)
 
 
 # ── 2. SPX Close + Zero Gamma line ───────────────────────────────────────────
-st.markdown('<div class="section-header" style="margin-top:0; margin-bottom:4px;">SPX Close</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-header" style="margin-top:0; margin-bottom:4px;">SPX Close</div>',
+            unsafe_allow_html=True)
 
 hist90_spx = hist.tail(90).dropna(subset=['spx']).copy()
 
@@ -440,8 +442,12 @@ if len(hist90_spx) > 0:
     spx_max = hist90_spx['spx'].max()
     spx_pad = (spx_max - spx_min) * 0.10
 
-    # Include zero_gamma in range if it's outside the SPX range
-    zg_val = float(last.get('zero_gamma', np.nan)) if last.get('zero_gamma') else np.nan
+    zg_val = np.nan
+    try:
+        zg_val = float(last.get('zero_gamma', np.nan))
+    except:
+        pass
+
     if not np.isnan(zg_val):
         spx_min = min(spx_min, zg_val)
         spx_max = max(spx_max, zg_val)
@@ -455,7 +461,6 @@ if len(hist90_spx) > 0:
         hovertemplate='<b>%{x|%b %d}</b><br>SPX: %{y:,.0f}<extra></extra>',
     ))
 
-    # Zero Gamma reference line
     if not np.isnan(zg_val):
         fig_spx.add_hline(
             y=zg_val,
@@ -471,7 +476,7 @@ if len(hist90_spx) > 0:
     fig_spx.add_vline(x=last_dt, **VLINE_STYLE)
 
     fig_spx.update_layout(**LAYOUT_BASE,
-        margin=dict(l=10, r=80, t=4, b=30), height=180,
+        margin=dict(l=10, r=130, t=4, b=30), height=180,
         yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.06)',
                    tickformat=',.0f', tickfont_size=11,
                    range=[spx_min - spx_pad, spx_max + spx_pad]),
@@ -479,8 +484,9 @@ if len(hist90_spx) > 0:
     st.plotly_chart(fig_spx, use_container_width=True)
 
 
-# ── 3. VIX — Compression / Mid / Spike shading ───────────────────────────────
-st.markdown('<div class="section-header" style="margin-top:0; margin-bottom:4px;">VIX State</div>', unsafe_allow_html=True)
+# ── 3. VIX State panel ────────────────────────────────────────────────────────
+st.markdown('<div class="section-header" style="margin-top:0; margin-bottom:4px;">VIX State</div>',
+            unsafe_allow_html=True)
 
 hist90_vix = hist.tail(90).dropna(subset=['vix']).copy()
 
@@ -502,8 +508,9 @@ if len(hist90_vix) > 0:
             except:
                 return 'mid'
 
+        # Use 'vstate' — NOT '_vs' (underscore prefix breaks itertuples namedtuple)
         hist90_vix = hist90_vix.copy()
-        hist90_vix['_vs'] = hist90_vix['vix_phi'].apply(_vix_state)
+        hist90_vix['vstate'] = hist90_vix['vix_phi'].apply(_vix_state)
 
         STATE_COLORS = {
             'compression': 'rgba(239,68,68,0.18)',
@@ -511,18 +518,12 @@ if len(hist90_vix) > 0:
             'mid':         'rgba(34,197,94,0.07)',
         }
 
-        # Group consecutive same-state rows and draw vrects
-        for state, grp in groupby(hist90_vix.itertuples(index=False), key=lambda r: r._vs):
+        for state, grp in groupby(hist90_vix.itertuples(index=False), key=lambda r: r.vstate):
             rows = list(grp)
             d0 = pd.Timestamp(rows[0].date)
             d1 = pd.Timestamp(rows[-1].date)
-            fig_vix.add_vrect(
-                x0=d0, x1=d1,
-                fillcolor=STATE_COLORS[state],
-                line_width=0,
-            )
+            fig_vix.add_vrect(x0=d0, x1=d1, fillcolor=STATE_COLORS[state], line_width=0)
 
-    # VIX line
     fig_vix.add_trace(go.Scatter(
         x=hist90_vix['date'], y=hist90_vix['vix'],
         mode='lines', name='VIX',
@@ -530,7 +531,6 @@ if len(hist90_vix) > 0:
         hovertemplate='<b>%{x|%b %d}</b><br>VIX: %{y:.2f}<extra></extra>',
     ))
 
-    # Reference line at VIX = 20
     fig_vix.add_hline(y=20, line_dash='dot',
                       line_color='rgba(255,255,255,0.20)', line_width=1,
                       annotation_text='20', annotation_position='right',
@@ -539,7 +539,7 @@ if len(hist90_vix) > 0:
     fig_vix.add_vline(x=last_dt, **VLINE_STYLE)
 
     fig_vix.update_layout(**LAYOUT_BASE,
-        margin=dict(l=10, r=80, t=4, b=30), height=160,
+        margin=dict(l=10, r=130, t=4, b=30), height=160,
         yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.06)',
                    tickformat='.0f', tickfont_size=11,
                    range=[max(0, vix_min - vix_pad), vix_max + vix_pad]),
