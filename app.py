@@ -4,11 +4,9 @@ app.py — MRS Live Dashboard (Streamlit)
 Password-protected. Reads mrs_history.csv and displays:
   • Current regime score + signal quality
   • 8-component breakdown table
-  • VIX lifecycle state layer (paper-grounded: compression / mid / spike-zone)
+  • VIX lifecycle state layer
   • Zero Gamma position
-  • 90-day MRS history chart
-  • SPX close price panel
-  • Regime duration counter
+  • 90-day MRS history chart + SPX close panel + VIX state panel
 """
 
 import numpy as np
@@ -17,6 +15,7 @@ import streamlit as st
 import plotly.graph_objects as go
 from pathlib import Path
 from datetime import date
+from itertools import groupby
 
 import pipeline
 
@@ -30,10 +29,8 @@ st.set_page_config(
 
 # ── Password gate ──────────────────────────────────────────────────────────────
 def check_password() -> bool:
-    """Simple password gate using Streamlit secrets."""
     if st.session_state.get('authenticated'):
         return True
-
     st.markdown('## MRS Dashboard')
     pwd = st.text_input('Password', type='password', key='pwd_input')
     if st.button('Enter'):
@@ -51,7 +48,7 @@ if not check_password():
 # ── Load data ──────────────────────────────────────────────────────────────────
 HIST_PATH = Path(__file__).parent / 'mrs_history.csv'
 
-@st.cache_data(ttl=300)   # refresh cache every 5 minutes
+@st.cache_data(ttl=300)
 def load_data() -> pd.DataFrame:
     df = pipeline.load_history(HIST_PATH)
     return df
@@ -157,25 +154,14 @@ def _f(key, fmt='{:.2f}'):
     except:
         return str(v) if v else '—'
 
-def _phi_bar(phi):
-    """Compact visual bar for Phi values."""
-    try:
-        p = float(phi)
-        if np.isnan(p): return '— '
-        filled = int(round(p * 10))
-        bar    = '█' * filled + '░' * (10 - filled)
-        return f'{bar} {p:.3f}'
-    except:
-        return '—'
-
 QUALITY_COLORS = {
-    'CONFIRMED':            '#22c55e',
+    'CONFIRMED':              '#22c55e',
     'NEUTRAL — BULLISH LEAN': '#22c55e',
     'NEUTRAL — BEARISH LEAN': '#f97316',
-    'NEUTRAL — NO EDGE':    '#9ca3af',
-    'UNCONFIRMED':          '#f97316',
-    'DIVERGENT':            '#ef4444',
-    'FRAGILE':              '#facc15',
+    'NEUTRAL — NO EDGE':      '#9ca3af',
+    'UNCONFIRMED':            '#f97316',
+    'DIVERGENT':              '#ef4444',
+    'FRAGILE':                '#facc15',
 }
 
 def quality_color(label: str) -> str:
@@ -248,11 +234,10 @@ st.divider()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TWO-COLUMN LAYOUT: Components (left) | VIX Hazard + Chart (right)
+# TWO-COLUMN LAYOUT: Components (left) | VIX Hazard + Gamma (right)
 # ══════════════════════════════════════════════════════════════════════════════
 left, right = st.columns([1.4, 1], gap='large')
 
-# ── LEFT: Component breakdown ──────────────────────────────────────────────────
 with left:
     st.markdown('<div class="section-header">Component Breakdown</div>', unsafe_allow_html=True)
 
@@ -283,13 +268,6 @@ with left:
         try: raw_f = f'{float(raw_v):,.2f}' if not np.isnan(float(raw_v)) else '—'
         except: raw_f = '—'
 
-        # Score color
-        try:
-            sv = float(sc_v)
-            sc_color = '#22c55e' if sv > 0 else ('#ef4444' if sv < 0 else '#6b7280')
-        except:
-            sc_color = '#6b7280'
-
         rows.append({
             'Component': name,
             'Raw Value': raw_f,
@@ -312,7 +290,6 @@ with left:
     styled = df_comp.style.map(color_score, subset=['Score'])
     st.dataframe(styled, use_container_width=True, hide_index=True)
 
-    # ── Phi explanation note
     st.markdown("""
     <div style="font-size:0.72rem;color:#6b7280;margin-top:4px;">
     Phi = percentile rank over rolling 756-session window (3 years).
@@ -321,10 +298,8 @@ with left:
     """, unsafe_allow_html=True)
 
 
-# ── RIGHT: VIX Hazard + Gamma ──────────────────────────────────────────────────
 with right:
 
-    # VIX Lifecycle State
     st.markdown('<div class="section-header">VIX Lifecycle State</div>', unsafe_allow_html=True)
 
     vix_phi   = last.get('vix_phi', np.nan)
@@ -359,7 +334,6 @@ with right:
     else:
         st.markdown('<div class="safe-row">🟢 No active compression exit event</div>', unsafe_allow_html=True)
 
-    # Zero Gamma position
     st.markdown('<div class="section-header" style="margin-top:16px;">Zero Gamma Position</div>', unsafe_allow_html=True)
     try:
         spx_v = float(last.get('spx', np.nan))
@@ -380,7 +354,7 @@ with right:
             try:
                 zg_only = float(last.get('zero_gamma', np.nan))
                 if not np.isnan(zg_only) and zg_only > 0:
-                    st.markdown(f'<div class="neutral-row">⚪ Zero Gamma level: <b>{zg_only:,.0f}</b> — SPX close pending (run after market close)</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="neutral-row">⚪ Zero Gamma level: <b>{zg_only:,.0f}</b> — SPX close pending</div>', unsafe_allow_html=True)
                 else:
                     st.markdown('<div class="neutral-row">⚪ Zero Gamma: no data today</div>', unsafe_allow_html=True)
             except:
@@ -389,7 +363,7 @@ with right:
         try:
             zg_only = float(last.get('zero_gamma', np.nan))
             if not np.isnan(zg_only) and zg_only > 0:
-                st.markdown(f'<div class="neutral-row">⚪ Zero Gamma level: <b>{zg_only:,.0f}</b> — SPX close pending (run after market close)</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="neutral-row">⚪ Zero Gamma level: <b>{zg_only:,.0f}</b> — SPX close pending</div>', unsafe_allow_html=True)
             else:
                 st.markdown('<div class="neutral-row">⚪ Zero Gamma: no data today</div>', unsafe_allow_html=True)
         except:
@@ -400,15 +374,30 @@ st.divider()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 90-DAY MRS HISTORY CHART
+# CHARTS — shared x-axis range so all panels align perfectly
 # ══════════════════════════════════════════════════════════════════════════════
-st.markdown('<div class="section-header">90-Day MRS History</div>', unsafe_allow_html=True)
 
 hist90 = hist.dropna(subset=['mrs_score']).tail(90).copy()
+# Anchor x-range to the full 90-row window (including today even if no SPX close)
+x_min  = hist.tail(90)['date'].min()
+x_max  = hist.tail(90)['date'].max()
+x_range = [x_min, x_max]
+
+VLINE_STYLE = dict(line_dash='dot', line_color='rgba(250,204,21,0.6)', line_width=1.5)
+LAYOUT_BASE = dict(
+    template='plotly_dark',
+    paper_bgcolor='rgba(0,0,0,0)',
+    plot_bgcolor='rgba(0,0,0,0)',
+    showlegend=False,
+    xaxis=dict(showgrid=False, tickformat='%b %d', tickfont_size=11, range=x_range),
+)
+
+
+# ── 1. 90-Day MRS History ─────────────────────────────────────────────────────
+st.markdown('<div class="section-header">90-Day MRS History</div>', unsafe_allow_html=True)
 
 fig = go.Figure()
 
-# Regime band fills
 band_defs = [
     (1.5,  5.0,  'rgba(26,127,55,0.12)',  'RISK-ON'),
     (0.5,  1.5,  'rgba(87,166,107,0.10)', 'MILD RISK-ON'),
@@ -418,52 +407,30 @@ band_defs = [
 ]
 for y0, y1, fill, label in band_defs:
     fig.add_hrect(y0=y0, y1=y1, fillcolor=fill, line_width=0,
-                  annotation_text=label,
-                  annotation_position='right',
-                  annotation_font_size=10,
-                  annotation_font_color='#6b7280')
+                  annotation_text=label, annotation_position='right',
+                  annotation_font_size=10, annotation_font_color='#6b7280')
 
-# MRS line
 fig.add_trace(go.Scatter(
-    x=hist90['date'],
-    y=hist90['mrs_score'],
-    mode='lines+markers',
-    name='MRS',
+    x=hist90['date'], y=hist90['mrs_score'],
+    mode='lines+markers', name='MRS',
     line=dict(color='#60a5fa', width=2.5),
     marker=dict(size=4, color='#60a5fa'),
     hovertemplate='<b>%{x|%b %d}</b><br>MRS: %{y:+.2f}<extra></extra>',
 ))
 
-# Zero line
 fig.add_hline(y=0, line_dash='dash', line_color='rgba(255,255,255,0.25)', line_width=1)
+fig.add_vline(x=last_dt, annotation_text='Today',
+              annotation_font_color='#facc15', annotation_font_size=10, **VLINE_STYLE)
 
-# Today marker
-fig.add_vline(
-    x=last_dt,
-    line_dash='dot',
-    line_color='rgba(250,204,21,0.6)',
-    line_width=1.5,
-    annotation_text='Today',
-    annotation_font_color='#facc15',
-    annotation_font_size=10,
-)
-
-fig.update_layout(
-    template='plotly_dark',
-    paper_bgcolor='rgba(0,0,0,0)',
-    plot_bgcolor='rgba(0,0,0,0)',
-    margin=dict(l=10, r=80, t=10, b=30),
-    height=300,
-    showlegend=False,
-    xaxis=dict(showgrid=False, tickformat='%b %d', tickfont_size=11),
+fig.update_layout(**LAYOUT_BASE,
+    margin=dict(l=10, r=80, t=10, b=30), height=300,
     yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.06)',
                tickformat='+.1f', range=[-4.5, 4.5], tickfont_size=11),
 )
-
 st.plotly_chart(fig, use_container_width=True)
 
 
-# ── SPX Close panel ────────────────────────────────────────────────────────────
+# ── 2. SPX Close + Zero Gamma line ───────────────────────────────────────────
 st.markdown('<div class="section-header" style="margin-top:0; margin-bottom:4px;">SPX Close</div>', unsafe_allow_html=True)
 
 hist90_spx = hist.tail(90).dropna(subset=['spx']).copy()
@@ -471,46 +438,113 @@ hist90_spx = hist.tail(90).dropna(subset=['spx']).copy()
 if len(hist90_spx) > 0:
     spx_min = hist90_spx['spx'].min()
     spx_max = hist90_spx['spx'].max()
-    spx_pad = (spx_max - spx_min) * 0.08
+    spx_pad = (spx_max - spx_min) * 0.10
+
+    # Include zero_gamma in range if it's outside the SPX range
+    zg_val = float(last.get('zero_gamma', np.nan)) if last.get('zero_gamma') else np.nan
+    if not np.isnan(zg_val):
+        spx_min = min(spx_min, zg_val)
+        spx_max = max(spx_max, zg_val)
 
     fig_spx = go.Figure()
 
     fig_spx.add_trace(go.Scatter(
-        x=hist90_spx['date'],
-        y=hist90_spx['spx'],
-        mode='lines',
-        name='SPX',
+        x=hist90_spx['date'], y=hist90_spx['spx'],
+        mode='lines', name='SPX',
         line=dict(color='#a78bfa', width=2),
-        fill='tonexty',
-        fillcolor='rgba(167,139,250,0.08)',
         hovertemplate='<b>%{x|%b %d}</b><br>SPX: %{y:,.0f}<extra></extra>',
     ))
 
-    fig_spx.add_vline(
-        x=last_dt,
-        line_dash='dot',
-        line_color='rgba(250,204,21,0.6)',
-        line_width=1.5,
-    )
+    # Zero Gamma reference line
+    if not np.isnan(zg_val):
+        fig_spx.add_hline(
+            y=zg_val,
+            line_dash='dash',
+            line_color='rgba(250,204,21,0.55)',
+            line_width=1.2,
+            annotation_text=f'Zero γ {zg_val:,.0f}',
+            annotation_position='right',
+            annotation_font_color='#facc15',
+            annotation_font_size=10,
+        )
 
-    fig_spx.update_layout(
-        template='plotly_dark',
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        margin=dict(l=10, r=80, t=4, b=30),
-        height=180,
-        showlegend=False,
-        xaxis=dict(showgrid=False, tickformat='%b %d', tickfont_size=11),
-        yaxis=dict(
-            showgrid=True,
-            gridcolor='rgba(255,255,255,0.06)',
-            tickformat=',.0f',
-            tickfont_size=11,
-            range=[spx_min - spx_pad, spx_max + spx_pad],
-        ),
-    )
+    fig_spx.add_vline(x=last_dt, **VLINE_STYLE)
 
+    fig_spx.update_layout(**LAYOUT_BASE,
+        margin=dict(l=10, r=80, t=4, b=30), height=180,
+        yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.06)',
+                   tickformat=',.0f', tickfont_size=11,
+                   range=[spx_min - spx_pad, spx_max + spx_pad]),
+    )
     st.plotly_chart(fig_spx, use_container_width=True)
+
+
+# ── 3. VIX — Compression / Mid / Spike shading ───────────────────────────────
+st.markdown('<div class="section-header" style="margin-top:0; margin-bottom:4px;">VIX State</div>', unsafe_allow_html=True)
+
+hist90_vix = hist.tail(90).dropna(subset=['vix']).copy()
+
+if len(hist90_vix) > 0:
+    vix_min = hist90_vix['vix'].min()
+    vix_max = hist90_vix['vix'].max()
+    vix_pad = (vix_max - vix_min) * 0.12
+
+    fig_vix = go.Figure()
+
+    # Background shading by VIX phi state
+    if 'vix_phi' in hist90_vix.columns:
+        def _vix_state(phi):
+            try:
+                p = float(phi)
+                if p < 0.30: return 'compression'
+                if p > 0.70: return 'spike'
+                return 'mid'
+            except:
+                return 'mid'
+
+        hist90_vix = hist90_vix.copy()
+        hist90_vix['_vs'] = hist90_vix['vix_phi'].apply(_vix_state)
+
+        STATE_COLORS = {
+            'compression': 'rgba(239,68,68,0.18)',
+            'spike':       'rgba(250,204,21,0.14)',
+            'mid':         'rgba(34,197,94,0.07)',
+        }
+
+        # Group consecutive same-state rows and draw vrects
+        for state, grp in groupby(hist90_vix.itertuples(index=False), key=lambda r: r._vs):
+            rows = list(grp)
+            d0 = pd.Timestamp(rows[0].date)
+            d1 = pd.Timestamp(rows[-1].date)
+            fig_vix.add_vrect(
+                x0=d0, x1=d1,
+                fillcolor=STATE_COLORS[state],
+                line_width=0,
+            )
+
+    # VIX line
+    fig_vix.add_trace(go.Scatter(
+        x=hist90_vix['date'], y=hist90_vix['vix'],
+        mode='lines', name='VIX',
+        line=dict(color='#f9a8d4', width=2),
+        hovertemplate='<b>%{x|%b %d}</b><br>VIX: %{y:.2f}<extra></extra>',
+    ))
+
+    # Reference line at VIX = 20
+    fig_vix.add_hline(y=20, line_dash='dot',
+                      line_color='rgba(255,255,255,0.20)', line_width=1,
+                      annotation_text='20', annotation_position='right',
+                      annotation_font_color='#6b7280', annotation_font_size=10)
+
+    fig_vix.add_vline(x=last_dt, **VLINE_STYLE)
+
+    fig_vix.update_layout(**LAYOUT_BASE,
+        margin=dict(l=10, r=80, t=4, b=30), height=160,
+        yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.06)',
+                   tickformat='.0f', tickfont_size=11,
+                   range=[max(0, vix_min - vix_pad), vix_max + vix_pad]),
+    )
+    st.plotly_chart(fig_vix, use_container_width=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
