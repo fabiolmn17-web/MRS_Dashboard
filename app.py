@@ -385,7 +385,31 @@ for y0, y1, fill, label in band_defs:
                   annotation_position='right',
                   annotation_font_size=10,
                   annotation_font_color='#9ca3af')
+# ══════════════════════════════════════════════════════════════════════════════
+# 90-DAY MRS HISTORY CHART
+# ══════════════════════════════════════════════════════════════════════════════
+st.markdown('<div class="section-header">90-Day MRS History</div>', unsafe_allow_html=True)
 
+hist90 = hist.dropna(subset=['mrs_score']).tail(90).copy()
+
+fig = go.Figure()
+
+# Regime band fills
+band_defs = [
+    (1.5,  5.0,  'rgba(26,127,55,0.12)',  'RISK-ON'),
+    (0.5,  1.5,  'rgba(87,166,107,0.10)', 'MILD RISK-ON'),
+    (-0.5, 0.5,  'rgba(107,114,128,0.08)','NEUTRAL'),
+    (-1.5, -0.5, 'rgba(217,119,6,0.10)',  'MILD RISK-OFF'),
+    (-5.0, -1.5, 'rgba(185,28,28,0.12)',  'RISK-OFF'),
+]
+for y0, y1, fill, label in band_defs:
+    fig.add_hrect(y0=y0, y1=y1, fillcolor=fill, line_width=0,
+                  annotation_text=label,
+                  annotation_position='right',
+                  annotation_font_size=10,
+                  annotation_font_color='#6b7280')
+
+# MRS line
 fig.add_trace(go.Scatter(
     x=hist90['date'],
     y=hist90['mrs_score'],
@@ -396,12 +420,14 @@ fig.add_trace(go.Scatter(
     hovertemplate='<b>%{x|%b %d}</b><br>MRS: %{y:+.2f}<extra></extra>',
 ))
 
-fig.add_hline(y=0, line_dash='dash', line_color='rgba(255,255,255,0.3)', line_width=1)
+# Zero line
+fig.add_hline(y=0, line_dash='dash', line_color='rgba(255,255,255,0.25)', line_width=1)
 
+# Today marker
 fig.add_vline(
     x=last_dt,
     line_dash='dot',
-    line_color='rgba(250,204,21,0.7)',
+    line_color='rgba(250,204,21,0.6)',
     line_width=1.5,
     annotation_text='Today',
     annotation_font_color='#facc15',
@@ -416,37 +442,50 @@ fig.update_layout(
     height=300,
     showlegend=False,
     xaxis=dict(showgrid=False, tickformat='%b %d', tickfont_size=11),
-    yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.08)',
+    yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.06)',
                tickformat='+.1f', range=[-4.5, 4.5], tickfont_size=11),
 )
 
 st.plotly_chart(fig, use_container_width=True)
 
+# ── SPX Close panel (directly below MRS chart) ────────────────────────────────
+hist90_spx = hist.tail(90).dropna(subset=['spx']).copy()
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PC RATIO CONTEXT (collapsible)
-# ══════════════════════════════════════════════════════════════════════════════
-with st.expander('PC Ratio — Five-Zone Context'):
-    pc_sma10 = last.get('pc_sma10', np.nan)
-    pc_daily = last.get('pc_ratio', np.nan)
+if len(hist90_spx) > 0:
+    fig_spx = go.Figure()
 
-    try:
-        pc10 = float(pc_sma10)
-        if pc10 < 0.686:
-            zone, note = 'Extreme LOW', 'Complacency. Both tails compressed. T+63 TRR+=1.26×, TRR-=0.75×.'
-            zcol = '#f97316'
-        elif pc10 < 0.732:
-            zone, note = 'Moderate LOW — TRANSITION ZONE', 'EXIT from complacency is the danger. T+63 TRR-=1.49× (p=0.007).'
-            zcol = '#ef4444'
-        elif pc10 < 0.944:
-            zone, note = 'Mid', 'No distributional edge. Baseline.'
-            zcol = '#6b7280'
-        elif pc10 < 1.003:
-            zone, note = 'Moderate HIGH', 'Early contrarian signal. Fear building.'
-            zcol = '#22c55e'
-        else:
-            zone, note = 'Extreme HIGH', 'Sustained fear fully priced. T+21 TRR+=1.67× (p<0.0001).'
-            zcol = '#22c55e'
+    fig_spx.add_trace(go.Scatter(
+        x=hist90_spx['date'],
+        y=hist90_spx['spx'],
+        mode='lines',
+        name='SPX',
+        line=dict(color='#a78bfa', width=2),
+        fill='tozeroy',
+        fillcolor='rgba(167,139,250,0.06)',
+        hovertemplate='<b>%{x|%b %d}</b><br>SPX: %{y:,.0f}<extra></extra>',
+    ))
+
+    fig_spx.add_vline(
+        x=last_dt,
+        line_dash='dot',
+        line_color='rgba(250,204,21,0.6)',
+        line_width=1.5,
+    )
+
+    fig_spx.update_layout(
+        template='plotly_dark',
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        margin=dict(l=10, r=80, t=4, b=30),
+        height=180,
+        showlegend=False,
+        xaxis=dict(showgrid=False, tickformat='%b %d', tickfont_size=11),
+        yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.06)',
+                   tickformat=',.0f', tickfont_size=11),
+    )
+
+    st.markdown('<div class="section-header" style="margin-top:0; margin-bottom:0;">SPX Close</div>', unsafe_allow_html=True)
+    st.plotly_chart(fig_spx, use_container_width=True)
 
         col1, col2, col3 = st.columns(3)
         col1.metric('PC SMA-10', f'{pc10:.3f}')
