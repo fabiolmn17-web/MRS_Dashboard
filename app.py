@@ -7,6 +7,7 @@ Password-protected. Reads mrs_history.csv and displays:
   • VIX lifecycle state layer (paper-grounded: compression / mid / spike-zone)
   • Zero Gamma position
   • 90-day MRS history chart
+  • SPX close price panel
   • Regime duration counter
 """
 
@@ -29,8 +30,10 @@ st.set_page_config(
 
 # ── Password gate ──────────────────────────────────────────────────────────────
 def check_password() -> bool:
+    """Simple password gate using Streamlit secrets."""
     if st.session_state.get('authenticated'):
         return True
+
     st.markdown('## MRS Dashboard')
     pwd = st.text_input('Password', type='password', key='pwd_input')
     if st.button('Enter'):
@@ -48,7 +51,7 @@ if not check_password():
 # ── Load data ──────────────────────────────────────────────────────────────────
 HIST_PATH = Path(__file__).parent / 'mrs_history.csv'
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=300)   # refresh cache every 5 minutes
 def load_data() -> pd.DataFrame:
     df = pipeline.load_history(HIST_PATH)
     return df
@@ -76,6 +79,7 @@ for col in ['b20_pct', 'b20_phi', 'b20_score', 'b20_state',
         valid = hist[hist[col].notna()]
         if len(valid) > 0:
             last[col] = valid.iloc[-1][col]
+
 # ── Custom CSS ─────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -153,14 +157,25 @@ def _f(key, fmt='{:.2f}'):
     except:
         return str(v) if v else '—'
 
+def _phi_bar(phi):
+    """Compact visual bar for Phi values."""
+    try:
+        p = float(phi)
+        if np.isnan(p): return '— '
+        filled = int(round(p * 10))
+        bar    = '█' * filled + '░' * (10 - filled)
+        return f'{bar} {p:.3f}'
+    except:
+        return '—'
+
 QUALITY_COLORS = {
-    'CONFIRMED':              '#22c55e',
+    'CONFIRMED':            '#22c55e',
     'NEUTRAL — BULLISH LEAN': '#22c55e',
     'NEUTRAL — BEARISH LEAN': '#f97316',
-    'NEUTRAL — NO EDGE':      '#9ca3af',
-    'UNCONFIRMED':            '#f97316',
-    'DIVERGENT':              '#ef4444',
-    'FRAGILE':                '#facc15',
+    'NEUTRAL — NO EDGE':    '#9ca3af',
+    'UNCONFIRMED':          '#f97316',
+    'DIVERGENT':            '#ef4444',
+    'FRAGILE':              '#facc15',
 }
 
 def quality_color(label: str) -> str:
@@ -208,7 +223,7 @@ with col_sq:
       <span class="quality-chip" style="background:{sq_col}20;color:{sq_col};border:1px solid {sq_col};">
         {sq_lbl}
       </span>
-      <div style="font-size:0.78rem;color:#c4cad6;margin-top:8px;line-height:1.5;">
+      <div style="font-size:0.78rem;color:#9ca3af;margin-top:8px;line-height:1.5;">
         {sq_desc[:220]}{'…' if len(sq_desc) > 220 else ''}
       </div>
     </div>
@@ -221,7 +236,7 @@ with col_dur:
     st.markdown(f"""
     <div class="metric-card">
       <div class="section-header">Levels</div>
-      <div style="font-size:0.88rem;line-height:2.2;color:#e2e8f0;">
+      <div style="font-size:0.82rem;line-height:2;">
         <b>VIX</b> {vix_now}<br>
         <b>SPX</b> {spx_now}<br>
         <b>Zero γ</b> {zg_now}
@@ -233,7 +248,7 @@ st.divider()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TWO-COLUMN LAYOUT: Components (left) | VIX State + Gamma (right)
+# TWO-COLUMN LAYOUT: Components (left) | VIX Hazard + Chart (right)
 # ══════════════════════════════════════════════════════════════════════════════
 left, right = st.columns([1.4, 1], gap='large')
 
@@ -268,6 +283,13 @@ with left:
         try: raw_f = f'{float(raw_v):,.2f}' if not np.isnan(float(raw_v)) else '—'
         except: raw_f = '—'
 
+        # Score color
+        try:
+            sv = float(sc_v)
+            sc_color = '#22c55e' if sv > 0 else ('#ef4444' if sv < 0 else '#6b7280')
+        except:
+            sc_color = '#6b7280'
+
         rows.append({
             'Component': name,
             'Raw Value': raw_f,
@@ -283,24 +305,26 @@ with left:
             v = float(val)
             if v > 0:  return 'color: #22c55e; font-weight: 700'
             if v < 0:  return 'color: #ef4444; font-weight: 700'
-            return 'color: #9ca3af'
+            return 'color: #6b7280'
         except:
             return ''
 
     styled = df_comp.style.map(color_score, subset=['Score'])
     st.dataframe(styled, use_container_width=True, hide_index=True)
 
+    # ── Phi explanation note
     st.markdown("""
-    <div style="font-size:0.72rem;color:#8892a4;margin-top:4px;">
+    <div style="font-size:0.72rem;color:#6b7280;margin-top:4px;">
     Phi = percentile rank over rolling 756-session window (3 years).
     Score = discretized contribution to the MRS composite.
     </div>
     """, unsafe_allow_html=True)
 
 
-# ── RIGHT: VIX Lifecycle State + Zero Gamma ───────────────────────────────────
+# ── RIGHT: VIX Hazard + Gamma ──────────────────────────────────────────────────
 with right:
 
+    # VIX Lifecycle State
     st.markdown('<div class="section-header">VIX Lifecycle State</div>', unsafe_allow_html=True)
 
     vix_phi   = last.get('vix_phi', np.nan)
@@ -336,188 +360,4 @@ with right:
         st.markdown('<div class="safe-row">🟢 No active compression exit event</div>', unsafe_allow_html=True)
 
     # Zero Gamma position
-    st.markdown('<div class="section-header" style="margin-top:16px;">Zero Gamma Position</div>', unsafe_allow_html=True)
-    try:
-        spx_v = float(last.get('spx', np.nan))
-        zg_v  = float(last.get('zero_gamma', np.nan))
-        if not np.isnan(spx_v) and not np.isnan(zg_v) and zg_v > 0:
-            dist_pct = (spx_v - zg_v) / spx_v * 100
-            if dist_pct > 1:
-                gcls = 'safe-row'
-                gtxt = f'🟢 SPX {spx_v:,.0f} is {dist_pct:.1f}% ABOVE zero-gamma ({zg_v:,.0f}). Positive gamma — dampening environment.'
-            elif dist_pct > -1:
-                gcls = 'neutral-row'
-                gtxt = f'🟡 SPX {spx_v:,.0f} is NEAR zero-gamma ({zg_v:,.0f}, {dist_pct:+.1f}%). Transition zone — regime could flip.'
-            else:
-                gcls = 'hazard-row'
-                gtxt = f'🔴 SPX {spx_v:,.0f} is {abs(dist_pct):.1f}% BELOW zero-gamma ({zg_v:,.0f}). Negative gamma — amplifying moves.'
-            st.markdown(f'<div class="{gcls}">{gtxt}</div>', unsafe_allow_html=True)
-        elif not np.isnan(zg_v) and zg_v > 0:
-            st.markdown(f'<div class="neutral-row">⚪ Zero Gamma level: <b>{zg_v:,.0f}</b> — SPX close pending</div>', unsafe_allow_html=True)
-        else:
-            st.markdown('<div class="neutral-row">⚪ Zero Gamma: no data today</div>', unsafe_allow_html=True)
-    except:
-        st.markdown('<div class="neutral-row">⚪ Zero Gamma: no data today</div>', unsafe_allow_html=True)
-
-
-st.divider()
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 90-DAY MRS HISTORY CHART
-# ══════════════════════════════════════════════════════════════════════════════
-st.markdown('<div class="section-header">90-Day MRS History</div>', unsafe_allow_html=True)
-
-hist90 = hist.dropna(subset=['mrs_score']).tail(90).copy()
-
-fig = go.Figure()
-
-band_defs = [
-    (1.5,  5.0,  'rgba(26,127,55,0.15)',  'RISK-ON'),
-    (0.5,  1.5,  'rgba(87,166,107,0.12)', 'MILD RISK-ON'),
-    (-0.5, 0.5,  'rgba(107,114,128,0.10)','NEUTRAL'),
-    (-1.5, -0.5, 'rgba(217,119,6,0.12)',  'MILD RISK-OFF'),
-    (-5.0, -1.5, 'rgba(185,28,28,0.15)',  'RISK-OFF'),
-]
-for y0, y1, fill, label in band_defs:
-    fig.add_hrect(y0=y0, y1=y1, fillcolor=fill, line_width=0,
-                  annotation_text=label,
-                  annotation_position='right',
-                  annotation_font_size=10,
-                  annotation_font_color='#9ca3af')
-# ══════════════════════════════════════════════════════════════════════════════
-# 90-DAY MRS HISTORY CHART
-# ══════════════════════════════════════════════════════════════════════════════
-st.markdown('<div class="section-header">90-Day MRS History</div>', unsafe_allow_html=True)
-
-hist90 = hist.dropna(subset=['mrs_score']).tail(90).copy()
-
-fig = go.Figure()
-
-# Regime band fills
-band_defs = [
-    (1.5,  5.0,  'rgba(26,127,55,0.12)',  'RISK-ON'),
-    (0.5,  1.5,  'rgba(87,166,107,0.10)', 'MILD RISK-ON'),
-    (-0.5, 0.5,  'rgba(107,114,128,0.08)','NEUTRAL'),
-    (-1.5, -0.5, 'rgba(217,119,6,0.10)',  'MILD RISK-OFF'),
-    (-5.0, -1.5, 'rgba(185,28,28,0.12)',  'RISK-OFF'),
-]
-for y0, y1, fill, label in band_defs:
-    fig.add_hrect(y0=y0, y1=y1, fillcolor=fill, line_width=0,
-                  annotation_text=label,
-                  annotation_position='right',
-                  annotation_font_size=10,
-                  annotation_font_color='#6b7280')
-
-# MRS line
-fig.add_trace(go.Scatter(
-    x=hist90['date'],
-    y=hist90['mrs_score'],
-    mode='lines+markers',
-    name='MRS',
-    line=dict(color='#60a5fa', width=2.5),
-    marker=dict(size=4, color='#60a5fa'),
-    hovertemplate='<b>%{x|%b %d}</b><br>MRS: %{y:+.2f}<extra></extra>',
-))
-
-# Zero line
-fig.add_hline(y=0, line_dash='dash', line_color='rgba(255,255,255,0.25)', line_width=1)
-
-# Today marker
-fig.add_vline(
-    x=last_dt,
-    line_dash='dot',
-    line_color='rgba(250,204,21,0.6)',
-    line_width=1.5,
-    annotation_text='Today',
-    annotation_font_color='#facc15',
-    annotation_font_size=10,
-)
-
-fig.update_layout(
-    template='plotly_dark',
-    paper_bgcolor='rgba(0,0,0,0)',
-    plot_bgcolor='rgba(0,0,0,0)',
-    margin=dict(l=10, r=80, t=10, b=30),
-    height=300,
-    showlegend=False,
-    xaxis=dict(showgrid=False, tickformat='%b %d', tickfont_size=11),
-    yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.06)',
-               tickformat='+.1f', range=[-4.5, 4.5], tickfont_size=11),
-)
-
-st.plotly_chart(fig, use_container_width=True)
-
-# ── SPX Close panel (directly below MRS chart) ────────────────────────────────
-hist90_spx = hist.tail(90).dropna(subset=['spx']).copy()
-
-if len(hist90_spx) > 0:
-    fig_spx = go.Figure()
-
-    fig_spx.add_trace(go.Scatter(
-        x=hist90_spx['date'],
-        y=hist90_spx['spx'],
-        mode='lines',
-        name='SPX',
-        line=dict(color='#a78bfa', width=2),
-        fill='tozeroy',
-        fillcolor='rgba(167,139,250,0.06)',
-        hovertemplate='<b>%{x|%b %d}</b><br>SPX: %{y:,.0f}<extra></extra>',
-    ))
-
-    fig_spx.add_vline(
-        x=last_dt,
-        line_dash='dot',
-        line_color='rgba(250,204,21,0.6)',
-        line_width=1.5,
-    )
-
-    fig_spx.update_layout(
-        template='plotly_dark',
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        margin=dict(l=10, r=80, t=4, b=30),
-        height=180,
-        showlegend=False,
-        xaxis=dict(showgrid=False, tickformat='%b %d', tickfont_size=11),
-        yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.06)',
-                   tickformat=',.0f', tickfont_size=11),
-    )
-
-    st.markdown('<div class="section-header" style="margin-top:0; margin-bottom:0;">SPX Close</div>', unsafe_allow_html=True)
-    st.plotly_chart(fig_spx, use_container_width=True)
-
-        col1, col2, col3 = st.columns(3)
-        col1.metric('PC SMA-10', f'{pc10:.3f}')
-        col2.metric('Daily PC', f'{float(pc_daily):.3f}' if not np.isnan(float(pc_daily)) else '—')
-        col3.metric('Zone', zone)
-
-        st.markdown(f"""
-        <div style="background:#252538;border-left:3px solid {zcol};border-radius:6px;
-                    padding:10px 16px;font-size:0.86rem;margin-top:8px;color:#c4cad6;">
-        <b style="color:{zcol};">{zone}</b><br>{note}
-        </div>
-        """, unsafe_allow_html=True)
-
-        st.markdown("""
-        | Zone | SMA-10 | Score | T+63 TRR+ | T+63 TRR- |
-        |------|--------|-------|-----------|-----------|
-        | Extreme LOW | < 0.686 | +0.5 | 1.26× | 0.75× |
-        | Moderate LOW ⚠ | 0.686–0.732 | **−0.5** | 0.82× | **1.49×** |
-        | Mid | 0.732–0.944 | 0.0 | baseline | baseline |
-        | Moderate HIGH | 0.944–1.003 | +0.5 | — | — |
-        | Extreme HIGH | > 1.003 | +1.0 | **1.67×** | — |
-        """)
-    except:
-        st.write('PC SMA-10 data not available.')
-
-
-# ── Footer ────────────────────────────────────────────────────────────────────
-last_upd = hist['date'].max()
-st.markdown(f"""
-<div style="text-align:center;font-size:0.72rem;color:#6b7280;margin-top:24px;">
-  Epistruct — Invariant Research &nbsp;|&nbsp;
-  Data through {last_upd.strftime('%B %d, %Y')} &nbsp;|&nbsp;
-  Updates daily at 5:30 PM ET
-</div>
-""", unsafe_allow_html=True)
+    st.markdown('<div
