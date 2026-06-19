@@ -54,7 +54,7 @@ def load_data() -> pd.DataFrame:
     return df
 
 hist = load_data()
-complete = hist.dropna(subset=['vix', 'mrs_score', 'spx'])
+complete = hist.dropna(subset=['vix', 'mrs_score'])
 last     = complete.iloc[-1].to_dict() if len(complete) else hist.iloc[-1].to_dict()
 last_dt  = pd.Timestamp(last['date'])
 
