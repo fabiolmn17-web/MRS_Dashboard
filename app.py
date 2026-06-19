@@ -58,6 +58,24 @@ complete = hist.dropna(subset=['vix', 'mrs_score'])
 last     = complete.iloc[-1].to_dict() if len(complete) else hist.iloc[-1].to_dict()
 last_dt  = pd.Timestamp(last['date'])
 
+# Fill price-derived fields from most recent row with valid SPX close
+if pd.isna(last.get('spx', np.nan)):
+    price_hist = hist.dropna(subset=['spx'])
+    if len(price_hist) > 0:
+        price_last = price_hist.iloc[-1]
+        for col in ['spx', 'spy', 'ext_phi', 'ext_score', 'ext_state',
+                    'mom_phi', 'mom_score', 'mom_state']:
+            if col in price_last.index:
+                last[col] = price_last[col]
+
+# Fill manual inputs from most recent non-NaN row for each
+for col in ['b20_pct', 'b20_phi', 'b20_score', 'b20_state',
+            'adl_level', 'adl_phi', 'adl_score', 'adl_state',
+            'zero_gamma', 'gamma_score', 'gamma_state']:
+    if pd.isna(last.get(col, np.nan)) and col in hist.columns:
+        valid = hist[hist[col].notna()]
+        if len(valid) > 0:
+            last[col] = valid.iloc[-1][col]
 # ── Custom CSS ─────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
