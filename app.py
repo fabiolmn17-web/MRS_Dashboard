@@ -469,6 +469,10 @@ st.markdown('<div class="section-header" style="margin-top:0; margin-bottom:4px;
 hist90_spx = hist.tail(90).dropna(subset=['spx']).copy()
 
 if len(hist90_spx) > 0:
+    spx_min = hist90_spx['spx'].min()
+    spx_max = hist90_spx['spx'].max()
+    spx_pad = (spx_max - spx_min) * 0.08
+
     fig_spx = go.Figure()
 
     fig_spx.add_trace(go.Scatter(
@@ -477,8 +481,8 @@ if len(hist90_spx) > 0:
         mode='lines',
         name='SPX',
         line=dict(color='#a78bfa', width=2),
-        fill='tozeroy',
-        fillcolor='rgba(167,139,250,0.06)',
+        fill='tonexty',
+        fillcolor='rgba(167,139,250,0.08)',
         hovertemplate='<b>%{x|%b %d}</b><br>SPX: %{y:,.0f}<extra></extra>',
     ))
 
@@ -497,8 +501,13 @@ if len(hist90_spx) > 0:
         height=180,
         showlegend=False,
         xaxis=dict(showgrid=False, tickformat='%b %d', tickfont_size=11),
-        yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.06)',
-                   tickformat=',.0f', tickfont_size=11),
+        yaxis=dict(
+            showgrid=True,
+            gridcolor='rgba(255,255,255,0.06)',
+            tickformat=',.0f',
+            tickfont_size=11,
+            range=[spx_min - spx_pad, spx_max + spx_pad],
+        ),
     )
 
     st.plotly_chart(fig_spx, use_container_width=True)
