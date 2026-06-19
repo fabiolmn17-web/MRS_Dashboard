@@ -31,20 +31,16 @@ def main():
     hist = pipeline.load_history(HIST_PATH)
     print(f'  History: {len(hist)} rows | last date: {hist["date"].max().date()}')
 
-    # 1b. Drop any trailing rows with missing SPX close prices (caused by mid-day runs)
-    #     so that update_history re-fetches them fresh after market close.
-    dropped = 0
-    while len(hist) > 0:
-        last_spx = hist.iloc[-1].get('spx', np.nan)
-        if pd.isna(last_spx):
-            drop_date = hist.iloc[-1]['date']
-            print(f'  Dropping incomplete row {pd.Timestamp(drop_date).date()} (NaN SPX) — will re-fetch at close')
+    # 1b. Drop today's row if SPX is missing (mid-day or holiday run)
+    #     so update_history re-fetches it fresh after market close.
+    import datetime
+    today_date = pd.Timestamp(datetime.date.today()).normalize()
+    if len(hist) > 0:
+        last_row  = hist.iloc[-1]
+        last_date = pd.Timestamp(last_row['date']).normalize()
+        if last_date == today_date and pd.isna(last_row.get('spx', np.nan)):
+            print(f'  Dropping today\'s incomplete row {today_date.date()} (NaN SPX) — will re-fetch at close')
             hist = hist.iloc[:-1].reset_index(drop=True)
-            dropped += 1
-        else:
-            break
-    if dropped:
-        print(f'  Dropped {dropped} incomplete row(s). History now ends: {hist["date"].max().date()}')
 
     # 2. Auto-fetch all manual inputs
     inp_map = auto_fetch.build_inp_map(hist)
