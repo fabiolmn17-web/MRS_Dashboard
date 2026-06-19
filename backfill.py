@@ -24,9 +24,13 @@ US_HOLIDAYS_2025_2026 = pd.to_datetime([
     '2026-11-26','2026-12-25',
 ])
 
-def get_missing_trading_days(last_date, today):
-    bdays = pd.bdate_range(start=last_date + pd.Timedelta(days=1), end=today - pd.Timedelta(days=1))
-    return [d for d in bdays if d.normalize() not in US_HOLIDAYS_2025_2026]
+def get_missing_trading_days(last_valid_date, today):
+    bdays = pd.bdate_range(
+        start=last_valid_date + pd.Timedelta(days=1),
+        end=today - pd.Timedelta(days=1)
+    )
+    holidays_norm = set(US_HOLIDAYS_2025_2026.normalize())
+    return [d for d in bdays if d.normalize() not in holidays_norm]
 
 def get_close(df, day):
     day = pd.Timestamp(day).normalize()
@@ -43,22 +47,39 @@ def main():
     print(f'\n=== MRS Backfill — {datetime.date.today()} ===\n')
 
     hist = pipeline.load_history(HIST_PATH)
-    last_date = hist['date'].max()
     today = pd.Timestamp(datetime.date.today()).normalize()
 
-    print(f'  History ends : {last_date.date()}')
-    print(f'  Today        : {today.date()}')
+    # Use last date with a VALID SPX close (not just last row in CSV)
+    spx_valid = hist.dropna(subset=['spx'])
+    if len(spx_valid) == 0:
+        print('  No valid SPX data in history at all — cannot backfill.')
+        return
 
-    missing = get_missing_trading_days(last_date, today)
+    last_valid_date = spx_valid['date'].max()
+    last_csv_date   = hist['date'].max()
+
+    print(f'  Last row in CSV      : {last_csv_date.date()}')
+    print(f'  Last valid SPX close : {last_valid_date.date()}')
+    print(f'  Today                : {today.date()}')
+
+    missing = get_missing_trading_days(last_valid_date, today)
+
+    # Remove any dates already present in CSV with valid SPX
+    existing_valid = set(spx_valid['date'].dt.normalize())
+    missing = [d for d in missing if d.normalize() not in existing_valid]
 
     if not missing:
         print('  No missing trading days — nothing to do.')
         return
 
-    print(f'  Missing days : {[d.date() for d in missing]}')
+    print(f'  Missing days to fill : {[d.date() for d in missing]}')
+
+    # Drop existing NaN-SPX rows for those dates so we can re-add them cleanly
+    missing_set = set(pd.Timestamp(d).normalize() for d in missing)
+    hist = hist[~hist['date'].dt.normalize().isin(missing_set)].reset_index(drop=True)
 
     # Fetch price history for the full gap window
-    fetch_start = (last_date - pd.Timedelta(days=3)).strftime('%Y-%m-%d')
+    fetch_start = (last_valid_date - pd.Timedelta(days=3)).strftime('%Y-%m-%d')
     fetch_end   = today.strftime('%Y-%m-%d')
 
     print(f'\n  Downloading price data {fetch_start} → {fetch_end} ...')
@@ -67,7 +88,7 @@ def main():
     skew_df = yf.download('^SKEW', start=fetch_start, end=fetch_end, auto_adjust=True, progress=False)
     spy_df  = yf.download('SPY',   start=fetch_start, end=fetch_end, auto_adjust=True, progress=False)
 
-    # Carry-forward manual inputs (ADL, B20%, PC, Zero Gamma)
+    # Carry-forward manually-sourced inputs
     def last_valid(col):
         if col in hist.columns and hist[col].notna().any():
             return float(hist[col].dropna().iloc[-1])
@@ -81,24 +102,17 @@ def main():
     }
 
     filled = 0
-    for day in missing:
+    for day in sorted(missing):
         spx  = get_close(spx_df,  day)
         vix  = get_close(vix_df,  day)
         skew = get_close(skew_df, day)
         spy  = get_close(spy_df,  day)
 
         if np.isnan(spx):
-            print(f'  [{day.date()}] No SPX data — skipping (likely holiday)')
+            print(f'  [{day.date()}] No SPX data — skipping (likely holiday or bad fetch)')
             continue
 
-        inp_map = {
-            'spx':        spx,
-            'spy':        spy,
-            'vix':        vix,
-            'skew':       skew,
-            **cf
-        }
-
+        inp_map = {'spx': spx, 'spy': spy, 'vix': vix, 'skew': skew, **cf}
         hist = pipeline.update_history(hist, inp_map)
         mrs  = hist['mrs_score'].iloc[-1]
         print(f'  [{day.date()}]  SPX={spx:,.2f}  VIX={vix:.2f}  SKEW={skew:.1f}  '
@@ -108,10 +122,13 @@ def main():
     if filled:
         pipeline.save_history(hist, HIST_PATH)
         print(f'\n  Saved {len(hist)} rows → {HIST_PATH.name}')
+        print(f'  Latest MRS: {hist["mrs_score"].iloc[-1]:+.2f} — '
+              f'{pipeline.regime_label(hist["mrs_score"].iloc[-1])}')
     else:
         print('\n  Nothing was filled.')
 
     print('\n=== Done ===')
+
 
 if __name__ == '__main__':
     main()
