@@ -1,5 +1,5 @@
 """
-update_data.py — Daily batch update (run by GitHub Actions at 4:30 PM ET)
+update_data.py — Daily batch update (run by GitHub Actions at 5:30 PM ET)
 =========================================================================
 Usage:
     python update_data.py
@@ -9,6 +9,8 @@ No Excel, no manual entry required.
 """
 
 import sys
+import numpy as np
+import pandas as pd
 from pathlib import Path
 
 import pipeline
@@ -28,6 +30,21 @@ def main():
     # 1. Load existing history
     hist = pipeline.load_history(HIST_PATH)
     print(f'  History: {len(hist)} rows | last date: {hist["date"].max().date()}')
+
+    # 1b. Drop any trailing rows with missing SPX close prices (caused by mid-day runs)
+    #     so that update_history re-fetches them fresh after market close.
+    dropped = 0
+    while len(hist) > 0:
+        last_spx = hist.iloc[-1].get('spx', np.nan)
+        if pd.isna(last_spx):
+            drop_date = hist.iloc[-1]['date']
+            print(f'  Dropping incomplete row {pd.Timestamp(drop_date).date()} (NaN SPX) — will re-fetch at close')
+            hist = hist.iloc[:-1].reset_index(drop=True)
+            dropped += 1
+        else:
+            break
+    if dropped:
+        print(f'  Dropped {dropped} incomplete row(s). History now ends: {hist["date"].max().date()}')
 
     # 2. Auto-fetch all manual inputs
     inp_map = auto_fetch.build_inp_map(hist)
