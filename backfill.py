@@ -5,14 +5,12 @@ Bypasses pipeline.update_history() which uses yf.download() (403 on GitHub Actio
 Uses individual yf.Ticker().history() calls instead.
 Accepts manual overrides from workflow_dispatch env vars (B20_PCT, ADL_TV, ZERO_GAMMA, PC_RATIO).
 """
-
 import datetime
 import os
 import numpy as np
 import pandas as pd
 import yfinance as yf
 from pathlib import Path
-
 import pipeline
 
 HIST_PATH = Path(__file__).parent / 'mrs_history.csv'
@@ -20,6 +18,12 @@ HIST_PATH = Path(__file__).parent / 'mrs_history.csv'
 # ── Hardcoded overrides (fallback when env vars not set) ──────────────────────
 # Format: 'YYYY-MM-DD': {field: value}
 MANUAL_OVERRIDES = {
+    '2026-06-20': {
+        'adl_level':  1_827_690.0,
+        'b20_pct':    50.69,
+        'zero_gamma': 7_446.59,
+        'pc_ratio':   0.756,
+    },
     '2026-06-22': {
         'adl_level':  1_827_690.0,
         'b20_pct':    50.69,
@@ -28,21 +32,18 @@ MANUAL_OVERRIDES = {
     },
 }
 
-
 def get_env_override() -> dict:
     """Read workflow_dispatch inputs from environment variables."""
     _b20 = os.environ.get('B20_PCT', '').strip()
     _adl = os.environ.get('ADL_TV', '').strip()
     _zg  = os.environ.get('ZERO_GAMMA', '').strip()
     _pc  = os.environ.get('PC_RATIO', '').strip()
-
     override = {}
     if _b20: override['b20_pct']    = float(_b20)
     if _adl: override['adl_level']  = float(_adl) * 1000   # TradingView ×1000 → CSV scale
     if _zg:  override['zero_gamma'] = float(_zg)
     if _pc:  override['pc_ratio']   = float(_pc)
     return override
-
 
 def fetch_one(ticker: str, start: str, end: str) -> pd.Series:
     """Fetch a single ticker's Close. Individual calls avoid GitHub Actions 403."""
@@ -56,7 +57,6 @@ def fetch_one(ticker: str, start: str, end: str) -> pd.Series:
     except Exception as e:
         print(f'    [{ticker}] ERROR: {e}')
         return pd.Series(dtype=float)
-
 
 def rescore(hist: pd.DataFrame) -> pd.DataFrame:
     """Replicate pipeline scoring block."""
@@ -73,6 +73,7 @@ def rescore(hist: pd.DataFrame) -> pd.DataFrame:
     hist['pc_sma10'] = pc_s.rolling(10, min_periods=1).mean()
     hist['pc_sma20'] = pc_s.rolling(20, min_periods=1).mean()
     hist['pc_sma50'] = pc_s.rolling(50, min_periods=1).mean()
+
     adl_prev = adl_s.shift(20)
     hist['adl_roc20'] = np.where(adl_prev.abs() > 1e-9,
                                   (adl_s - adl_prev) / adl_prev.abs(), np.nan)
@@ -86,6 +87,7 @@ def rescore(hist: pd.DataFrame) -> pd.DataFrame:
 
     vix_chg = vix_s.pct_change(fill_method=None)
     hist['spike_flag'] = (vix_chg > 0.30).fillna(False).astype(int)
+
     vix_phi_s       = hist['vix_phi']
     compressed_flag = (vix_phi_s < 0.30).fillna(False).astype(int)
     crossed = ((compressed_flag.shift(1) == 1) & (vix_phi_s >= 0.30)).fillna(False).astype(int)
@@ -103,8 +105,8 @@ def rescore(hist: pd.DataFrame) -> pd.DataFrame:
                   'b20_score','pc_score','skew_score','gamma_score']
     state_cols = ['vix_state','ext_state','mom_state','adl_state',
                   'b20_state','pc_state','skew_state','gamma_state']
-    res = {c: [] for c in score_cols + state_cols + ['mrs_score']}
 
+    res = {c: [] for c in score_cols + state_cols + ['mrs_score']}
     for _, row in hist.iterrows():
         def g(c):
             v = row.get(c, np.nan)
@@ -127,7 +129,6 @@ def rescore(hist: pd.DataFrame) -> pd.DataFrame:
     for col in score_cols + state_cols + ['mrs_score']:
         hist[col] = res[col]
     return hist
-
 
 def main():
     print(f'\n=== MRS Backfill — {datetime.date.today()} ===\n')
@@ -159,7 +160,6 @@ def main():
     if len(missing) == 0:
         print('  Already up to date — nothing to backfill.')
         return
-
     print(f'  Missing: {[str(d.date()) for d in missing]}')
 
     # ── Carry-forward base manual inputs ──────────────────────────────────────
@@ -182,12 +182,10 @@ def main():
     fetch_start = (last_valid - pd.Timedelta(days=5)).strftime('%Y-%m-%d')
     fetch_end   = (yesterday  + pd.Timedelta(days=2)).strftime('%Y-%m-%d')
     print(f'\n  Fetching market data ({fetch_start} → {fetch_end})...')
-
     spy_s  = fetch_one('SPY',   fetch_start, fetch_end)
     spx_s  = fetch_one('^GSPC', fetch_start, fetch_end)
     vix_s  = fetch_one('^VIX',  fetch_start, fetch_end)
     skew_s = fetch_one('^SKEW', fetch_start, fetch_end)
-
     print(f'    SPY  rows: {len(spy_s)}  last: {spy_s.index[-1].date() if len(spy_s) else "—"}')
     print(f'    SPX  rows: {len(spx_s)}  last: {spx_s.index[-1].date() if len(spx_s) else "—"}')
     print(f'    VIX  rows: {len(vix_s)}  last: {vix_s.index[-1].date() if len(vix_s) else "—"}')
@@ -234,9 +232,25 @@ def main():
             'compressed':   0,
             'trigger_days': 0.0,
         })
-
         hist = pd.concat([hist, pd.DataFrame([new_row])], ignore_index=True)
         hist = hist.sort_values('date').reset_index(drop=True)
         appended += 1
 
     if appended == 0:
+        print('\n  No rows appended (all missing days were holidays or had no SPX data).')
+        return
+
+    # ── Rescore full history ──────────────────────────────────────────────────
+    print(f'\n  Rescoring {len(hist)} rows...')
+    hist = rescore(hist)
+
+    # ── Save ──────────────────────────────────────────────────────────────────
+    pipeline.save_history(hist, HIST_PATH)
+    last_row = hist.iloc[-1]
+    print(f'\n  ✅ Saved {appended} new row(s) to {HIST_PATH.name}')
+    print(f'  Last row: {last_row["date"].date()} | '
+          f'SPX={last_row["spx"]:.2f} | VIX={last_row["vix"]:.2f} | '
+          f'MRS={last_row["mrs_score"]:+.2f}')
+
+if __name__ == '__main__':
+    main()
