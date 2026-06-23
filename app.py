@@ -8,16 +8,40 @@ Password-protected. Reads mrs_history.csv and displays:
   • Zero Gamma position
   • 90-day MRS history chart + SPX close panel + VIX state panel
 """
-
 import numpy as np
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
+import requests                          # ── NEW (sidebar form)
 from pathlib import Path
 from datetime import date
 from itertools import groupby
-
 import pipeline
+
+# ── NEW: trigger GitHub Actions backfill workflow ──────────────────────────────
+def _trigger_backfill(gh_token: str, b20: float, adl: float,
+                      zg: float, pc: float) -> bool:
+    url = ('https://api.github.com/repos/fabiolmn17-web/'
+           'MRS_Dashboard/actions/workflows/backfill.yml/dispatches')
+    headers = {
+        'Authorization': f'token {gh_token}',
+        'Accept': 'application/vnd.github.v3+json',
+    }
+    payload = {
+        'ref': 'main',
+        'inputs': {
+            'b20_pct':    str(b20),
+            'adl_tv':     str(adl),
+            'zero_gamma': str(zg),
+            'pc_ratio':   str(pc) if pc > 0 else '',
+        },
+    }
+    try:
+        r = requests.post(url, headers=headers, json=payload, timeout=10)
+        return r.status_code == 204
+    except Exception as e:
+        print(f'Workflow trigger error: {e}')
+        return False
 
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -44,6 +68,31 @@ def check_password() -> bool:
 
 if not check_password():
     st.stop()
+
+# ── NEW: Sidebar daily-input form ──────────────────────────────────────────────
+with st.sidebar:
+    st.markdown('### 📥 Daily Inputs')
+    st.caption('Enter after market close (4 PM ET).\n\nADL: TradingView value — auto ×1000.')
+    with st.form('daily_inputs_form'):
+        inp_b20 = st.number_input('B20% (S5TW)',           min_value=0.0, max_value=100.0,
+                                   value=50.0, step=0.01)
+        inp_adl = st.number_input('ADL (TradingView ×1000)', value=1827.0, step=0.01)
+        inp_zg  = st.number_input('Zero Gamma (SPX level)', value=7400.0, step=1.0)
+        inp_pc  = st.number_input('PC Ratio (0 = auto)',    value=0.0,    step=0.001,
+                                   min_value=0.0)
+        submitted = st.form_submit_button('🔄 Submit & Update')
+    if submitted:
+        gh_token = st.secrets.get('GITHUB_TOKEN', '')
+        if not gh_token:
+            st.sidebar.error('GITHUB_TOKEN not in Streamlit secrets.')
+        elif inp_b20 <= 0:
+            st.sidebar.warning('Enter a valid B20% value (> 0).')
+        else:
+            ok = _trigger_backfill(gh_token, inp_b20, inp_adl, inp_zg, inp_pc)
+            if ok:
+                st.sidebar.success('✅ Update triggered!\nRefresh in ~90 seconds.')
+            else:
+                st.sidebar.error('❌ API call failed — check GITHUB_TOKEN.')
 
 # ── Load data ──────────────────────────────────────────────────────────────────
 HIST_PATH = Path(__file__).parent / 'mrs_history.csv'
@@ -144,7 +193,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-
 # ── Helper functions ────────────────────────────────────────────────────────────
 def _f(key, fmt='{:.2f}'):
     v = last.get(key, np.nan)
@@ -169,7 +217,6 @@ def quality_color(label: str) -> str:
         if k in label:
             return v
     return '#9ca3af'
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # HEADER ROW
@@ -232,7 +279,6 @@ with col_dur:
 
 st.divider()
 
-
 # ══════════════════════════════════════════════════════════════════════════════
 # TWO-COLUMN LAYOUT
 # ══════════════════════════════════════════════════════════════════════════════
@@ -240,7 +286,6 @@ left, right = st.columns([1.4, 1], gap='large')
 
 with left:
     st.markdown('<div class="section-header">Component Breakdown</div>', unsafe_allow_html=True)
-
     COMP_DEF = [
         ('VIX',        'vix_phi',  'vix_score',  'vix_state',   'vix'),
         ('Extension',  'ext_phi',  'ext_score',  'ext_state',   'spy'),
@@ -251,28 +296,21 @@ with left:
         ('SKEW',       'skew_phi', 'skew_score', 'skew_state',  'skew'),
         ('Zero Gamma', None,       'gamma_score','gamma_state', 'zero_gamma'),
     ]
-
     rows = []
     for name, phi_key, sc_key, st_key, raw_key in COMP_DEF:
         phi_v = last.get(phi_key, np.nan) if phi_key else np.nan
         sc_v  = last.get(sc_key, 0) or 0
         st_v  = last.get(st_key, '—') or '—'
         raw_v = last.get(raw_key, np.nan)
-
         try: phi_f = f'{float(phi_v):.3f}' if not np.isnan(float(phi_v)) else '—'
         except: phi_f = '—'
-
         try: sc_f = f'{float(sc_v):+.1f}'
         except: sc_f = '0.0'
-
         try: raw_f = f'{float(raw_v):,.2f}' if not np.isnan(float(raw_v)) else '—'
         except: raw_f = '—'
-
         rows.append({'Component': name, 'Raw Value': raw_f,
                      'Phi': phi_f, 'State': str(st_v), 'Score': sc_f})
-
     df_comp = pd.DataFrame(rows)
-
     def color_score(val):
         try:
             v = float(val)
@@ -281,10 +319,8 @@ with left:
             return 'color: #6b7280'
         except:
             return ''
-
     styled = df_comp.style.map(color_score, subset=['Score'])
     st.dataframe(styled, use_container_width=True, hide_index=True)
-
     st.markdown("""
     <div style="font-size:0.72rem;color:#6b7280;margin-top:4px;">
     Phi = percentile rank over rolling 756-session window (3 years).
@@ -292,13 +328,10 @@ with left:
     </div>
     """, unsafe_allow_html=True)
 
-
 with right:
     st.markdown('<div class="section-header">VIX Lifecycle State</div>', unsafe_allow_html=True)
-
     vix_phi   = last.get('vix_phi', np.nan)
     trig_days = float(last.get('trigger_days', 0) or 0)
-
     try: vix_phi_f = float(vix_phi)
     except: vix_phi_f = np.nan
 
@@ -361,14 +394,11 @@ with right:
         except:
             st.markdown('<div class="neutral-row">⚪ Zero Gamma: no data today</div>', unsafe_allow_html=True)
 
-
 st.divider()
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CHARTS — shared x-axis range so all panels align perfectly
 # ══════════════════════════════════════════════════════════════════════════════
-
 hist90  = hist.dropna(subset=['mrs_score']).tail(90).copy()
 x_min   = hist.tail(90)['date'].min()
 x_max   = hist.tail(90)['date'].max()
@@ -383,12 +413,10 @@ LAYOUT_BASE = dict(
     xaxis=dict(showgrid=False, tickformat='%b %d', tickfont_size=11, range=x_range),
 )
 
-
 # ── 1. 90-Day MRS History ─────────────────────────────────────────────────────
 st.markdown('<div class="section-header">90-Day MRS History</div>', unsafe_allow_html=True)
 
 fig = go.Figure()
-
 band_defs = [
     (1.5,  5.0,  'rgba(26,127,55,0.12)',  'RISK-ON'),
     (0.5,  1.5,  'rgba(87,166,107,0.10)', 'MILD RISK-ON'),
@@ -413,20 +441,17 @@ fig.add_trace(go.Scatter(
     marker=dict(size=4, color='#60a5fa'),
     hovertemplate='<b>%{x|%b %d}</b><br>MRS: %{y:+.2f}<extra></extra>',
 ))
-
 fig.add_hline(y=0, line_dash='dash', line_color='rgba(255,255,255,0.25)', line_width=1)
 fig.add_vline(x=last_dt, annotation_text='Today',
               annotation_position='top right',
               annotation_font_color='#facc15', annotation_font_size=10,
               **VLINE_STYLE)
-
 fig.update_layout(**LAYOUT_BASE,
     margin=dict(l=10, r=130, t=10, b=30), height=300,
     yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.06)',
                tickformat='+.1f', range=[-4.5, 4.5], tickfont_size=11),
 )
 st.plotly_chart(fig, use_container_width=True)
-
 
 # ── 2. SPX Close + Zero Gamma line ───────────────────────────────────────────
 st.markdown('<div class="section-header" style="margin-top:0; margin-bottom:4px;">SPX Close</div>',
@@ -439,19 +464,16 @@ if len(hist90_spx_valid) > 0:
     spx_min = hist90_spx_valid['spx'].min()
     spx_max = hist90_spx_valid['spx'].max()
     spx_pad = (spx_max - spx_min) * 0.10
-
     zg_val = np.nan
     try:
         zg_val = float(last.get('zero_gamma', np.nan))
     except:
         pass
-
     if not np.isnan(zg_val):
         spx_min = min(spx_min, zg_val)
         spx_max = max(spx_max, zg_val)
 
     fig_spx = go.Figure()
-
     fig_spx.add_trace(go.Scatter(
         x=hist90_spx['date'],
         y=hist90_spx['spx'],
@@ -459,7 +481,6 @@ if len(hist90_spx_valid) > 0:
         line=dict(color='#a78bfa', width=2),
         hovertemplate='<b>%{x|%b %d}</b><br>SPX: %{y:,.0f}<extra></extra>',
     ))
-
     if not np.isnan(zg_val):
         fig_spx.add_hline(
             y=zg_val,
@@ -471,9 +492,7 @@ if len(hist90_spx_valid) > 0:
             annotation_font_color='#facc15',
             annotation_font_size=10,
         )
-
     fig_spx.add_vline(x=last_dt, **VLINE_STYLE)
-
     fig_spx.update_layout(**LAYOUT_BASE,
         margin=dict(l=10, r=130, t=4, b=30), height=180,
         yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.06)',
@@ -481,7 +500,6 @@ if len(hist90_spx_valid) > 0:
                    range=[spx_min - spx_pad, spx_max + spx_pad]),
     )
     st.plotly_chart(fig_spx, use_container_width=True)
-
 
 # ── 3. VIX State panel ────────────────────────────────────────────────────────
 st.markdown('<div class="section-header" style="margin-top:0; margin-bottom:4px;">VIX State</div>',
@@ -496,7 +514,6 @@ if len(hist90_vix_valid) > 0:
     vix_pad = (vix_max - vix_min) * 0.12
 
     fig_vix = go.Figure()
-
     if 'vix_phi' in hist90_vix_valid.columns:
         def _vix_state(phi):
             try:
@@ -506,16 +523,13 @@ if len(hist90_vix_valid) > 0:
                 return 'mid'
             except:
                 return 'mid'
-
         hist90_vix_valid = hist90_vix_valid.copy()
         hist90_vix_valid['vstate'] = hist90_vix_valid['vix_phi'].apply(_vix_state)
-
         STATE_COLORS = {
             'compression': 'rgba(239,68,68,0.18)',
             'spike':       'rgba(250,204,21,0.14)',
             'mid':         'rgba(34,197,94,0.07)',
         }
-
         for state, grp in groupby(hist90_vix_valid.itertuples(index=False), key=lambda r: r.vstate):
             rows = list(grp)
             d0 = pd.Timestamp(rows[0].date)
@@ -529,14 +543,11 @@ if len(hist90_vix_valid) > 0:
         line=dict(color='#f9a8d4', width=2),
         hovertemplate='<b>%{x|%b %d}</b><br>VIX: %{y:.2f}<extra></extra>',
     ))
-
     fig_vix.add_hline(y=20, line_dash='dot',
                       line_color='rgba(255,255,255,0.20)', line_width=1,
                       annotation_text='20', annotation_position='right',
                       annotation_font_color='#6b7280', annotation_font_size=10)
-
     fig_vix.add_vline(x=last_dt, **VLINE_STYLE)
-
     fig_vix.update_layout(**LAYOUT_BASE,
         margin=dict(l=10, r=130, t=4, b=30), height=160,
         yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.06)',
@@ -545,14 +556,12 @@ if len(hist90_vix_valid) > 0:
     )
     st.plotly_chart(fig_vix, use_container_width=True)
 
-
 # ══════════════════════════════════════════════════════════════════════════════
 # PC RATIO CONTEXT (collapsible)
 # ══════════════════════════════════════════════════════════════════════════════
 with st.expander('PC Ratio — Five-Zone Context'):
     pc_sma10 = last.get('pc_sma10', np.nan)
     pc_daily = last.get('pc_ratio', np.nan)
-
     try:
         pc10 = float(pc_sma10)
         if pc10 < 0.686:
@@ -570,19 +579,16 @@ with st.expander('PC Ratio — Five-Zone Context'):
         else:
             zone, note = 'Extreme HIGH', 'Sustained fear fully priced. T+21 TRR+=1.67× (p<0.0001).'
             zcol = '#22c55e'
-
         col1, col2, col3 = st.columns(3)
         col1.metric('PC SMA-10', f'{pc10:.3f}')
         col2.metric('Daily PC', f'{float(pc_daily):.3f}' if not np.isnan(float(pc_daily)) else '—')
         col3.metric('Zone', zone)
-
         st.markdown(f"""
         <div style="background:#1e1e2e;border-left:3px solid {zcol};border-radius:6px;
                     padding:10px 16px;font-size:0.86rem;margin-top:8px;">
         <b style="color:{zcol};">{zone}</b><br>{note}
         </div>
         """, unsafe_allow_html=True)
-
         st.markdown("""
         | Zone | SMA-10 | Score | T+63 TRR+ | T+63 TRR- |
         |------|--------|-------|-----------|-----------|
@@ -594,7 +600,6 @@ with st.expander('PC Ratio — Five-Zone Context'):
         """)
     except:
         st.write('PC SMA-10 data not available.')
-
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 last_upd = hist['date'].max()
