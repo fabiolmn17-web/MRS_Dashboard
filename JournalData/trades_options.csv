@@ -1,0 +1,26 @@
+id,underlying,strategy,contract_desc,side,open_date,premium,qty,risk_usd,setup,chart_link,notes,close_date,close_premium,pnl_pct,r_multiple,duration_days,mrs_score_open,mrs_state_open,status,created_at
+OPT_HIST_000,TJX,Call,155 C exp 20260220,Long,2025-12-31,5.118141,1,,,https://www.tradingview.com/x/0VTv4wpc/,,2026-01-02,2.89,-43.53,,2.0,-0.7,MILD RISK-OFF,Closed,2026-07-20T00:00:00
+OPT_HIST_001,EMBJ,Call,60 C exp 20260116,Long,2025-12-31,5.449641,1,,,https://www.tradingview.com/x/kZwA0zMt/,,2026-01-02,5.48,0.56,,2.0,-0.7,MILD RISK-OFF,Closed,2026-07-20T00:00:00
+OPT_HIST_002,VIX,Call,13.5 C exp 20260218,Long,2025-12-31,5.014666,1,,,,,2026-01-12,4.6,-8.27,,12.0,-0.7,MILD RISK-OFF,Closed,2026-07-20T00:00:00
+OPT_HIST_003,IBIT,Call,48 C exp 20260320,Long,2026-01-09,6.4,1,,CounterTrend,https://www.tradingview.com/x/9mBzDzxB/,,2026-01-20,5.25,-17.97,,11.0,0.15,NEUTRAL,Closed,2026-07-20T00:00:00
+OPT_HIST_004,VXX,Call,25 C exp 20260220,Long,2026-01-13,2.72,2,,CounterTrend,https://www.tradingview.com/x/5Cu2FWN5/,,2026-01-20,5.14,88.97,,7.0,-1.55,RISK-OFF,Closed,2026-07-20T00:00:00
+OPT_HIST_005,SPY,Bfly Put,L 650 P exp 20260130 | S 670 P exp 20260130 | L 690 P exp 20260130,Long,2026-01-27,1.89,1,,CounterTrend,https://www.tradingview.com/x/xvNcLPll/,,2026-01-30,0.99,-47.62,,3.0,-1.5,RISK-OFF,Closed,2026-07-20T00:00:00
+OPT_HIST_006,SPY,Put Debit Spread,S 675 P exp 20260220 | L 684 P exp 20260220,Long,2026-01-30,1.85,1,,CounterTrend,,,2026-02-03,1.31,-29.19,,4.0,-0.65,MILD RISK-OFF,Closed,2026-07-20T00:00:00
+OPT_HIST_007,CAG,Call,17 C exp 20260320,Long,2026-01-30,1.53,3,,Base Breakout(down),https://www.tradingview.com/x/mEi6lGLZ/,,2026-02-04,2.78333333333333,81.92,,5.0,-0.65,MILD RISK-OFF,Closed,2026-07-20T00:00:00
+OPT_HIST_008,SPY,Put,665 P exp 20260306,Short,2026-02-04,7.22,1,,,,,2026-02-09,3.3,54.29,,5.0,-0.65,MILD RISK-OFF,Closed,2026-07-20T00:00:00
+OPT_HIST_009,SPY,Put,675 P exp 20260306,Long,2026-02-04,9.6,1,,,,,2026-02-09,4.65,-51.56,,5.0,-0.65,MILD RISK-OFF,Closed,2026-07-20T00:00:00
+OPT_HIST_010,QQQ,Put Debit Spread,S 595 P exp 20260306 | L 600 P exp 20260306,Long,2026-02-10,1.1,1,,Bounce,https://www.tradingview.com/x/cuXUCe5o/,,2026-02-25,0.75,-31.82,,15.0,-0.7,MILD RISK-OFF,Closed,2026-07-20T00:00:00
+OPT_HIST_011,F,Call,13 C exp 20260417,Long,2026-02-18,1.4,3,,Base Breakout(down),https://www.tradingview.com/x/RPet4m75/,,2026-02-27,1.64,17.14,,9.0,-4.05,RISK-OFF,Closed,2026-07-20T00:00:00
+OPT_HIST_012,UEC,Call,14 C exp 20260320,Long,2026-02-19,2.5,2,,,https://www.tradingview.com/x/vppr4jnb/,,2026-02-26,1.8,-28.0,,7.0,-4.05,RISK-OFF,Closed,2026-07-20T00:00:00
+OPT_HIST_013,QQQ,Put Debit Spread,L 595 P exp 20260306 | S 600 P exp 20260306,Short,2026-02-25,0.76,1,,Base Breakout(down),https://www.tradingview.com/x/cuXUCe5o/,,2026-02-25,0.77,1.32,,0.0,-2.75,RISK-OFF,Closed,2026-07-20T00:00:00
+OPT_HIST_014,QQQ,Put Debit Spread,S 570 P exp 20260320 | L 580 P exp 20260320,Long,2026-02-27,1.57,1,,Base Breakout(down),,,2026-03-10,0.89,-43.31,,11.0,-2.95,RISK-OFF,Closed,2026-07-20T00:00:00
+OPT_HIST_015,QQQ,Put Debit Spread,S 555 P exp 20260331 | L 565 P exp 20260331 | S 560 P exp 20260331 | L 570 P exp 20260331,Long,2026-03-05,2.89,1,,,,,2026-03-27,6.28,117.3,,22.0,-2.9,RISK-OFF,Closed,2026-07-20T00:00:00
+OPT_HIST_016,SRLN,Put,40 P exp 20260515,Long,2026-03-16,0.85,4,,Bounce,https://www.tradingview.com/x/e7DW8AMK/,,2026-03-23,0.61,-28.24,,7.0,-5.1,RISK-OFF,Closed,2026-07-20T00:00:00
+OPT_HIST_017,OPEN,Call,5 C exp 20260515,Long,2026-03-16,0.91,4,,Bottoming Base Breakout,https://www.tradingview.com/x/YV3KtEmk/,,2026-03-30,0.41,-54.95,,14.0,-5.1,RISK-OFF,Closed,2026-07-20T00:00:00
+OPT_HIST_018,ARKK,Put Debit Spread,Apr17' 70/65,Long,2026-03-18,1.27,2,,Bounce,https://www.tradingview.com/x/pPAzlzjA/,,2026-03-30,3.5,175.59,,12.0,-6.4,RISK-OFF,Closed,2026-07-20T00:00:00
+OPT_HIST_019,PDD,Call Debit Spread,May15' $620/613,Long,2026-03-30,2.54,1,,CounterTrend,,,,,,,,-5.1,RISK-OFF,Open,2026-07-20T00:00:00
+OPT_HIST_020,IBIT,Call Debit Spread,Apr17' $44/50,Long,2026-03-17,0.79,2,,,,,2026-04-17,0.1,-87.34,,31.0,-5.1,RISK-OFF,Closed,2026-07-20T00:00:00
+OPT_HIST_021,PLUG,Call,Jun18' $2 Call,Long,2026-03-26,0.6,7,,,https://www.tradingview.com/x/qtm4q40v/,,2026-04-20,1.19,98.33,,25.0,-5.1,RISK-OFF,Closed,2026-07-20T00:00:00
+OPT_HIST_022,CHWY,Put,May15' $27.5 Put,Long,2026-04-07,2.91,1,,,https://www.tradingview.com/x/C7CRahyF/,,2026-04-20,0.8,-72.51,,13.0,-3.55,RISK-OFF,Closed,2026-07-20T00:00:00
+OPT_HIST_023,PLTR,Put Debit Spread,May01' $130/120,Long,2026-04-11,1.72,1,,,,,,,,,,-1.75,RISK-OFF,Open,2026-07-20T00:00:00
+OPT_HIST_024,QQQ,Put Debit Spread,May15' $620/613,Long,2026-04-25,1.57,1,,,,,,,,,,-1.85,RISK-OFF,Open,2026-07-20T00:00:00
