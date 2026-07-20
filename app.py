@@ -74,6 +74,8 @@ def build_sector_table(closes):
         if len(s) < 63:
             continue
         p = s.iloc[-1]
+        p_prev = s.iloc[-2] if len(s) >= 2 else p
+        daily_chg = (p / p_prev - 1) if p_prev != 0 else 0.0
 
         ytd_base = prev_year[etf].dropna().iloc[-1] if len(prev_year) > 0 and etf in prev_year else s.iloc[0]
 
@@ -100,7 +102,7 @@ def build_sector_table(closes):
         else:           trend = 'NEUTRAL'
 
         rows.append({
-            'Sector': sector, 'ETF': etf, 'Close': p,
+            'Sector': sector, 'ETF': etf, 'Close': p, 'DailyChg': daily_chg,
             'YTD': r_ytd, '1Y': r_1y, '6M': r_6m, '3M': r_3m,
             'RS 1Y': rs_1y, 'RS 6M': rs_6m, 'RS 3M': rs_3m,
             'Score': composite, 'Label': _sector_composite_label(composite),
@@ -240,6 +242,12 @@ with st.sidebar:
             if not gh_token:
                 st.sidebar.error('GITHUB_TOKEN not in Streamlit secrets.')
             else:
+                # Store for live preview — overlay on last dict below
+                st.session_state['pending_b20']  = inp_b20
+                st.session_state['pending_adl']  = inp_adl * 1000  # ×1000 → CSV scale
+                st.session_state['pending_zg']   = inp_zg
+                st.session_state['pending_pc']   = inp_pc
+                st.session_state['pending_date'] = _today.strftime('%Y-%m-%d')
                 ok = _trigger_backfill(gh_token, inp_b20, inp_adl, inp_zg, inp_pc)
                 if ok:
                     st.sidebar.success(
@@ -251,6 +259,8 @@ with st.sidebar:
 
     st.sidebar.divider()
     if st.sidebar.button('Refresh Data', use_container_width=True):
+        for _k in ['pending_b20','pending_adl','pending_zg','pending_pc','pending_date']:
+            st.session_state.pop(_k, None)
         st.cache_data.clear()
         st.rerun()
     st.sidebar.caption('Clears cache and reloads CSV from disk.')
@@ -285,6 +295,40 @@ if pd.isna(last.get('skew', np.nan)) and 'skew' in hist.columns:
         for col in ['skew', 'skew_phi', 'skew_score', 'skew_state']:
             if col in valid_skew.columns:
                 last[col] = valid_skew.iloc[-1][col]
+
+# ── Live preview: overlay today's submitted inputs ────────────────────────────
+_preview_active = False
+if st.session_state.get('pending_date') == date.today().strftime('%Y-%m-%d'):
+    last['b20_pct']    = st.session_state['pending_b20']
+    last['adl_level']  = st.session_state['pending_adl']
+    last['zero_gamma'] = st.session_state['pending_zg']
+    _pc_sub = st.session_state['pending_pc']
+    if _pc_sub > 0:
+        last['pc_ratio'] = _pc_sub
+    # Recompute scores for components directly sensitive to manual inputs
+    try:
+        _gs, _gst = pipeline.score_gamma(float(last.get('spx', np.nan)), float(last['zero_gamma']))
+        last['gamma_score'] = _gs
+        last['gamma_state'] = _gst
+        _ps, _pst = pipeline.score_pc(float(last.get('pc_ratio', np.nan)), float(last.get('pc_sma10', np.nan)))
+        last['pc_score'] = _ps
+        last['pc_state'] = _pst
+        # Recompute weighted mrs_score estimate
+        _wts = pipeline.COMPONENT_WEIGHTS
+        _sc_map = {
+            'vix': 'vix_score', 'ext': 'ext_score', 'mom': 'mom_score',
+            'adl': 'adl_score', 'b20': 'b20_score', 'pc': 'pc_score',
+            'skew': 'skew_score', 'gamma': 'gamma_score', 'vol': 'vol_score',
+        }
+        _wsum = sum(
+            float(last.get(sc, 0) or 0) * _wts[k]
+            for k, sc in _sc_map.items()
+            if not np.isnan(float(last.get(sc, 0) or 0))
+        )
+        last['mrs_score'] = round(_wsum, 2)
+    except Exception:
+        pass
+    _preview_active = True
 
 # ── Custom CSS ─────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -417,7 +461,7 @@ with col_sq:
         {sq_lbl}
       </span>
       <div style="font-size:0.78rem;color:#9ca3af;margin-top:8px;line-height:1.5;">
-        {sq_desc[:220]}{'…' if len(sq_desc) > 220 else ''}
+        {sq_desc}
       </div>
     </div>
     """, unsafe_allow_html=True)
@@ -445,6 +489,14 @@ st.divider()
 left, right = st.columns([1.4, 1], gap='large')
 
 with left:
+    if _preview_active:
+        st.markdown(
+            '<div style="background:rgba(161,98,7,0.15);border:1px solid #a16207;border-radius:6px;'
+            'padding:7px 12px;margin-bottom:8px;font-size:0.78rem;color:#fbbf24;">'
+            '📥 Showing today\'s submitted inputs — CSV update pending (~90 sec, then Refresh Data)'
+            '</div>',
+            unsafe_allow_html=True
+        )
     st.markdown('<div class="section-header">Component Breakdown</div>', unsafe_allow_html=True)
     COMP_DEF = [
         ('VIX',        'vix_phi',  'vix_score',  'vix_state',   'vix'),
@@ -561,13 +613,13 @@ with right:
             dist_pct = (spx_v - zg_v) / spx_v * 100
             if dist_pct > 1:
                 gcls = 'safe-row'
-                gtxt = f'🟢 SPX {spx_v:,.0f} is {dist_pct:.1f}% ABOVE zero-gamma ({zg_v:,.0f}). Dealers short gamma — dampening environment.'
+                gtxt = f'🟢 SPX {spx_v:,.0f} is {dist_pct:.1f}% ABOVE zero-gamma ({zg_v:,.0f}). Dealers long gamma — dampening environment.'
             elif dist_pct > -1:
                 gcls = 'neutral-row'
                 gtxt = f'🟡 SPX {spx_v:,.0f} is NEAR zero-gamma ({zg_v:,.0f}, {dist_pct:+.1f}%). Transition zone — regime could flip.'
             else:
                 gcls = 'hazard-row'
-                gtxt = f'🔴 SPX {spx_v:,.0f} is {abs(dist_pct):.1f}% BELOW zero-gamma ({zg_v:,.0f}). Dealers long gamma — amplifying moves.'
+                gtxt = f'🔴 SPX {spx_v:,.0f} is {abs(dist_pct):.1f}% BELOW zero-gamma ({zg_v:,.0f}). Dealers short gamma — amplifying moves.'
             st.markdown(f'<div class="{gcls}">{gtxt}</div>', unsafe_allow_html=True)
         else:
             zg_only = float(last.get('zero_gamma', np.nan))
@@ -922,7 +974,15 @@ if _sec_df is not None and len(_sec_df) > 0:
         html += '<tr>'
         html += '<td style="' + row_left  + '"><b style="color:#e5e7eb;">' + row['Sector'] + '</b></td>'
         html += '<td style="' + row_style + 'color:#9ca3af;">' + row['ETF'] + '</td>'
-        html += '<td style="' + row_style + '">' + f"${row['Close']:,.2f}" + '</td>'
+        _dc = row['DailyChg']
+        _dc_sign = '+' if _dc >= 0 else ''
+        _dc_color = '#22c55e' if _dc >= 0 else '#f87171'
+        html += (
+            '<td style="' + row_style + 'white-space:nowrap;">'
+            + f"${row['Close']:,.2f}"
+            + f'<br><span style="font-size:0.70rem;color:{_dc_color};">{_dc_sign}{_dc*100:.2f}%</span>'
+            + '</td>'
+        )
         html += '<td style="' + row_style + 'color:' + _cell_color(row['YTD'])  + ';">' + _pct(row['YTD'])   + '</td>'
         html += '<td style="' + row_style + 'color:' + _cell_color(row['1Y'])   + ';">' + _pct(row['1Y'])    + '</td>'
         html += '<td style="' + row_style + 'color:' + _cell_color(row['6M'])   + ';">' + _pct(row['6M'])    + '</td>'
@@ -950,7 +1010,7 @@ else:
 last_upd = hist['date'].max()
 st.markdown(
     '<div style="text-align:center;font-size:0.72rem;color:#4b5563;margin-top:24px;">'
-    'Epistruct &mdash; Invariant Research &nbsp;|&nbsp;'
+    'Epistruct &nbsp;|&nbsp;'
     'Data through ' + last_upd.strftime('%B %d, %Y') + ' &nbsp;|&nbsp;'
     'Updates daily at 4:30 PM ET'
     '</div>',
