@@ -1111,11 +1111,13 @@ if _scan_df is not None and len(_scan_df) > 0:
     if _sector_filter != 'All sectors':
         _display_df = _display_df[_display_df['sector'] == _sector_filter]
 
-    if _atr_only:
+    if _atr_only and 'atr_compressed' in _display_df.columns:
         _display_df = _display_df[_display_df['atr_compressed'] == True]
 
-    if _squeeze_only:
+    if _squeeze_only and 'bb_kc_squeeze' in _display_df.columns:
         _display_df = _display_df[_display_df['bb_kc_squeeze'] == True]
+    elif _squeeze_only:
+        st.warning('Squeeze data not available — re-run the scanner to update the CSV.', icon='⚡')
 
     _display_df = _display_df.sort_values('rs_composite', ascending=False).reset_index(drop=True)
 
@@ -1200,7 +1202,7 @@ if _scan_df is not None and len(_scan_df) > 0:
             sect_score   = _sector_score_map.get(display_sect)
             sect_trend   = _sector_trend_map.get(display_sect, 'NEUTRAL')
             if sect_score is not None:
-                sect_score_txt = f'{float(sect_score):+.1f}'
+                sect_score_txt = _sector_composite_label(float(sect_score))
                 sect_score_col = _sc_clr(float(sect_score))
             else:
                 sect_score_txt = '—'
@@ -1233,7 +1235,7 @@ if _scan_df is not None and len(_scan_df) > 0:
             _scan_html += f'<td style="{_rl}"><b style="color:#e5e7eb;">{ticker}</b></td>'
             _scan_html += f'<td style="{_rl}color:#9ca3af;font-size:0.75rem;">{name}</td>'
             _scan_html += f'<td style="{_rl}color:#9ca3af;font-size:0.75rem;">{display_sect}</td>'
-            _scan_html += f'<td style="{_rs}color:{sect_score_col};font-weight:700;">{sect_score_txt}</td>'
+            _scan_html += f'<td style="{_rs}color:{sect_score_col};font-weight:700;font-size:0.72rem;white-space:nowrap;">{sect_score_txt}</td>'
             _scan_html += f'<td style="{_rc}color:{t_col};font-size:0.75rem;font-weight:600;">{t_lbl}</td>'
             _scan_html += f'<td style="{_rs}">{close_txt}</td>'
             _scan_html += f'<td style="{_rs}color:{pct_ath_col};font-weight:600;">{pct_ath_txt}</td>'
