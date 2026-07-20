@@ -475,14 +475,20 @@ def compute_signal_quality(last: dict, hist: pd.DataFrame, ref_date) -> tuple:
     # ── Fragile note ──────────────────────────────────────────────────────────
     fragile_str = (' | FRAGILE: ' + '; '.join(at_risk)) if at_risk else ''
 
-    # ── Gap to +0.5 scoring threshold ─────────────────────────────────────────
-    def _gap_str(phi, threshold=0.70):
+    # ── Gap to breadth confirmation threshold (regime-aware) ──────────────────
+    def _gap_str(phi, is_negative_regime):
         if np.isnan(phi): return None
-        gap = threshold - phi
-        return f'needs +{gap:.3f} Phi to score' if gap > 0 else 'already past scoring threshold'
+        if is_negative_regime:
+            # Negative confirmation: need Phi to DROP below 0.30
+            gap = phi - 0.30
+            return f'needs -{gap:.3f} Phi to confirm selloff (cross below 0.300)' if gap > 0 else 'already at bearish breadth threshold'
+        else:
+            # Positive confirmation: need Phi to RISE above 0.70
+            gap = 0.70 - phi
+            return f'needs +{gap:.3f} Phi to confirm rally (cross above 0.700)' if gap > 0 else 'already at bullish breadth threshold'
 
-    b20_gap = _gap_str(b20_phi)
-    adl_gap = _gap_str(adl_phi)
+    b20_gap = _gap_str(b20_phi, is_neg)
+    adl_gap = _gap_str(adl_phi, is_neg)
 
     # ── Classification ─────────────────────────────────────────────────────────
     if is_neut:
@@ -549,12 +555,17 @@ def compute_signal_quality(last: dict, hist: pd.DataFrame, ref_date) -> tuple:
             gap_parts.append(f'ADL Phi={adl_phi:.3f} ({adl_gap})')
         gap_sentence = '; '.join(gap_parts) + '.' if gap_parts else ''
 
+        breadth_threshold_note = (
+            'Until B20 or ADL Phi drops below 0.300, breadth is not confirming the selloff — treat as positioning signal only.'
+            if is_neg else
+            'Until B20 or ADL Phi crosses 0.700, breadth is not confirming the rally — treat as positioning signal only.'
+        )
         desc = (
             f'Score {score:+.2f} is driven by {non_breadth_str}. '
             f'Breadth is not scoring: {gap_sentence} '
             + (f'Breadth trend: {breadth_trend_str}. ' if breadth_trend_str else '')
-            + f'Until B20 or ADL Phi crosses 0.700, treat this as a positioning signal only. '
-            f'{margin_desc}.{fragile_str}'
+            + breadth_threshold_note + ' '
+            + f'{margin_desc}.{fragile_str}'
         )
 
     return (lbl, desc, col)
