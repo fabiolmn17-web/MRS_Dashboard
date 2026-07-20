@@ -74,6 +74,8 @@ def build_sector_table(closes):
         if len(s) < 63:
             continue
         p = s.iloc[-1]
+        p_prev = s.iloc[-2] if len(s) >= 2 else p
+        daily_chg = (p / p_prev - 1) if p_prev != 0 else 0.0
 
         ytd_base = prev_year[etf].dropna().iloc[-1] if len(prev_year) > 0 and etf in prev_year else s.iloc[0]
 
@@ -100,7 +102,7 @@ def build_sector_table(closes):
         else:           trend = 'NEUTRAL'
 
         rows.append({
-            'Sector': sector, 'ETF': etf, 'Close': p,
+            'Sector': sector, 'ETF': etf, 'Close': p, 'DailyChg': daily_chg,
             'YTD': r_ytd, '1Y': r_1y, '6M': r_6m, '3M': r_3m,
             'RS 1Y': rs_1y, 'RS 6M': rs_6m, 'RS 3M': rs_3m,
             'Score': composite, 'Label': _sector_composite_label(composite),
@@ -417,7 +419,7 @@ with col_sq:
         {sq_lbl}
       </span>
       <div style="font-size:0.78rem;color:#9ca3af;margin-top:8px;line-height:1.5;">
-        {sq_desc[:220]}{'…' if len(sq_desc) > 220 else ''}
+        {sq_desc}
       </div>
     </div>
     """, unsafe_allow_html=True)
@@ -561,13 +563,13 @@ with right:
             dist_pct = (spx_v - zg_v) / spx_v * 100
             if dist_pct > 1:
                 gcls = 'safe-row'
-                gtxt = f'🟢 SPX {spx_v:,.0f} is {dist_pct:.1f}% ABOVE zero-gamma ({zg_v:,.0f}). Dealers short gamma — dampening environment.'
+                gtxt = f'🟢 SPX {spx_v:,.0f} is {dist_pct:.1f}% ABOVE zero-gamma ({zg_v:,.0f}). Dealers long gamma — dampening environment.'
             elif dist_pct > -1:
                 gcls = 'neutral-row'
                 gtxt = f'🟡 SPX {spx_v:,.0f} is NEAR zero-gamma ({zg_v:,.0f}, {dist_pct:+.1f}%). Transition zone — regime could flip.'
             else:
                 gcls = 'hazard-row'
-                gtxt = f'🔴 SPX {spx_v:,.0f} is {abs(dist_pct):.1f}% BELOW zero-gamma ({zg_v:,.0f}). Dealers long gamma — amplifying moves.'
+                gtxt = f'🔴 SPX {spx_v:,.0f} is {abs(dist_pct):.1f}% BELOW zero-gamma ({zg_v:,.0f}). Dealers short gamma — amplifying moves.'
             st.markdown(f'<div class="{gcls}">{gtxt}</div>', unsafe_allow_html=True)
         else:
             zg_only = float(last.get('zero_gamma', np.nan))
@@ -922,7 +924,15 @@ if _sec_df is not None and len(_sec_df) > 0:
         html += '<tr>'
         html += '<td style="' + row_left  + '"><b style="color:#e5e7eb;">' + row['Sector'] + '</b></td>'
         html += '<td style="' + row_style + 'color:#9ca3af;">' + row['ETF'] + '</td>'
-        html += '<td style="' + row_style + '">' + f"${row['Close']:,.2f}" + '</td>'
+        _dc = row['DailyChg']
+        _dc_sign = '+' if _dc >= 0 else ''
+        _dc_color = '#22c55e' if _dc >= 0 else '#f87171'
+        html += (
+            '<td style="' + row_style + 'white-space:nowrap;">'
+            + f"${row['Close']:,.2f}"
+            + f'<br><span style="font-size:0.70rem;color:{_dc_color};">{_dc_sign}{_dc*100:.2f}%</span>'
+            + '</td>'
+        )
         html += '<td style="' + row_style + 'color:' + _cell_color(row['YTD'])  + ';">' + _pct(row['YTD'])   + '</td>'
         html += '<td style="' + row_style + 'color:' + _cell_color(row['1Y'])   + ';">' + _pct(row['1Y'])    + '</td>'
         html += '<td style="' + row_style + 'color:' + _cell_color(row['6M'])   + ';">' + _pct(row['6M'])    + '</td>'
@@ -950,7 +960,7 @@ else:
 last_upd = hist['date'].max()
 st.markdown(
     '<div style="text-align:center;font-size:0.72rem;color:#4b5563;margin-top:24px;">'
-    'Epistruct &mdash; Invariant Research &nbsp;|&nbsp;'
+    'Epistruct &nbsp;|&nbsp;'
     'Data through ' + last_upd.strftime('%B %d, %Y') + ' &nbsp;|&nbsp;'
     'Updates daily at 4:30 PM ET'
     '</div>',
