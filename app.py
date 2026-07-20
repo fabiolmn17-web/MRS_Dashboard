@@ -619,10 +619,10 @@ with right:
         zg_v  = float(last.get('zero_gamma', np.nan))
         if not np.isnan(spx_v) and not np.isnan(zg_v) and zg_v > 0:
             dist_pct = (spx_v - zg_v) / spx_v * 100
-            if dist_pct > 1:
+            if dist_pct > 0.25:
                 gcls = 'safe-row'
                 gtxt = f'🟢 SPX {spx_v:,.0f} is {dist_pct:.1f}% ABOVE zero-gamma ({zg_v:,.0f}). Dealers long gamma — dampening environment.'
-            elif dist_pct > -1:
+            elif dist_pct > -0.25:
                 gcls = 'neutral-row'
                 gtxt = f'🟡 SPX {spx_v:,.0f} is NEAR zero-gamma ({zg_v:,.0f}, {dist_pct:+.1f}%). Transition zone — regime could flip.'
             else:
