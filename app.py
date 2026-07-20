@@ -1081,7 +1081,7 @@ if _scan_df is not None and len(_scan_df) > 0:
         )
 
     # ── Filter controls ────────────────────────────────────────────────────────
-    _sc_col1, _sc_col2, _sc_col3 = st.columns([2, 2, 2])
+    _sc_col1, _sc_col2, _sc_col3, _sc_col4 = st.columns([2, 2, 1, 1])
     with _sc_col1:
         _mode_filter = st.selectbox(
             'Filter',
@@ -1096,7 +1096,9 @@ if _scan_df is not None and len(_scan_df) > 0:
             _sector_options, index=0, key='scanner_sector', label_visibility='collapsed'
         )
     with _sc_col3:
-        _atr_only = st.checkbox('ATR compressed only', value=False, key='scanner_atr')
+        _atr_only = st.checkbox('ATR compressed 🔵', value=False, key='scanner_atr')
+    with _sc_col4:
+        _squeeze_only = st.checkbox('Squeeze ⚡', value=False, key='scanner_squeeze')
 
     # ── Apply filters ──────────────────────────────────────────────────────────
     _display_df = _scan_df[_scan_df['pass_mode'].notna()].copy()
@@ -1111,6 +1113,9 @@ if _scan_df is not None and len(_scan_df) > 0:
 
     if _atr_only:
         _display_df = _display_df[_display_df['atr_compressed'] == True]
+
+    if _squeeze_only:
+        _display_df = _display_df[_display_df['bb_kc_squeeze'] == True]
 
     _display_df = _display_df.sort_values('rs_composite', ascending=False).reset_index(drop=True)
 
