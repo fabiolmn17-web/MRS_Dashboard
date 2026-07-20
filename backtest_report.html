@@ -1,0 +1,1622 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MRS Backtest Report — Epistruct Research</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <style>
+        :root {
+            --bg-dark: #0f0f0f;
+            --bg-card: #1a1a1a;
+            --bg-card-hover: #222;
+            --text-primary: #e5e7eb;
+            --text-secondary: #9ca3af;
+            --text-muted: #6b7280;
+            --accent-green: #22c55e;
+            --accent-red: #ef4444;
+            --accent-yellow: #facc15;
+            --accent-orange: #f97316;
+            --accent-blue: #3b82f6;
+            --border: #2a2a2a;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-dark);
+            color: var(--text-primary);
+            line-height: 1.6;
+            padding: 24px;
+        }
+
+        .container { max-width: 1400px; margin: 0 auto; }
+
+        h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+            color: var(--text-primary);
+        }
+
+        h2 {
+            font-size: 1.4rem;
+            font-weight: 600;
+            margin: 32px 0 16px;
+            color: var(--text-primary);
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 8px;
+        }
+
+        h3 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin: 24px 0 12px;
+            color: var(--text-secondary);
+        }
+
+        .subtitle {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+            margin-bottom: 24px;
+        }
+
+        .card {
+            background: var(--bg-card);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border);
+        }
+
+        .card-header {
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            margin-bottom: 12px;
+        }
+
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+        }
+
+        .metric {
+            background: var(--bg-dark);
+            border-radius: 8px;
+            padding: 16px;
+        }
+
+        .metric-value {
+            font-size: 1.8rem;
+            font-weight: 700;
+            line-height: 1.2;
+        }
+
+        .metric-label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .positive { color: var(--accent-green); }
+        .negative { color: var(--accent-red); }
+        .warning { color: var(--accent-orange); }
+        .neutral { color: var(--text-secondary); }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+
+        th, td {
+            padding: 10px 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            background: var(--bg-dark);
+            color: var(--text-muted);
+            font-weight: 600;
+            font-size: 0.75rem;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        tr:hover { background: var(--bg-card-hover); }
+
+        .tag {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .tag-risk-on { background: rgba(34, 197, 94, 0.2); color: var(--accent-green); }
+        .tag-mild-risk-on { background: rgba(34, 197, 94, 0.1); color: #86efac; }
+        .tag-neutral { background: rgba(107, 114, 128, 0.2); color: var(--text-secondary); }
+        .tag-mild-risk-off { background: rgba(249, 115, 22, 0.2); color: var(--accent-orange); }
+        .tag-risk-off { background: rgba(239, 68, 68, 0.2); color: var(--accent-red); }
+
+        .insight-box {
+            background: rgba(59, 130, 246, 0.1);
+            border-left: 4px solid var(--accent-blue);
+            border-radius: 0 8px 8px 0;
+            padding: 16px 20px;
+            margin: 16px 0;
+        }
+
+        .insight-box.success {
+            background: rgba(34, 197, 94, 0.1);
+            border-left-color: var(--accent-green);
+        }
+
+        .insight-box.warning {
+            background: rgba(249, 115, 22, 0.1);
+            border-left-color: var(--accent-orange);
+        }
+
+        .insight-box.danger {
+            background: rgba(239, 68, 68, 0.1);
+            border-left-color: var(--accent-red);
+        }
+
+        .insight-title {
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .chart-container {
+            background: var(--bg-card);
+            border-radius: 12px;
+            padding: 16px;
+            margin: 16px 0;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+
+        .tab {
+            padding: 8px 16px;
+            background: var(--bg-dark);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            transition: all 0.2s;
+        }
+
+        .tab:hover { background: var(--bg-card-hover); }
+        .tab.active {
+            background: var(--accent-blue);
+            color: white;
+            border-color: var(--accent-blue);
+        }
+
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        .two-col {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 900px) {
+            .two-col { grid-template-columns: 1fr; }
+        }
+
+        .progress-bar {
+            height: 8px;
+            background: var(--bg-dark);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 8px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.3s;
+        }
+
+        .section-divider {
+            border: none;
+            border-top: 1px solid var(--border);
+            margin: 32px 0;
+        }
+
+        .footer {
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            margin-top: 48px;
+            padding-top: 24px;
+            border-top: 1px solid var(--border);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>MRS Backtest Report</h1>
+        <p class="subtitle">
+            Market Regime Score behavior analysis around significant drawdown events<br>
+            Data: Dec 2006 — Jul 2026 |
+            Generated: July 19, 2026
+        </p>
+
+        <h2>Executive Summary</h2>
+        <div class="card">
+            <div class="card-header">Key Findings</div>
+
+            <div class="metric-grid">
+                <div class="metric">
+                    <div class="metric-value">45</div>
+                    <div class="metric-label">total drawdown events analyzed</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-value">60</div>
+                    <div class="metric-label">avg days of warning (10-15% corrections)</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-value warning">-3.5</div>
+                    <div class="metric-label">avg MRS at drawdown troughs</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-value">67%</div>
+                    <div class="metric-label">showed seasonal volume divergence</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="insight-box success">
+            <div class="insight-title">✓ Early Warning Capability</div>
+
+            <p>The MRS provided meaningful early warning for 33% of 10-15% corrections.
+            Leading indicators in order of deterioration: <strong>SKEW, ADL, MOM</strong>.</p>
+
+        </div>
+
+        <div class="insight-box warning">
+            <div class="insight-title">⚠ Seasonal Volume Divergence Pattern</div>
+            <p>Volume divergence (low volume for time of year while price rises) preceded a significant portion of drawdowns.
+            This uses seasonal normalization to avoid false signals during summer/holiday periods.</p>
+        </div>
+
+        <h2>Drawdown Severity Analysis</h2>
+        <p class="subtitle" style="margin-top: -12px;">
+            Events categorized into <strong>mutually exclusive</strong> severity bands — each drawdown appears in only one category.
+        </p>
+        <div class="tabs">
+
+            <div class="tab " onclick="switchTab('5_10pct')">5-10% (Minor Correction)</div>
+
+            <div class="tab active" onclick="switchTab('10_15pct')">10-15% (Correction)</div>
+
+            <div class="tab " onclick="switchTab('15_20pct')">15-20% (Significant Correction)</div>
+
+            <div class="tab " onclick="switchTab('20pctplus')">20%+ (Bear Market)</div>
+
+        </div>
+
+        <div class="tab-content " id="tab-5_10pct">
+            <div class="card">
+                <div class="card-header">5-10% Drawdowns — Minor Correction (n=37)</div>
+                <div class="metric-grid">
+                    <div class="metric">
+                        <div class="metric-value">22%</div>
+                        <div class="metric-label">MRS negative at peak</div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: 21.62162162162162%; background: var(--accent-green);"></div>
+                        </div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value">8%</div>
+                        <div class="metric-label">RISK-OFF at peak</div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: 8.108108108108109%; background: var(--accent-orange);"></div>
+                        </div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value">54d</div>
+                        <div class="metric-label">Avg lead time (60d window)</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value negative">-6.5</div>
+                        <div class="metric-label">Worst MRS at trough</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">Individual Events</div>
+                <div style="overflow-x: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Peak Date</th>
+                                <th>Trough Date</th>
+                                <th>Drawdown</th>
+                                <th>Duration</th>
+                                <th>MRS at Peak</th>
+                                <th>Regime at Peak</th>
+                                <th>MRS at Trough</th>
+                                <th>Lead Time</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+
+                            <tr>
+                                <td>2007-02-20</td>
+                                <td>2007-03-05</td>
+                                <td class="negative">-6.0%</td>
+                                <td>13d</td>
+                                <td class="positive">2.00</td>
+                                <td><span class="tag tag-risk-on">RISK-ON</span></td>
+                                <td class="negative">-3.50</td>
+                                <td>30d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2007-06-04</td>
+                                <td>2007-08-03</td>
+                                <td class="negative">-6.7%</td>
+                                <td>60d</td>
+                                <td class="">0.00</td>
+                                <td><span class="tag tag-neutral">NEUTRAL</span></td>
+                                <td class="negative">-5.50</td>
+                                <td>60d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2007-10-09</td>
+                                <td>2007-11-26</td>
+                                <td class="negative">-9.9%</td>
+                                <td>48d</td>
+                                <td class="negative">-0.50</td>
+                                <td><span class="tag tag-neutral">NEUTRAL</span></td>
+                                <td class="negative">-5.00</td>
+                                <td>60d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2010-01-19</td>
+                                <td>2010-02-08</td>
+                                <td class="negative">-8.0%</td>
+                                <td>20d</td>
+                                <td class="positive">2.50</td>
+                                <td><span class="tag tag-risk-on">RISK-ON</span></td>
+                                <td class="negative">-2.50</td>
+                                <td>55d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2010-04-23</td>
+                                <td>2010-05-07</td>
+                                <td class="negative">-8.7%</td>
+                                <td>14d</td>
+                                <td class="positive">2.50</td>
+                                <td><span class="tag tag-risk-on">RISK-ON</span></td>
+                                <td class="negative">-4.00</td>
+                                <td>59d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2010-05-13</td>
+                                <td>2010-06-07</td>
+                                <td class="negative">-9.1%</td>
+                                <td>25d</td>
+                                <td class="negative">-0.50</td>
+                                <td><span class="tag tag-neutral">NEUTRAL</span></td>
+                                <td class="negative">-4.00</td>
+                                <td>5d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2010-06-17</td>
+                                <td>2010-07-02</td>
+                                <td class="negative">-8.9%</td>
+                                <td>15d</td>
+                                <td class="positive">2.00</td>
+                                <td><span class="tag tag-risk-on">RISK-ON</span></td>
+                                <td class="negative">-2.00</td>
+                                <td>29d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2010-08-09</td>
+                                <td>2010-08-26</td>
+                                <td class="negative">-6.9%</td>
+                                <td>17d</td>
+                                <td class="positive">2.50</td>
+                                <td><span class="tag tag-risk-on">RISK-ON</span></td>
+                                <td class="negative">-3.50</td>
+                                <td>60d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2011-02-18</td>
+                                <td>2011-03-16</td>
+                                <td class="negative">-6.2%</td>
+                                <td>26d</td>
+                                <td class="positive">2.00</td>
+                                <td><span class="tag tag-risk-on">RISK-ON</span></td>
+                                <td class="negative">-3.00</td>
+                                <td>—</td>
+                            </tr>
+
+                            <tr>
+                                <td>2011-04-29</td>
+                                <td>2011-06-24</td>
+                                <td class="negative">-7.1%</td>
+                                <td>56d</td>
+                                <td class="positive">2.00</td>
+                                <td><span class="tag tag-risk-on">RISK-ON</span></td>
+                                <td class="negative">-4.50</td>
+                                <td>32d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2011-10-27</td>
+                                <td>2011-11-01</td>
+                                <td class="negative">-5.2%</td>
+                                <td>5d</td>
+                                <td class="positive">2.00</td>
+                                <td><span class="tag tag-risk-on">RISK-ON</span></td>
+                                <td class="negative">1.00</td>
+                                <td>60d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2011-11-08</td>
+                                <td>2011-11-25</td>
+                                <td class="negative">-9.0%</td>
+                                <td>17d</td>
+                                <td class="positive">1.00</td>
+                                <td><span class="tag tag-mild-risk-on">MILD RISK-ON</span></td>
+                                <td class="negative">-4.00</td>
+                                <td>60d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2012-04-02</td>
+                                <td>2012-06-04</td>
+                                <td class="negative">-9.7%</td>
+                                <td>63d</td>
+                                <td class="positive">2.50</td>
+                                <td><span class="tag tag-risk-on">RISK-ON</span></td>
+                                <td class="negative">-4.50</td>
+                                <td>58d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2012-09-14</td>
+                                <td>2012-11-15</td>
+                                <td class="negative">-7.8%</td>
+                                <td>62d</td>
+                                <td class="positive">0.50</td>
+                                <td><span class="tag tag-mild-risk-on">MILD RISK-ON</span></td>
+                                <td class="negative">-5.00</td>
+                                <td>59d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2013-05-21</td>
+                                <td>2013-06-24</td>
+                                <td class="negative">-6.0%</td>
+                                <td>34d</td>
+                                <td class="positive">1.00</td>
+                                <td><span class="tag tag-mild-risk-on">MILD RISK-ON</span></td>
+                                <td class="negative">-4.50</td>
+                                <td>60d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2013-12-31</td>
+                                <td>2014-02-03</td>
+                                <td class="negative">-5.7%</td>
+                                <td>34d</td>
+                                <td class="positive">3.50</td>
+                                <td><span class="tag tag-risk-on">RISK-ON</span></td>
+                                <td class="negative">-4.00</td>
+                                <td>59d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2014-09-18</td>
+                                <td>2014-10-16</td>
+                                <td class="negative">-7.7%</td>
+                                <td>28d</td>
+                                <td class="positive">1.50</td>
+                                <td><span class="tag tag-risk-on">RISK-ON</span></td>
+                                <td class="negative">-3.00</td>
+                                <td>44d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2015-11-03</td>
+                                <td>2015-12-18</td>
+                                <td class="negative">-5.2%</td>
+                                <td>45d</td>
+                                <td class="positive">1.50</td>
+                                <td><span class="tag tag-risk-on">RISK-ON</span></td>
+                                <td class="negative">-3.50</td>
+                                <td>60d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2016-06-08</td>
+                                <td>2016-06-27</td>
+                                <td class="negative">-6.0%</td>
+                                <td>19d</td>
+                                <td class="positive">0.50</td>
+                                <td><span class="tag tag-mild-risk-on">MILD RISK-ON</span></td>
+                                <td class="negative">-2.00</td>
+                                <td>52d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2017-08-07</td>
+                                <td>2018-12-24</td>
+                                <td class="negative">-5.5%</td>
+                                <td>504d</td>
+                                <td class="positive">2.00</td>
+                                <td><span class="tag tag-risk-on">RISK-ON</span></td>
+                                <td class="negative">-5.50</td>
+                                <td>56d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2019-05-03</td>
+                                <td>2019-06-03</td>
+                                <td class="negative">-6.6%</td>
+                                <td>31d</td>
+                                <td class="negative">-0.50</td>
+                                <td><span class="tag tag-neutral">NEUTRAL</span></td>
+                                <td class="negative">-5.50</td>
+                                <td>60d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2019-07-26</td>
+                                <td>2019-08-05</td>
+                                <td class="negative">-6.0%</td>
+                                <td>10d</td>
+                                <td class="negative">-0.50</td>
+                                <td><span class="tag tag-neutral">NEUTRAL</span></td>
+                                <td class="negative">-6.50</td>
+                                <td>60d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2019-09-12</td>
+                                <td>2020-03-09</td>
+                                <td class="negative">-9.0%</td>
+                                <td>179d</td>
+                                <td class="">0.00</td>
+                                <td><span class="tag tag-neutral">NEUTRAL</span></td>
+                                <td class="negative">-5.50</td>
+                                <td>60d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2020-03-11</td>
+                                <td>2020-03-12</td>
+                                <td class="negative">-9.6%</td>
+                                <td>1d</td>
+                                <td class="negative">-5.50</td>
+                                <td><span class="tag tag-risk-off">RISK-OFF</span></td>
+                                <td class="negative">-5.50</td>
+                                <td>49d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2020-06-08</td>
+                                <td>2020-06-11</td>
+                                <td class="negative">-7.0%</td>
+                                <td>3d</td>
+                                <td class="">0.00</td>
+                                <td><span class="tag tag-neutral">NEUTRAL</span></td>
+                                <td class="negative">-0.50</td>
+                                <td>60d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2020-09-02</td>
+                                <td>2020-09-23</td>
+                                <td class="negative">-9.8%</td>
+                                <td>21d</td>
+                                <td class="positive">1.50</td>
+                                <td><span class="tag tag-risk-on">RISK-ON</span></td>
+                                <td class="negative">-5.00</td>
+                                <td>58d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2021-09-02</td>
+                                <td>2021-10-04</td>
+                                <td class="negative">-5.4%</td>
+                                <td>32d</td>
+                                <td class="positive">2.00</td>
+                                <td><span class="tag tag-risk-on">RISK-ON</span></td>
+                                <td class="negative">-4.00</td>
+                                <td>53d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2022-01-03</td>
+                                <td>2022-01-27</td>
+                                <td class="negative">-9.7%</td>
+                                <td>24d</td>
+                                <td class="positive">3.00</td>
+                                <td><span class="tag tag-risk-on">RISK-ON</span></td>
+                                <td class="negative">-4.50</td>
+                                <td>60d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2022-02-09</td>
+                                <td>2022-03-08</td>
+                                <td class="negative">-9.0%</td>
+                                <td>27d</td>
+                                <td class="negative">-2.50</td>
+                                <td><span class="tag tag-risk-off">RISK-OFF</span></td>
+                                <td class="negative">-4.50</td>
+                                <td>51d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2022-08-16</td>
+                                <td>2022-09-06</td>
+                                <td class="negative">-9.1%</td>
+                                <td>21d</td>
+                                <td class="">0.00</td>
+                                <td><span class="tag tag-neutral">NEUTRAL</span></td>
+                                <td class="negative">-5.00</td>
+                                <td>60d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2022-09-14</td>
+                                <td>2022-09-30</td>
+                                <td class="negative">-9.5%</td>
+                                <td>16d</td>
+                                <td class="negative">-5.00</td>
+                                <td><span class="tag tag-risk-off">RISK-OFF</span></td>
+                                <td class="negative">-5.50</td>
+                                <td>60d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2022-11-30</td>
+                                <td>2022-12-28</td>
+                                <td class="negative">-7.6%</td>
+                                <td>28d</td>
+                                <td class="">0.00</td>
+                                <td><span class="tag tag-neutral">NEUTRAL</span></td>
+                                <td class="negative">-4.00</td>
+                                <td>60d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2023-02-02</td>
+                                <td>2023-03-13</td>
+                                <td class="negative">-7.5%</td>
+                                <td>39d</td>
+                                <td class="positive">1.00</td>
+                                <td><span class="tag tag-mild-risk-on">MILD RISK-ON</span></td>
+                                <td class="negative">-2.50</td>
+                                <td>60d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2024-03-27</td>
+                                <td>2024-04-19</td>
+                                <td class="negative">-5.4%</td>
+                                <td>23d</td>
+                                <td class="positive">2.00</td>
+                                <td><span class="tag tag-risk-on">RISK-ON</span></td>
+                                <td class="negative">-3.00</td>
+                                <td>—</td>
+                            </tr>
+
+                            <tr>
+                                <td>2024-07-16</td>
+                                <td>2024-08-05</td>
+                                <td class="negative">-8.4%</td>
+                                <td>20d</td>
+                                <td class="positive">4.00</td>
+                                <td><span class="tag tag-risk-on">RISK-ON</span></td>
+                                <td class="negative">-2.50</td>
+                                <td>60d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2025-10-29</td>
+                                <td>2025-11-20</td>
+                                <td class="negative">-5.1%</td>
+                                <td>22d</td>
+                                <td class="negative">-0.50</td>
+                                <td><span class="tag tag-neutral">NEUTRAL</span></td>
+                                <td class="negative">-4.50</td>
+                                <td>49d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2026-01-27</td>
+                                <td>2026-03-30</td>
+                                <td class="negative">-9.1%</td>
+                                <td>62d</td>
+                                <td class="">0.00</td>
+                                <td><span class="tag tag-neutral">NEUTRAL</span></td>
+                                <td class="negative">-4.50</td>
+                                <td>60d</td>
+                            </tr>
+
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">Signal Quality</div>
+                <div class="two-col">
+                    <div>
+                        <h3>Detection Metrics</h3>
+                        <table>
+                            <tr><td>Total MRS &lt; 0 periods</td><td>257</td></tr>
+                            <tr><td>True Positives (preceded drawdown)</td><td class="positive">110</td></tr>
+                            <tr><td>False Positives (no drawdown followed)</td><td class="warning">147</td></tr>
+                            <tr><td><strong>Precision</strong></td><td><strong>42.8%</strong></td></tr>
+                        </table>
+                    </div>
+                    <div>
+                        <h3>Interpretation</h3>
+                        <p style="color: var(--text-secondary); font-size: 0.9rem;">
+                            Precision of 43% means that when MRS goes negative, there's a
+                            43% chance a 5-10% drawdown follows within 60 days.
+                            Consider using additional confirmation signals.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <div class="tab-content active" id="tab-10_15pct">
+            <div class="card">
+                <div class="card-header">10-15% Drawdowns — Correction (n=3)</div>
+                <div class="metric-grid">
+                    <div class="metric">
+                        <div class="metric-value">33%</div>
+                        <div class="metric-label">MRS negative at peak</div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: 33.33333333333333%; background: var(--accent-green);"></div>
+                        </div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value">33%</div>
+                        <div class="metric-label">RISK-OFF at peak</div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: 33.33333333333333%; background: var(--accent-orange);"></div>
+                        </div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value">60d</div>
+                        <div class="metric-label">Avg lead time (60d window)</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value negative">-4.5</div>
+                        <div class="metric-label">Worst MRS at trough</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">Individual Events</div>
+                <div style="overflow-x: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Peak Date</th>
+                                <th>Trough Date</th>
+                                <th>Drawdown</th>
+                                <th>Duration</th>
+                                <th>MRS at Peak</th>
+                                <th>Regime at Peak</th>
+                                <th>MRS at Trough</th>
+                                <th>Lead Time</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+
+                            <tr>
+                                <td>2014-12-29</td>
+                                <td>2015-08-25</td>
+                                <td class="negative">-10.3%</td>
+                                <td>239d</td>
+                                <td class="positive">1.00</td>
+                                <td><span class="tag tag-mild-risk-on">MILD RISK-ON</span></td>
+                                <td class="negative">-4.50</td>
+                                <td>60d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2015-12-29</td>
+                                <td>2016-02-11</td>
+                                <td class="negative">-11.8%</td>
+                                <td>44d</td>
+                                <td class="negative">-1.50</td>
+                                <td><span class="tag tag-mild-risk-off">MILD RISK-OFF</span></td>
+                                <td class="negative">-4.00</td>
+                                <td>60d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2023-07-31</td>
+                                <td>2023-10-27</td>
+                                <td class="negative">-10.3%</td>
+                                <td>88d</td>
+                                <td class="positive">1.50</td>
+                                <td><span class="tag tag-risk-on">RISK-ON</span></td>
+                                <td class="negative">-2.00</td>
+                                <td>59d</td>
+                            </tr>
+
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">Signal Quality</div>
+                <div class="two-col">
+                    <div>
+                        <h3>Detection Metrics</h3>
+                        <table>
+                            <tr><td>Total MRS &lt; 0 periods</td><td>257</td></tr>
+                            <tr><td>True Positives (preceded drawdown)</td><td class="positive">12</td></tr>
+                            <tr><td>False Positives (no drawdown followed)</td><td class="warning">245</td></tr>
+                            <tr><td><strong>Precision</strong></td><td><strong>4.7%</strong></td></tr>
+                        </table>
+                    </div>
+                    <div>
+                        <h3>Interpretation</h3>
+                        <p style="color: var(--text-secondary); font-size: 0.9rem;">
+                            Precision of 5% means that when MRS goes negative, there's a
+                            5% chance a 10-15% drawdown follows within 60 days.
+                            Consider using additional confirmation signals.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <div class="tab-content " id="tab-15_20pct">
+            <div class="card">
+                <div class="card-header">15-20% Drawdowns — Significant Correction (n=3)</div>
+                <div class="metric-grid">
+                    <div class="metric">
+                        <div class="metric-value">33%</div>
+                        <div class="metric-label">MRS negative at peak</div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: 33.33333333333333%; background: var(--accent-green);"></div>
+                        </div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value">33%</div>
+                        <div class="metric-label">RISK-OFF at peak</div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: 33.33333333333333%; background: var(--accent-orange);"></div>
+                        </div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value">43d</div>
+                        <div class="metric-label">Avg lead time (60d window)</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value negative">-5.5</div>
+                        <div class="metric-label">Worst MRS at trough</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">Individual Events</div>
+                <div style="overflow-x: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Peak Date</th>
+                                <th>Trough Date</th>
+                                <th>Drawdown</th>
+                                <th>Duration</th>
+                                <th>MRS at Peak</th>
+                                <th>Regime at Peak</th>
+                                <th>MRS at Trough</th>
+                                <th>Lead Time</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+
+                            <tr>
+                                <td>2007-12-10</td>
+                                <td>2008-03-10</td>
+                                <td class="negative">-15.8%</td>
+                                <td>91d</td>
+                                <td class="negative">-1.50</td>
+                                <td><span class="tag tag-mild-risk-off">MILD RISK-OFF</span></td>
+                                <td class="negative">-4.50</td>
+                                <td>60d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2011-07-07</td>
+                                <td>2011-10-03</td>
+                                <td class="negative">-18.8%</td>
+                                <td>88d</td>
+                                <td class="positive">2.00</td>
+                                <td><span class="tag tag-risk-on">RISK-ON</span></td>
+                                <td class="negative">-5.50</td>
+                                <td>23d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2024-12-06</td>
+                                <td>2025-04-08</td>
+                                <td class="negative">-18.3%</td>
+                                <td>123d</td>
+                                <td class="positive">3.00</td>
+                                <td><span class="tag tag-risk-on">RISK-ON</span></td>
+                                <td class="negative">-4.00</td>
+                                <td>45d</td>
+                            </tr>
+
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">Signal Quality</div>
+                <div class="two-col">
+                    <div>
+                        <h3>Detection Metrics</h3>
+                        <table>
+                            <tr><td>Total MRS &lt; 0 periods</td><td>257</td></tr>
+                            <tr><td>True Positives (preceded drawdown)</td><td class="positive">7</td></tr>
+                            <tr><td>False Positives (no drawdown followed)</td><td class="warning">250</td></tr>
+                            <tr><td><strong>Precision</strong></td><td><strong>2.7%</strong></td></tr>
+                        </table>
+                    </div>
+                    <div>
+                        <h3>Interpretation</h3>
+                        <p style="color: var(--text-secondary); font-size: 0.9rem;">
+                            Precision of 3% means that when MRS goes negative, there's a
+                            3% chance a 15-20% drawdown follows within 60 days.
+                            Consider using additional confirmation signals.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <div class="tab-content " id="tab-20pctplus">
+            <div class="card">
+                <div class="card-header">20%+ Drawdowns — Bear Market (n=2)</div>
+                <div class="metric-grid">
+                    <div class="metric">
+                        <div class="metric-value">0%</div>
+                        <div class="metric-label">MRS negative at peak</div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: 0.0%; background: var(--accent-green);"></div>
+                        </div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value">0%</div>
+                        <div class="metric-label">RISK-OFF at peak</div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: 0.0%; background: var(--accent-orange);"></div>
+                        </div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value">58d</div>
+                        <div class="metric-label">Avg lead time (60d window)</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value negative">-5.5</div>
+                        <div class="metric-label">Worst MRS at trough</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">Individual Events</div>
+                <div style="overflow-x: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Peak Date</th>
+                                <th>Trough Date</th>
+                                <th>Drawdown</th>
+                                <th>Duration</th>
+                                <th>MRS at Peak</th>
+                                <th>Regime at Peak</th>
+                                <th>MRS at Trough</th>
+                                <th>Lead Time</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+
+                            <tr>
+                                <td>2008-05-19</td>
+                                <td>2009-03-09</td>
+                                <td class="negative">-52.4%</td>
+                                <td>294d</td>
+                                <td class="positive">0.50</td>
+                                <td><span class="tag tag-mild-risk-on">MILD RISK-ON</span></td>
+                                <td class="negative">-5.50</td>
+                                <td>60d</td>
+                            </tr>
+
+                            <tr>
+                                <td>2022-03-29</td>
+                                <td>2022-06-17</td>
+                                <td class="negative">-20.7%</td>
+                                <td>80d</td>
+                                <td class="positive">0.50</td>
+                                <td><span class="tag tag-mild-risk-on">MILD RISK-ON</span></td>
+                                <td class="negative">-5.00</td>
+                                <td>57d</td>
+                            </tr>
+
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">Signal Quality</div>
+                <div class="two-col">
+                    <div>
+                        <h3>Detection Metrics</h3>
+                        <table>
+                            <tr><td>Total MRS &lt; 0 periods</td><td>257</td></tr>
+                            <tr><td>True Positives (preceded drawdown)</td><td class="positive">7</td></tr>
+                            <tr><td>False Positives (no drawdown followed)</td><td class="warning">250</td></tr>
+                            <tr><td><strong>Precision</strong></td><td><strong>2.7%</strong></td></tr>
+                        </table>
+                    </div>
+                    <div>
+                        <h3>Interpretation</h3>
+                        <p style="color: var(--text-secondary); font-size: 0.9rem;">
+                            Precision of 3% means that when MRS goes negative, there's a
+                            3% chance a 20%+ drawdown follows within 60 days.
+                            Consider using additional confirmation signals.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <h2>Component Analysis</h2>
+        <div class="card">
+            <div class="card-header">Component Leading Indicators (10-15% Corrections)</div>
+            <p style="color: var(--text-secondary); margin-bottom: 16px;">
+                Average days each component turned negative before peak. Higher = earlier warning.
+            </p>
+
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+
+                <div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                        <span style="font-weight: 600;">SKEW</span>
+                        <span style="color: var(--text-muted);">68 days</span>
+                    </div>
+                    <div class="progress-bar" style="height: 12px;">
+                        <div class="progress-fill" style="width: 100.0%; background: var(--accent-blue);"></div>
+                    </div>
+                </div>
+
+                <div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                        <span style="font-weight: 600;">ADL</span>
+                        <span style="color: var(--text-muted);">62 days</span>
+                    </div>
+                    <div class="progress-bar" style="height: 12px;">
+                        <div class="progress-fill" style="width: 90.17595307917888%; background: var(--accent-blue);"></div>
+                    </div>
+                </div>
+
+                <div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                        <span style="font-weight: 600;">MOM</span>
+                        <span style="color: var(--text-muted);">56 days</span>
+                    </div>
+                    <div class="progress-bar" style="height: 12px;">
+                        <div class="progress-fill" style="width: 82.84457478005865%; background: var(--accent-blue);"></div>
+                    </div>
+                </div>
+
+                <div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                        <span style="font-weight: 600;">EXT</span>
+                        <span style="color: var(--text-muted);">56 days</span>
+                    </div>
+                    <div class="progress-bar" style="height: 12px;">
+                        <div class="progress-fill" style="width: 82.32090490155007%; background: var(--accent-blue);"></div>
+                    </div>
+                </div>
+
+                <div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                        <span style="font-weight: 600;">B20</span>
+                        <span style="color: var(--text-muted);">56 days</span>
+                    </div>
+                    <div class="progress-bar" style="height: 12px;">
+                        <div class="progress-fill" style="width: 81.3782991202346%; background: var(--accent-blue);"></div>
+                    </div>
+                </div>
+
+                <div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                        <span style="font-weight: 600;">VIX</span>
+                        <span style="color: var(--text-muted);">52 days</span>
+                    </div>
+                    <div class="progress-bar" style="height: 12px;">
+                        <div class="progress-fill" style="width: 76.0019550342131%; background: var(--accent-blue);"></div>
+                    </div>
+                </div>
+
+                <div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                        <span style="font-weight: 600;">PC</span>
+                        <span style="color: var(--text-muted);">10 days</span>
+                    </div>
+                    <div class="progress-bar" style="height: 12px;">
+                        <div class="progress-fill" style="width: 14.662756598240467%; background: var(--accent-blue);"></div>
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+
+        <div class="two-col">
+            <div class="card">
+                <div class="card-header">Component Scores at Peak (avg)</div>
+
+                <table>
+                    <thead><tr><th>Component</th><th>Avg Score</th><th>% Negative</th></tr></thead>
+                    <tbody>
+
+                        <tr>
+                            <td>VIX</td>
+                            <td class="positive">0.17</td>
+                            <td>33%</td>
+                        </tr>
+
+                        <tr>
+                            <td>EXT</td>
+                            <td class="negative">-0.17</td>
+                            <td>33%</td>
+                        </tr>
+
+                        <tr>
+                            <td>MOM</td>
+                            <td class="negative">-0.33</td>
+                            <td>33%</td>
+                        </tr>
+
+                        <tr>
+                            <td>ADL</td>
+                            <td class="">0.00</td>
+                            <td>0%</td>
+                        </tr>
+
+                        <tr>
+                            <td>B20</td>
+                            <td class="positive">0.17</td>
+                            <td>0%</td>
+                        </tr>
+
+                        <tr>
+                            <td>PC</td>
+                            <td class="">0.00</td>
+                            <td>0%</td>
+                        </tr>
+
+                        <tr>
+                            <td>SKEW</td>
+                            <td class="positive">0.50</td>
+                            <td>0%</td>
+                        </tr>
+
+                    </tbody>
+                </table>
+
+            </div>
+            <div class="card">
+                <div class="card-header">Component Scores at Trough (avg)</div>
+
+                <table>
+                    <thead><tr><th>Component</th><th>Avg Score</th><th>Min Score</th></tr></thead>
+                    <tbody>
+
+                        <tr>
+                            <td>VIX</td>
+                            <td class="negative">-1.00</td>
+                            <td class="negative">-1.5</td>
+                        </tr>
+
+                        <tr>
+                            <td>EXT</td>
+                            <td class="negative">-0.50</td>
+                            <td class="negative">-0.5</td>
+                        </tr>
+
+                        <tr>
+                            <td>MOM</td>
+                            <td class="negative">-1.00</td>
+                            <td class="negative">-1.0</td>
+                        </tr>
+
+                        <tr>
+                            <td>ADL</td>
+                            <td class="negative">-1.00</td>
+                            <td class="negative">-1.0</td>
+                        </tr>
+
+                        <tr>
+                            <td>B20</td>
+                            <td class="negative">-0.50</td>
+                            <td class="negative">-0.5</td>
+                        </tr>
+
+                        <tr>
+                            <td>PC</td>
+                            <td class="positive">0.50</td>
+                            <td class="negative">0.0</td>
+                        </tr>
+
+                        <tr>
+                            <td>SKEW</td>
+                            <td class="">0.00</td>
+                            <td class="negative">0.0</td>
+                        </tr>
+
+                    </tbody>
+                </table>
+
+            </div>
+        </div>
+
+        <h2>Recovery Analysis (Buy-Side Signals)</h2>
+        <div class="card">
+            <div class="card-header">Bottom Detection & Recovery Timing</div>
+            <p style="color: var(--text-secondary); margin-bottom: 16px;">
+                <strong>Bottom Definition:</strong> Trough = lowest price before a 10% rebound or 50% retracement of drawdown.
+                Analysis window: 60 days after trough.
+            </p>
+
+            <div class="metric-grid">
+                <div class="metric">
+                    <div class="metric-value">14d</div>
+                    <div class="metric-label">Avg days for MRS to turn positive after trough</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-value">8d</div>
+                    <div class="metric-label">Avg days to exit RISK-OFF (MRS &gt; -0.5)</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-value">33%</div>
+                    <div class="metric-label">MRS turned positive before 25% price recovery</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-value">67%</div>
+                    <div class="metric-label">Recoveries confirmed by volume</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">Component Recovery Sequencing</div>
+            <p style="color: var(--text-secondary); margin-bottom: 16px;">
+                Which components recover first at market bottoms? Earlier = better leading indicator for buy signals.
+            </p>
+
+            <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px;">
+
+                <div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                        <span><span style="color: var(--text-muted); font-size: 0.8rem;">1st</span> <strong>PC</strong></span>
+                        <span style="color: var(--text-muted);">7 days to positive</span>
+                    </div>
+                    <div class="progress-bar" style="height: 12px;">
+                        <div class="progress-fill" style="width: 71.17117117117117%; background: var(--accent-green);"></div>
+                    </div>
+                </div>
+
+                <div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                        <span><span style="color: var(--text-muted); font-size: 0.8rem;">2nd</span> <strong>B20</strong></span>
+                        <span style="color: var(--text-muted);">8 days to positive</span>
+                    </div>
+                    <div class="progress-bar" style="height: 12px;">
+                        <div class="progress-fill" style="width: 66.84684684684684%; background: var(--accent-green);"></div>
+                    </div>
+                </div>
+
+                <div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                        <span><span style="color: var(--text-muted); font-size: 0.8rem;">3rd</span> <strong>MOM</strong></span>
+                        <span style="color: var(--text-muted);">12 days to positive</span>
+                    </div>
+                    <div class="progress-bar" style="height: 12px;">
+                        <div class="progress-fill" style="width: 48.108108108108105%; background: var(--accent-blue);"></div>
+                    </div>
+                </div>
+
+                <div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                        <span><span style="color: var(--text-muted); font-size: 0.8rem;">4th</span> <strong>SKEW</strong></span>
+                        <span style="color: var(--text-muted);">12 days to positive</span>
+                    </div>
+                    <div class="progress-bar" style="height: 12px;">
+                        <div class="progress-fill" style="width: 46.66666666666666%; background: var(--accent-blue);"></div>
+                    </div>
+                </div>
+
+                <div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                        <span><span style="color: var(--text-muted); font-size: 0.8rem;">5th</span> <strong>VIX</strong></span>
+                        <span style="color: var(--text-muted);">18 days to positive</span>
+                    </div>
+                    <div class="progress-bar" style="height: 12px;">
+                        <div class="progress-fill" style="width: 20.0%; background: var(--accent-orange);"></div>
+                    </div>
+                </div>
+
+            </div>
+
+            <h3>Times Each Component Recovered First</h3>
+            <div style="display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px;">
+
+                <div style="background: var(--bg-dark); padding: 12px 16px; border-radius: 8px; text-align: center;">
+                    <div style="font-size: 1.4rem; font-weight: 700; color: var(--accent-green);">2</div>
+                    <div style="font-size: 0.8rem; color: var(--text-muted);">PC</div>
+                </div>
+
+                <div style="background: var(--bg-dark); padding: 12px 16px; border-radius: 8px; text-align: center;">
+                    <div style="font-size: 1.4rem; font-weight: 700; color: var(--accent-green);">1</div>
+                    <div style="font-size: 0.8rem; color: var(--text-muted);">SKEW</div>
+                </div>
+
+            </div>
+
+        </div>
+
+        <div class="insight-box success">
+            <div class="insight-title">Recovery Leading Indicators</div>
+            <p><strong>PC</strong> and <strong>B20</strong>
+            are the fastest components to recover at market bottoms, turning positive on average
+            7 and 8 days after the trough respectively.
+            These can serve as early buy signals when combined with capitulation volume.</p>
+        </div>
+
+        <h2>Volume Analysis</h2>
+        <div class="card">
+            <div class="card-header">Volume Behavior Around Drawdowns</div>
+
+            <div class="metric-grid">
+                <div class="metric">
+                    <div class="metric-value">4</div>
+                    <div class="metric-label">Events with volume divergence before peak</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: 133.33333333333331%; background: var(--accent-orange);"></div>
+                    </div>
+                </div>
+                <div class="metric">
+                    <div class="metric-value">1</div>
+                    <div class="metric-label">Events with capitulation volume at trough</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: 33.33333333333333%; background: var(--accent-green);"></div>
+                    </div>
+                </div>
+                <div class="metric">
+                    <div class="metric-value">2.0x</div>
+                    <div class="metric-label">Avg volume ratio at trough (vs 20d avg)</div>
+                </div>
+            </div>
+
+            <div class="insight-box warning" style="margin-top: 16px;">
+                <div class="insight-title">Volume Divergence Signal</div>
+                <p>Volume divergence (declining volume while price rises) preceded a significant portion of drawdowns.
+                This pattern could be integrated into MRS as an additional warning signal.</p>
+            </div>
+
+            <div class="insight-box success" style="margin-top: 16px;">
+                <div class="insight-title">Capitulation Volume Pattern</div>
+                <p>Drawdown troughs typically show elevated volume (capitulation).
+                A volume spike combined with extreme MRS readings could help identify bottoms.</p>
+            </div>
+
+        </div>
+
+        <div class="card">
+            <div class="card-header">Volume During Recovery</div>
+
+            <div class="metric-grid">
+                <div class="metric">
+                    <div class="metric-value positive">67%</div>
+                    <div class="metric-label">Recoveries with higher volume on up days</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-value">-0.76%</div>
+                    <div class="metric-label">Avg daily volume trend during recovery</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-value">-36%</div>
+                    <div class="metric-label">Avg volume change (trough to recovery)</div>
+                </div>
+            </div>
+
+            <p style="color: var(--text-secondary); margin-top: 16px; font-size: 0.9rem;">
+                <strong>Volume confirmation:</strong> Higher average volume on up days vs down days during recovery
+                suggests institutional accumulation and increases confidence in the recovery signal.
+            </p>
+        </div>
+
+        <h2>Analysis Window Comparison</h2>
+        <div class="card">
+            <div class="card-header">Warning Lead Time by Analysis Window</div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Window</th>
+                        <th>% Events Warned</th>
+                        <th>Avg Lead Time</th>
+                        <th>Median Lead Time</th>
+                        <th>Avg MRS Slope</th>
+                    </tr>
+                </thead>
+                <tbody>
+
+                    <tr>
+                        <td>30 days</td>
+                        <td>67%</td>
+                        <td>21d</td>
+                        <td>21d</td>
+                        <td class="negative">-0.056/day</td>
+                    </tr>
+
+                    <tr>
+                        <td>60 days</td>
+                        <td>100%</td>
+                        <td>60d</td>
+                        <td>60d</td>
+                        <td class="positive">0.007/day</td>
+                    </tr>
+
+                    <tr>
+                        <td>90 days</td>
+                        <td>100%</td>
+                        <td>83d</td>
+                        <td>90d</td>
+                        <td class="positive">0.014/day</td>
+                    </tr>
+
+                </tbody>
+            </table>
+        </div>
+
+        <h2>Actionable Insights for MRS v2</h2>
+        <div class="card">
+            <div class="card-header">Recommendations</div>
+
+            <h3>1. Leading Indicator Enhancement</h3>
+
+            <div class="insight-box">
+                <p><strong>Weight leading components higher:</strong> SKEW and ADL
+                provide the earliest warnings. Consider increasing their weight in the composite score or creating a
+                separate "early warning" sub-score.</p>
+            </div>
+
+            <h3>2. Volume Integration</h3>
+            <div class="insight-box">
+                <p><strong>Add volume divergence indicator:</strong> Track 20-day volume trend vs price trend.
+                When price makes new highs but volume is declining, flag as distribution warning.
+                Consider adding a Volume Divergence Score (-0.5 when diverging).</p>
+            </div>
+
+            <h3>3. Capitulation Detection</h3>
+            <div class="insight-box success">
+                <p><strong>Add capitulation signal for bottom detection:</strong> When volume exceeds 2x the 20-day average
+                AND VIX is in Stress state AND MRS is in RISK-OFF territory, flag as potential capitulation.
+                This could improve recovery timing.</p>
+            </div>
+
+            <h3>4. Regime Transition Alerts</h3>
+            <div class="insight-box warning">
+                <p><strong>Track regime transition velocity:</strong> Rapid transitions from RISK-ON to NEUTRAL
+                (within 5-10 days) often precede larger drawdowns. Add an alert when regime changes faster than
+                historical average.</p>
+            </div>
+
+            <h3>5. Recovery Signal Enhancement</h3>
+
+            <div class="insight-box success">
+                <p><strong>Add Buy-Side Signals:</strong> PC is the fastest component
+                to recover at bottoms (7 days avg). Consider adding a "Recovery Signal"
+                when PC turns positive while MRS is still in RISK-OFF territory.
+                Combine with capitulation volume for higher confidence.</p>
+            </div>
+
+            <h3>6. Threshold Optimization</h3>
+
+            <div class="insight-box">
+                <p><strong>Consider using MRS &lt; -0.5 as primary warning:</strong> The 5-10% band
+                shows the highest precision (43%). Using MILD RISK-OFF or worse as the warning
+                level may reduce false positives while maintaining detection rate.</p>
+            </div>
+
+            <h3>7. Bottom Detection Framework</h3>
+            <div class="insight-box success">
+                <p><strong>Implement "Capitulation + Recovery" signal:</strong> Define a bottom signal as:
+                <ul style="margin-top: 8px; padding-left: 20px;">
+                    <li>MRS in RISK-OFF territory (≤ -1.5)</li>
+                    <li>Volume spike > 2x 20-day average</li>
+                    <li>VIX in Stress state (Phi > 0.80)</li>
+                    <li>Leading component (PC) turns positive</li>
+                </ul>
+                This multi-factor approach can help identify actionable bottoms.</p>
+            </div>
+        </div>
+
+        <h2>Data Quality & Methodology</h2>
+        <div class="card">
+            <div class="card-header">Notes</div>
+            <ul style="color: var(--text-secondary); padding-left: 20px;">
+                <li>MRS computed using 756-day (3-year) rolling Phi values</li>
+                <li>Zero Gamma component excluded (no historical data available)</li>
+                <li>Drawdown events require 50% recovery to be confirmed</li>
+                <li>Overlapping events resolved by keeping larger drawdown</li>
+                <li>False positive analysis uses 60-day forward window</li>
+            </ul>
+        </div>
+
+        <div class="footer">
+            <p>Epistruct Research — Invariant Analysis</p>
+            <p>MRS Backtest Framework v1.0</p>
+        </div>
+    </div>
+
+    <script>
+        function switchTab(tabId) {
+            // Hide all tab contents
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+
+            // Show selected tab
+            document.getElementById('tab-' + tabId).classList.add('active');
+            event.target.classList.add('active');
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,221 @@
+# ════════════════════════════════════════════════════════════════════════════════
+# CAN SLIM Stock Scanner Configuration
+# ════════════════════════════════════════════════════════════════════════════════
+# All thresholds are configurable. Modify this file to adjust scan criteria
+# without changing source code.
+
+# ── Scanner Metadata ────────────────────────────────────────────────────────────
+scanner:
+  name: "CAN SLIM Scanner"
+  version: "1.0.0"
+  description: "William O'Neil inspired equity scanner with Strict and Relaxed modes"
+
+# ── Data Provider ───────────────────────────────────────────────────────────────
+# Supported: yfinance, fmp (Financial Modeling Prep), polygon
+# API keys should be in environment variables:
+#   - FMP_API_KEY for Financial Modeling Prep
+#   - POLYGON_API_KEY for Polygon.io
+data_provider:
+  primary: "yfinance"
+  fallback: null
+  cache_enabled: true
+  cache_ttl_hours: 24
+  rate_limit_requests_per_minute: 100
+  retry_attempts: 3
+  retry_delay_seconds: 2
+
+# ── Universe Settings ───────────────────────────────────────────────────────────
+universe:
+  # Exchanges to include
+  exchanges:
+    - "NYSE"
+    - "NASDAQ"
+    - "AMEX"  # NYSE American
+
+  # Security types to EXCLUDE (auto-filtered)
+  excluded_types:
+    - "ETF"
+    - "ETN"
+    - "Preferred"
+    - "Warrant"
+    - "Unit"
+    - "Closed-End Fund"
+    - "SPAC"  # Pre-merger SPACs
+    - "OTC"
+    - "ADR"   # Optional: set to include ADRs
+
+  # Minimum requirements (set to 0 or null to disable)
+  min_market_cap: null        # No minimum by default
+  min_price: null             # No minimum by default
+
+  # Universe source
+  # Options: "sp500", "sp500_nasdaq100", "russell1000", "russell3000", "custom"
+  source: "russell3000"
+  custom_tickers_file: null   # Path to custom ticker list if source is "custom"
+
+# ── Technical Filters (identical for Strict and Relaxed) ───────────────────────
+technical:
+  # Moving Average Settings
+  sma_periods:
+    short: 50
+    medium: 100  # Used for RS calculation
+    long: 200
+
+  # Trend Requirements
+  price_above_sma50: true
+  sma50_above_sma200: true
+
+  # Distance from All-Time High
+  # Stock passes if: (close / ATH - 1) >= max_distance_from_ath
+  # -0.20 means within 20% of ATH
+  max_distance_from_ath: -0.20
+
+  # ATH Lookback (trading days, null = all available history)
+  ath_lookback_days: null
+
+# ── Liquidity Filter ────────────────────────────────────────────────────────────
+liquidity:
+  min_avg_volume: 500000      # Minimum 500k shares average daily volume
+  volume_lookback_days: 50    # 50-day average
+  use_share_volume: true      # true = share volume, false = dollar volume
+
+# ── Relative Strength Settings ──────────────────────────────────────────────────
+relative_strength:
+  # Benchmark for RS calculation
+  benchmark_ticker: "SPY"
+
+  # SMA period for RS calculation (distance from SMA)
+  sma_period: 100
+
+  # Minimum RS ratio to pass (stock_distance / benchmark_distance)
+  min_rs_ratio: 2.0
+
+  # RS Score thresholds
+  score_thresholds:
+    score_3: 3.0    # RS ratio >= 3.0 gets score 3
+    score_2: 2.0    # RS ratio >= 2.0 gets score 2
+    score_1: 0.0    # RS ratio >= 0.0 gets score 1
+
+  # Division by zero protection
+  # When benchmark is within this % of SMA, use a floor value
+  benchmark_near_sma_threshold: 0.005  # 0.5%
+  benchmark_floor_value: 0.005
+
+# ── Fundamental Filters: STRICT CAN SLIM ────────────────────────────────────────
+strict_canslim:
+  # C - Current Quarterly EPS
+  quarterly_eps_growth_min: 0.25          # 25% YoY growth
+  require_prior_quarter_eps_growth: true  # Previous quarter also 25%+
+  prior_quarter_eps_growth_min: 0.25
+
+  # A - Annual EPS
+  annual_eps_growth_years: 3              # Look back 3 fiscal years
+  annual_eps_growth_min: 0.25             # Each year must show 25%+ growth
+  annual_eps_cagr_min: 0.25               # 3-year CAGR must be 25%+
+
+  # Revenue
+  quarterly_revenue_growth_min: 0.25      # 25% YoY growth
+
+  # Quality
+  roe_min: 0.17                           # 17% minimum ROE
+  require_positive_ttm_income: true       # TTM net income must be positive
+
+  # Missing data handling
+  fail_on_missing_data: true              # Fail if any required metric is missing
+
+# ── Fundamental Filters: RELAXED CAN SLIM ───────────────────────────────────────
+relaxed_canslim:
+  # C - Current Quarterly EPS (more flexible)
+  quarterly_eps_growth_min: 0.20          # 20% YoY growth
+  require_prior_quarter_eps_growth: false # Prior quarter not required
+  require_one_of_two_quarters_positive: true  # At least 1 of last 2 quarters positive
+
+  # A - Annual EPS (more flexible)
+  annual_eps_growth_years: 3
+  # Either CAGR OR 2-of-3 years positive
+  annual_eps_cagr_min: 0.15               # 15% CAGR OR...
+  annual_eps_positive_years_min: 2        # ...2 of 3 years positive growth
+  require_latest_annual_eps_positive: true
+
+  # Revenue
+  quarterly_revenue_growth_min: 0.15      # 15% YoY growth
+
+  # Quality
+  roe_min: 0.15                           # 15% minimum ROE
+  require_positive_ttm_income: true
+
+  # Missing data handling
+  fail_on_missing_data: false             # Allow partial data
+
+# ── Turnaround Mode (optional, disabled by default) ─────────────────────────────
+turnaround:
+  enabled: false
+
+  # A turnaround candidate must meet ALL of:
+  requirements:
+    latest_quarterly_eps_positive: true   # Current quarter EPS > 0
+    prior_year_quarter_eps_nonpositive: true  # Same quarter last year <= 0
+    quarterly_revenue_growth_min: 0.15    # Revenue still growing 15%+
+    positive_ttm_income: true             # TTM profitable
+
+  # Label turnaround candidates distinctly
+  label: "TURNAROUND"
+
+# ── Pattern Detection (bonus layer) ─────────────────────────────────────────────
+patterns:
+  enabled: true
+
+  # ATR Compression (Tight Base)
+  atr_compression:
+    enabled: true
+    lookback_days: 20           # Look for compression over 20 days
+    atr_period: 14              # Standard ATR period
+    compression_threshold: 0.5  # ATR must be <= 50% of its 50-day average
+
+  # Higher Lows (Swing Point Detection)
+  higher_lows:
+    enabled: true
+    min_swing_points: 3         # Need at least 3 higher lows
+    lookback_days: 60           # Look back 60 days for swing points
+    swing_threshold: 0.02       # 2% minimum move to qualify as swing
+
+# ── Quality Indicators (calculated but not required) ────────────────────────────
+quality_indicators:
+  calculate_eps_acceleration: true
+  calculate_revenue_acceleration: true
+  calculate_margin_expansion: true
+  calculate_share_dilution: true
+  calculate_operating_cash_flow: true
+  calculate_institutional_ownership: true
+
+# ── Output Settings ─────────────────────────────────────────────────────────────
+output:
+  directory: "output"
+
+  # File names
+  all_scanned_file: "scan_all_stocks.csv"
+  strict_candidates_file: "scan_strict_canslim.csv"
+  relaxed_candidates_file: "scan_relaxed_canslim.csv"
+  rejected_file: "scan_rejected.csv"
+  summary_file: "scan_summary.json"
+
+  # Sorting (for passing stocks)
+  sort_order:
+    - field: "rs_score"
+      ascending: false
+    - field: "rs_ratio"
+      ascending: false
+    - field: "quarterly_eps_growth"
+      ascending: false
+    - field: "quarterly_revenue_growth"
+      ascending: false
+
+  # Pattern bonus: stocks with patterns appear at top of their RS tier
+  pattern_boost: true
+
+# ── Logging ─────────────────────────────────────────────────────────────────────
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  file: "scanner.log"
+  console: true
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
