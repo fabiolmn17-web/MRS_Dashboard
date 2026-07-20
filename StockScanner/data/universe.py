@@ -45,34 +45,140 @@ class UniverseManager:
         self._tickers: List[str] = []
         self._ticker_info: Dict[str, Dict] = {}
 
+    # ── Static fallback ────────────────────────────────────────────────────────
+    # Core S&P 500 members — used when all network sources fail.
+    # Update this list when significant composition changes occur.
+    _SP500_STATIC: List[str] = [
+        # Tech
+        "AAPL","MSFT","NVDA","AVGO","ORCL","AMD","QCOM","TXN","INTC","CSCO",
+        "ADBE","CRM","INTU","AMAT","LRCX","MU","KLAC","SNPS","CDNS","PANW",
+        "FTNT","CRWD","ANET","ANSS","MPWR","MCHP","ON","WDC","STX","NTAP",
+        "HPQ","HPE","DELL","GDDY","PTC","TYL","JKHY","EPAM","CTSH","ACN",
+        "IBM","FSLR","ENPH","SMCI","SWKS","ZBRA","JNPR","GPN","FLT",
+        # Financials
+        "JPM","BAC","WFC","GS","MS","BLK","C","AXP","V","MA","COF","DFS",
+        "USB","PNC","TFC","SCHW","MCO","SPGI","ICE","CME","CBOE","NDAQ",
+        "FIS","FISERV","PYPL","AIG","MET","PRU","AFL","ALL","CB","TRV",
+        "PGR","HIG","AJG","MMC","AON","L","CINF","GL","BEN","IVZ","TROW",
+        "STT","BK","NTRS","RF","CFG","KEY","HBAN","FITB","MTB","ZION","CMA",
+        # Healthcare
+        "UNH","JNJ","LLY","ABBV","MRK","TMO","ABT","DHR","BSX","SYK","MDT",
+        "ISRG","EW","VRTX","REGN","BIIB","GILD","AMGN","MRNA","ILMN","BMY",
+        "PFE","ZBH","BAX","BDX","IQV","CRL","HOLX","RMD","DXCM","IDXX","MTD",
+        "WAT","A","COO","HSIC","ALGN","TFX","STE","PODD","INCY","CTLT",
+        "MCK","CVS","CI","ELV","HUM","MOH","HCA","CNC","DVA",
+        # Consumer Discretionary
+        "AMZN","TSLA","HD","MCD","SBUX","NKE","LOW","TGT","BKNG","ABNB",
+        "CMG","DRI","YUM","DPZ","HLT","MAR","H","PHM","DHI","LEN","NVR",
+        "TOL","AZO","ORLY","GPC","AN","PAG","KMX","APTV","F","GM","BWA",
+        "LEA","TSCO","TJX","ROST","BBY","RL","PVH","TPR","ETSY","EBAY",
+        # Consumer Staples
+        "WMT","PG","KO","PEP","COST","PM","MO","MDLZ","EL","KHC","CL",
+        "GIS","K","CAG","SJM","MKC","HSY","HRL","BG","CPB","TSN","LW",
+        "SYY","MCK","CAH","ABC","CASY","ACI","SFM",
+        # Energy
+        "XOM","CVX","COP","EOG","SLB","MPC","OXY","PXD","VLO","PSX","HAL",
+        "HES","DVN","FANG","MRO","APA","BKR","CTRA","EQT","AR","MTDR",
+        "NOV","PTEN","CHK","RRC","MGY","SM","NOG","CNX","OVV",
+        # Industrials
+        "GE","HON","RTX","CAT","DE","LMT","UPS","NOC","BA","GD","EMR",
+        "ETN","PH","ROK","ITW","ROP","FAST","GWW","CMI","FDX","TEX","PCAR",
+        "OTIS","CARR","TDG","HEI","AXON","CACI","SAIC","LDOS","L3H","KNX",
+        "WAB","CSX","UNP","NSC","J","CHRW","XPO","JBHT","LSTR","ODFL",
+        "AOS","LII","GNRC","HII","NDSN","WMS",
+        # Materials
+        "LIN","APD","ECL","PPG","SHW","NEM","GOLD","FCX","DOW","DD","LYB",
+        "EMN","CE","ALB","AA","NUE","STLD","RS","CF","MOS","FMC","IFF",
+        "AVY","PKG","SEE","IP","WRK","SON","GEF",
+        # Real Estate
+        "AMT","CCI","PLD","SPG","O","WELL","VTR","DLR","EQIX","EXR","PSA",
+        "AVB","EQR","UDR","CPT","MAA","SBA","SBAC","GLPI","VICI","WY",
+        "CBRE","JLL","CSGP","ARE","BXP","KIM","REG","FRT","NNN","WPC",
+        "STAG","REXR","EGP","FR",
+        # Utilities
+        "NEE","DUK","SO","D","EXC","AEP","SRE","XEL","ES","ED","FE","CNP",
+        "NI","CMS","LNT","PEG","AEE","DTE","WEC","AWK","ETR","PPL","NRG",
+        "CEG","VST",
+        # Communication Services
+        "GOOGL","GOOG","META","NFLX","DIS","CMCSA","VZ","T","TMUS","CHTR",
+        "WBD","PARA","FOX","FOXA","OMC","IPG","NWSA","NWS","NYT","MTCH",
+        "SNAP","PINS","UBER","LYFT","IAC",
+    ]
+
+    _BROWSER_HEADERS: dict = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+    }
+
     def _fetch_sp500(self) -> List[str]:
-        """Fetch S&P 500 constituents from Wikipedia."""
-        url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+        """
+        Fetch S&P 500 constituents.
+        Sources tried in order:
+          1. GitHub datasets CSV (reliable in CI/CD, no bot blocking)
+          2. Wikipedia via requests + browser User-Agent (bypasses 403)
+          3. Static fallback list embedded in this file
+        """
+        # ── Source 1: GitHub datasets ──────────────────────────────────────────
+        gh_url = (
+            "https://raw.githubusercontent.com/datasets/"
+            "s-and-p-500-companies/main/data/constituents.csv"
+        )
         try:
-            tables = pd.read_html(url)
-            df = tables[0]
-            tickers = df["Symbol"].str.replace(".", "-", regex=False).tolist()
-            logger.info(f"Fetched {len(tickers)} S&P 500 tickers")
-            return tickers
+            resp = requests.get(gh_url, headers=self._BROWSER_HEADERS, timeout=20)
+            resp.raise_for_status()
+            df = pd.read_csv(StringIO(resp.text))
+            col = "Symbol" if "Symbol" in df.columns else df.columns[0]
+            tickers = df[col].str.replace(".", "-", regex=False).tolist()
+            if len(tickers) > 400:
+                logger.info(f"Fetched {len(tickers)} S&P 500 tickers from GitHub datasets")
+                return tickers
         except Exception as e:
-            logger.error(f"Failed to fetch S&P 500: {e}")
-            return []
+            logger.warning(f"GitHub datasets fetch failed: {e}")
+
+        # ── Source 2: Wikipedia with browser User-Agent ────────────────────────
+        wiki_url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+        try:
+            resp = requests.get(wiki_url, headers=self._BROWSER_HEADERS, timeout=30)
+            resp.raise_for_status()
+            tables = pd.read_html(StringIO(resp.text))
+            df = tables[0]
+            col = "Symbol" if "Symbol" in df.columns else df.columns[0]
+            tickers = df[col].str.replace(".", "-", regex=False).tolist()
+            if len(tickers) > 400:
+                logger.info(f"Fetched {len(tickers)} S&P 500 tickers from Wikipedia")
+                return tickers
+        except Exception as e:
+            logger.warning(f"Wikipedia S&P 500 fetch failed: {e}")
+
+        # ── Source 3: Static fallback ──────────────────────────────────────────
+        logger.warning(f"Using static S&P 500 list ({len(self._SP500_STATIC)} tickers)")
+        return list(self._SP500_STATIC)
 
     def _fetch_nasdaq100(self) -> List[str]:
-        """Fetch Nasdaq 100 constituents from Wikipedia."""
+        """Fetch Nasdaq 100 — Wikipedia with browser User-Agent."""
         url = "https://en.wikipedia.org/wiki/Nasdaq-100"
         try:
-            tables = pd.read_html(url)
+            resp = requests.get(url, headers=self._BROWSER_HEADERS, timeout=30)
+            resp.raise_for_status()
+            tables = pd.read_html(StringIO(resp.text))
             for table in tables:
-                if "Ticker" in table.columns or "Symbol" in table.columns:
-                    col = "Ticker" if "Ticker" in table.columns else "Symbol"
+                col = None
+                if "Ticker" in table.columns:
+                    col = "Ticker"
+                elif "Symbol" in table.columns:
+                    col = "Symbol"
+                if col and len(table) > 80:
                     tickers = table[col].str.replace(".", "-", regex=False).tolist()
-                    logger.info(f"Fetched {len(tickers)} Nasdaq 100 tickers")
+                    logger.info(f"Fetched {len(tickers)} Nasdaq 100 tickers from Wikipedia")
                     return tickers
-            return []
         except Exception as e:
-            logger.error(f"Failed to fetch Nasdaq 100: {e}")
-            return []
+            logger.warning(f"Nasdaq 100 Wikipedia fetch failed: {e}")
+        return []
 
     def _fetch_russell_from_ishares(self, etf: str = "IWV") -> List[str]:
         """
