@@ -101,23 +101,34 @@ def main():
     # ── Missing business days ─────────────────────────────────────────────────
     today     = pd.Timestamp(datetime.date.today()).normalize()
     yesterday = today - pd.Timedelta(days=1)
-    end_date  = today if env_override else yesterday
 
-    # When env_override is provided, re-process the last business day so
-    # corrected manual inputs (B20, ADL, Zero Gamma) overwrite the existing row.
+    # Get the most recent business day (could be today if weekday, or last Friday if weekend)
+    last_bday = pd.bdate_range(end=today, periods=1)[0]
+
+    # When env_override is provided, we ALWAYS want to update the last business day
+    # with the new manual inputs, even if that row already exists
     if env_override and len(hist) > 0:
-        last_bday = pd.bdate_range(end=today, periods=1)[0]
-        if last_valid == last_bday:
-            print(f'  ENV override: dropping {last_bday.date()} to re-process with new inputs...')
-            hist       = hist[hist['date'] < last_bday].reset_index(drop=True)
-            last_valid = hist['date'].max() if len(hist) > 0 else pd.Timestamp('2000-01-01')
-
-    missing = pd.bdate_range(start=last_valid + pd.Timedelta(days=1), end=end_date)
-
-    if len(missing) == 0:
-        print('  Already up to date — nothing to backfill.')
-        return
-    print(f'  Missing: {[str(d.date()) for d in missing]}')
+        if last_valid >= last_bday:
+            print(f'  ENV override: dropping {last_valid.date()} to re-process with new inputs...')
+            hist       = hist[hist['date'] < last_valid].reset_index(drop=True)
+            # Force re-processing of last_valid
+            missing = [last_valid]
+            print(f'  Will re-process: {[str(d.date()) for d in missing]}')
+        else:
+            # last_valid is before last_bday, so we need to add missing days up to last_bday
+            missing = pd.bdate_range(start=last_valid + pd.Timedelta(days=1), end=last_bday)
+            if len(missing) == 0:
+                print('  Already up to date — nothing to backfill.')
+                return
+            print(f'  Missing: {[str(d.date()) for d in missing]}')
+    else:
+        # No override — just check for missing days
+        end_date = yesterday
+        missing = pd.bdate_range(start=last_valid + pd.Timedelta(days=1), end=end_date)
+        if len(missing) == 0:
+            print('  Already up to date — nothing to backfill.')
+            return
+        print(f'  Missing: {[str(d.date()) for d in missing]}')
 
     # ── Carry-forward base manual inputs ──────────────────────────────────────
     def last_val(col):
