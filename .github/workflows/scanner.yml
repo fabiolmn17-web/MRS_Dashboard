@@ -9,7 +9,7 @@ on:
       universe:
         description: 'Universe: sp500 or sp500_nasdaq100'
         required: false
-        default: 'sp500'
+        default: 'sp500_nasdaq100'
 
 jobs:
   scan:
@@ -34,7 +34,7 @@ jobs:
 
       - name: Run scanner
         env:
-          UNIVERSE: ${{ inputs.universe || 'sp500' }}
+          UNIVERSE: ${{ inputs.universe || 'sp500_nasdaq100' }}
         run: python StockScanner/run_scanner.py
 
       - name: Commit results
