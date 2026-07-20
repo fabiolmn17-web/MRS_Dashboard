@@ -8,6 +8,7 @@ Password-protected. Reads mrs_history.csv and displays:
   • Zero Gamma position
   • 90-day MRS history chart + SPX close panel + VIX state panel
   • S&P 500 Sector Performance & Relative Strength
+  • CAN SLIM Stock Scanner
 """
 import numpy as np
 import pandas as pd
@@ -34,6 +35,23 @@ SECTOR_MAP = {
     'XLRE': 'Real Estate',
     'XLU':  'Utilities',
 }
+
+@st.cache_data(ttl=3600)
+def load_scanner_results():
+    """Load latest scanner results from StockScanner/output/scan_results.csv."""
+    try:
+        csv_path = Path(__file__).parent / 'StockScanner' / 'output' / 'scan_results.csv'
+        if not csv_path.exists():
+            return None, None
+        df = pd.read_csv(csv_path)
+        if df.empty:
+            return None, None
+        scan_date = df['scan_date'].iloc[0] if 'scan_date' in df.columns else 'unknown'
+        return df, scan_date
+    except Exception as e:
+        print(f'[scanner] load error: {e}')
+        return None, None
+
 
 @st.cache_data(ttl=3600)
 def load_sector_data():
@@ -1013,6 +1031,187 @@ if _sec_df is not None and len(_sec_df) > 0:
     st.markdown(html, unsafe_allow_html=True)
 else:
     st.info('Sector data temporarily unavailable.')
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CAN SLIM STOCK SCANNER
+# ══════════════════════════════════════════════════════════════════════════════
+st.divider()
+st.markdown('<div class="section-header">CAN SLIM Stock Scanner</div>', unsafe_allow_html=True)
+
+_scan_df, _scan_date = load_scanner_results()
+
+if _scan_df is not None and len(_scan_df) > 0:
+
+    # ── MRS context banner ─────────────────────────────────────────────────────
+    _scan_mrs = _scan_df['mrs_score'].iloc[0] if 'mrs_score' in _scan_df.columns else None
+    _scan_state = _scan_df['mrs_state'].iloc[0] if 'mrs_state' in _scan_df.columns else None
+    if _scan_mrs is not None and not (isinstance(_scan_mrs, float) and np.isnan(_scan_mrs)):
+        _mrs_color = '#22c55e' if float(_scan_mrs) > 0 else '#f87171'
+        st.markdown(
+            f'<div style="font-size:0.78rem;color:#9ca3af;margin-bottom:6px;">'
+            f'MRS at scan: <span style="color:{_mrs_color};font-weight:700;">'
+            f'{float(_scan_mrs):+.2f} {_scan_state or ""}</span>'
+            f'&nbsp;·&nbsp;Scan date: <b style="color:#e5e7eb;">{_scan_date}</b>'
+            f'&nbsp;·&nbsp;Universe: S&amp;P 500'
+            f'&nbsp;·&nbsp;Updated nightly at 10 PM UTC'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+    # ── Filter controls ────────────────────────────────────────────────────────
+    _sc_col1, _sc_col2, _sc_col3 = st.columns([2, 2, 2])
+    with _sc_col1:
+        _mode_filter = st.selectbox(
+            'Filter',
+            ['All candidates', 'STRICT only', 'RELAXED only'],
+            index=0, key='scanner_mode', label_visibility='collapsed'
+        )
+    with _sc_col2:
+        _sectors = sorted(_scan_df['sector'].dropna().unique().tolist()) if 'sector' in _scan_df.columns else []
+        _sector_options = ['All sectors'] + _sectors
+        _sector_filter = st.selectbox(
+            'Sector',
+            _sector_options, index=0, key='scanner_sector', label_visibility='collapsed'
+        )
+    with _sc_col3:
+        _atr_only = st.checkbox('ATR compressed only', value=False, key='scanner_atr')
+
+    # ── Apply filters ──────────────────────────────────────────────────────────
+    _display_df = _scan_df[_scan_df['pass_mode'].notna()].copy()
+
+    if _mode_filter == 'STRICT only':
+        _display_df = _display_df[_display_df['pass_mode'] == 'STRICT']
+    elif _mode_filter == 'RELAXED only':
+        _display_df = _display_df[_display_df['pass_mode'] == 'RELAXED']
+
+    if _sector_filter != 'All sectors':
+        _display_df = _display_df[_display_df['sector'] == _sector_filter]
+
+    if _atr_only:
+        _display_df = _display_df[_display_df['atr_compressed'] == True]
+
+    _display_df = _display_df.sort_values('rs_composite', ascending=False).reset_index(drop=True)
+
+    if _display_df.empty:
+        st.info('No candidates match the selected filters.')
+    else:
+        def _pct_s(v, dec=1):
+            if v is None or (isinstance(v, float) and np.isnan(v)): return '—'
+            sign = '+' if v > 0 else ''
+            return f'{sign}{v * 100:.{dec}f}%'
+
+        def _cc(v):
+            if v is None or (isinstance(v, float) and np.isnan(v)): return '#6b7280'
+            return '#22c55e' if v > 0 else '#ef4444' if v < 0 else '#6b7280'
+
+        def _sc_clr(v):
+            if v >= 1.0:  return '#22c55e'
+            if v >= 0.5:  return '#86efac'
+            if v <= -1.0: return '#ef4444'
+            if v <= -0.5: return '#f97316'
+            return '#6b7280'
+
+        _hs = 'background:#21262d;color:#9ca3af;font-size:0.72rem;font-weight:600;padding:7px 10px;text-align:right;border-bottom:1px solid #374151;white-space:nowrap;'
+        _hl = _hs.replace('text-align:right', 'text-align:left')
+        _hc = _hs.replace('text-align:right', 'text-align:center')
+        _rs = 'background:#161b22;color:#e5e7eb;font-size:0.80rem;padding:6px 10px;text-align:right;border-bottom:1px solid #1f2937;'
+        _rl = _rs.replace('text-align:right', 'text-align:left')
+        _rc = _rs.replace('text-align:right', 'text-align:center')
+
+        _scan_html  = '<div style="overflow-x:auto;margin-top:8px;">'
+        _scan_html += '<table style="width:100%;border-collapse:collapse;border-radius:8px;overflow:hidden;">'
+        _scan_html += '<thead><tr>'
+        _scan_html += '<th style="' + _hl + '">Ticker</th>'
+        _scan_html += '<th style="' + _hl + '">Name</th>'
+        _scan_html += '<th style="' + _hl + '">Sector</th>'
+        _scan_html += '<th style="' + _hs + '">Close</th>'
+        _scan_html += '<th style="' + _hs + '">RS Score</th>'
+        _scan_html += '<th style="' + _hs + '">RS 1Y</th>'
+        _scan_html += '<th style="' + _hs + '">RS 6M</th>'
+        _scan_html += '<th style="' + _hs + '">RS 3M</th>'
+        _scan_html += '<th style="' + _hs + '">EPS QoQ</th>'
+        _scan_html += '<th style="' + _hs + '">Rev QoQ</th>'
+        _scan_html += '<th style="' + _hs + '">ROE</th>'
+        _scan_html += '<th style="' + _hc + '">ATR Comp</th>'
+        _scan_html += '<th style="' + _hc + '">Near Pivot</th>'
+        _scan_html += '<th style="' + _hc + '">Mode</th>'
+        _scan_html += '</tr></thead><tbody>'
+
+        for _, row in _display_df.iterrows():
+            rs_comp = row.get('rs_composite', 0) or 0
+            sc_color = _sc_clr(float(rs_comp))
+            mode = row.get('pass_mode', '')
+            mode_bg  = 'rgba(34,197,94,0.12)'  if mode == 'STRICT'  else 'rgba(251,191,36,0.10)'
+            mode_col = '#22c55e'                if mode == 'STRICT'  else '#fbbf24'
+
+            eps  = row.get('eps_qtr_yoy')
+            rev  = row.get('rev_qtr_yoy')
+            roe  = row.get('roe')
+            rs1y = row.get('rs_1y')
+            rs6m = row.get('rs_6m')
+            rs3m = row.get('rs_3m')
+
+            # ATR compressed indicator
+            atr_c = bool(row.get('atr_compressed', False))
+            atr_txt = '🔵 TIGHT' if atr_c else '—'
+            atr_col = '#60a5fa' if atr_c else '#4b5563'
+
+            # Near pivot indicator
+            near_p = bool(row.get('near_pivot', False))
+            gap    = row.get('pivot_gap_pct')
+            if near_p and gap is not None and not (isinstance(gap, float) and np.isnan(gap)):
+                sign = '+' if float(gap) >= 0 else ''
+                pivot_txt = f'✅ {sign}{float(gap):.1f}%'
+                pivot_col = '#22c55e' if float(gap) >= 0 else '#fbbf24'
+            else:
+                pivot_txt = '—'
+                pivot_col = '#4b5563'
+
+            name   = str(row.get('name', ''))[:28]
+            sector = str(row.get('sector', ''))[:20]
+            ticker = str(row.get('ticker', ''))
+            close  = row.get('close')
+            close_txt = f'${float(close):,.2f}' if close is not None and not (isinstance(close, float) and np.isnan(close)) else '—'
+
+            _scan_html += '<tr>'
+            _scan_html += f'<td style="{_rl}"><b style="color:#e5e7eb;">{ticker}</b></td>'
+            _scan_html += f'<td style="{_rl}color:#9ca3af;font-size:0.75rem;">{name}</td>'
+            _scan_html += f'<td style="{_rl}color:#9ca3af;font-size:0.75rem;">{sector}</td>'
+            _scan_html += f'<td style="{_rs}">{close_txt}</td>'
+            _scan_html += f'<td style="{_rs}color:{sc_color};font-weight:700;">{float(rs_comp):+.1f}</td>'
+            _scan_html += f'<td style="{_rs}color:{_cc(rs1y)};">{_pct_s(rs1y)}</td>'
+            _scan_html += f'<td style="{_rs}color:{_cc(rs6m)};">{_pct_s(rs6m)}</td>'
+            _scan_html += f'<td style="{_rs}color:{_cc(rs3m)};">{_pct_s(rs3m)}</td>'
+            _scan_html += f'<td style="{_rs}color:{_cc(eps)};">{_pct_s(eps)}</td>'
+            _scan_html += f'<td style="{_rs}color:{_cc(rev)};">{_pct_s(rev)}</td>'
+            _scan_html += f'<td style="{_rs}color:{_cc(roe)};">{_pct_s(roe)}</td>'
+            _scan_html += f'<td style="{_rc}color:{atr_col};font-size:0.75rem;">{atr_txt}</td>'
+            _scan_html += f'<td style="{_rc}color:{pivot_col};font-size:0.75rem;">{pivot_txt}</td>'
+            _scan_html += f'<td style="background:{mode_bg};color:{mode_col};font-weight:700;font-size:0.75rem;text-align:center;padding:6px 10px;border-bottom:1px solid #1f2937;">{mode}</td>'
+            _scan_html += '</tr>'
+
+        _scan_html += '</tbody></table></div>'
+        _scan_html += (
+            '<div style="font-size:0.70rem;color:#6b7280;margin-top:6px;">'
+            'RS = return differential vs SPY (same formula as sector table). '
+            'EPS QoQ/Rev QoQ = YoY growth of most recent quarter. '
+            'STRICT ≥ 25% EPS + Rev, ROE ≥ 17%. RELAXED ≥ 20% EPS, ≥ 15% Rev, ROE ≥ 15%. '
+            'ATR Comp = ATR in bottom 35th pctile vs 50 bars. '
+            'Near Pivot = within 5% of recent swing high.'
+            '</div>'
+        )
+
+        st.markdown(_scan_html, unsafe_allow_html=True)
+
+        st.caption(f'{len(_display_df)} candidates shown · '
+                   f'{int((_scan_df["pass_mode"] == "STRICT").sum())} strict · '
+                   f'{int((_scan_df["pass_mode"] == "RELAXED").sum())} relaxed in universe')
+
+else:
+    st.info(
+        'No scanner results yet. The scanner runs nightly at 10 PM UTC (Mon–Fri) via GitHub Actions. '
+        'You can also trigger it manually under Actions → CAN SLIM Scanner → Run workflow.'
+    )
 
 # ── Footer ─────────────────────────────────────────────────────────────────────
 last_upd = hist['date'].max()

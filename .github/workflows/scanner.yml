@@ -1,0 +1,46 @@
+name: CAN SLIM Scanner
+
+on:
+  schedule:
+    # Run at 10:00 PM UTC Mon-Fri (after US market close + backfill)
+    - cron: '0 22 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      universe:
+        description: 'Universe: sp500 or sp500_nasdaq100'
+        required: false
+        default: 'sp500'
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Configure git credentials
+        run: git config --global url."https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run scanner
+        env:
+          UNIVERSE: ${{ inputs.universe || 'sp500' }}
+        run: python StockScanner/run_scanner.py
+
+      - name: Commit results
+        run: |
+          git config user.name  "MRS Bot"
+          git config user.email "mrs-bot@epistruct.com"
+          git add StockScanner/output/scan_results.csv
+          git diff --staged --quiet || git commit -m "scanner: $(date +%Y-%m-%d)"
+          git push
