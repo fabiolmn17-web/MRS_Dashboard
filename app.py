@@ -205,10 +205,11 @@ with st.sidebar:
     st.markdown('### Daily Inputs')
     st.caption('Enter after market close (4 PM ET). ADL: TradingView value — auto x1000.')
 
-    # Pre-populate with last known values so nothing stale slips through
-    _def_b20 = _last_val('b20_pct',    50.0)
-    _def_adl = _last_val('adl_level',  1_827_000.0) / 1000.0
-    _def_zg  = _last_val('zero_gamma', 7_400.0)
+    # Pre-populate: prefer URL params (survive reload) then CSV last value
+    _qp = st.query_params
+    _def_b20 = float(_qp['b20']) if 'b20' in _qp else _last_val('b20_pct',    50.0)
+    _def_adl = float(_qp['adl']) if 'adl' in _qp else _last_val('adl_level',  1_827_000.0) / 1000.0
+    _def_zg  = float(_qp['zg'])  if 'zg'  in _qp else _last_val('zero_gamma', 7_400.0)
 
     with st.form('daily_inputs_form'):
         inp_b20 = st.number_input('B20% (S5TW)',            min_value=0.0,  max_value=100.0,
@@ -242,7 +243,12 @@ with st.sidebar:
             if not gh_token:
                 st.sidebar.error('GITHUB_TOKEN not in Streamlit secrets.')
             else:
-                # Store for live preview — overlay on last dict below
+                # Persist in URL params (survives reload) + session_state (live preview)
+                st.query_params['b20'] = str(inp_b20)
+                st.query_params['adl'] = str(inp_adl)
+                st.query_params['zg']  = str(inp_zg)
+                if inp_pc > 0:
+                    st.query_params['pc'] = str(inp_pc)
                 st.session_state['pending_b20']  = inp_b20
                 st.session_state['pending_adl']  = inp_adl * 1000  # ×1000 → CSV scale
                 st.session_state['pending_zg']   = inp_zg
@@ -261,6 +267,8 @@ with st.sidebar:
     if st.sidebar.button('Refresh Data', use_container_width=True):
         for _k in ['pending_b20','pending_adl','pending_zg','pending_pc','pending_date']:
             st.session_state.pop(_k, None)
+        for _qk in ['b20','adl','zg','pc']:
+            st.query_params.pop(_qk, None)
         st.cache_data.clear()
         st.rerun()
     st.sidebar.caption('Clears cache and reloads CSV from disk.')
