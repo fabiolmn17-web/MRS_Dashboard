@@ -38,7 +38,9 @@ class TechnicalCalculator:
             'price_above_sma50': False,
             'sma50_above_sma200': False,
             'ath': np.nan,
+            'high_52w': np.nan,
             'pct_from_ath': np.nan,
+            'pct_from_52w_high': np.nan,
             'within_20pct_ath': False,
             'avg_volume_50d': np.nan,
             'volume_ok': False,
@@ -84,11 +86,17 @@ class TechnicalCalculator:
                 return result
         # If we don't have 200 bars, skip the golden cross check (early-stage stock)
 
-        # ATH (all available history)
-        ath = float(close.max())
-        pct_from_ath = (price / ath) - 1.0  # negative value means below ATH
-        result['ath'] = ath
-        result['pct_from_ath'] = pct_from_ath
+        # ATH (all available history) + 52-week high
+        ath      = float(close.max())
+        high_52w = float(close.iloc[-252:].max()) if len(close) >= 252 else ath
+
+        pct_from_ath      = (price / ath)      - 1.0   # ≤ 0, negative = below ATH
+        pct_from_52w_high = (price / high_52w) - 1.0   # ≤ 0, negative = below 52W high
+
+        result['ath']               = ath
+        result['high_52w']          = high_52w
+        result['pct_from_ath']      = pct_from_ath
+        result['pct_from_52w_high'] = pct_from_52w_high
         within_20 = pct_from_ath >= -0.20  # within 20% of ATH
         result['within_20pct_ath'] = within_20
 

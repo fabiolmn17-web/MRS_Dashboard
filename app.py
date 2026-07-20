@@ -22,6 +22,21 @@ from itertools import groupby
 import pipeline
 
 # ── Sector RS — constants & helpers ───────────────────────────────────────────
+# yfinance sector strings → our SECTOR_MAP display names
+YF_TO_SECTOR = {
+    'Technology':             'Technology',
+    'Communication Services': 'Comm Services',
+    'Consumer Cyclical':      'Consumer Disc',
+    'Consumer Defensive':     'Consumer Staples',
+    'Energy':                 'Energy',
+    'Financial Services':     'Financials',
+    'Healthcare':             'Health Care',
+    'Industrials':            'Industrials',
+    'Basic Materials':        'Materials',
+    'Real Estate':            'Real Estate',
+    'Utilities':              'Utilities',
+}
+
 SECTOR_MAP = {
     'XLK':  'Technology',
     'XLC':  'Comm Services',
@@ -1042,6 +1057,13 @@ _scan_df, _scan_date = load_scanner_results()
 
 if _scan_df is not None and len(_scan_df) > 0:
 
+    # ── Sector score / trend lookup (join via yfinance → display name mapping) ──
+    _sector_score_map = {}
+    _sector_trend_map = {}
+    if _sec_df is not None and len(_sec_df) > 0:
+        _sector_score_map = dict(zip(_sec_df['Sector'], _sec_df['Score']))
+        _sector_trend_map = dict(zip(_sec_df['Sector'], _sec_df['Trend']))
+
     # ── MRS context banner ─────────────────────────────────────────────────────
     _scan_mrs = _scan_df['mrs_score'].iloc[0] if 'mrs_score' in _scan_df.columns else None
     _scan_state = _scan_df['mrs_state'].iloc[0] if 'mrs_state' in _scan_df.columns else None
@@ -1052,7 +1074,7 @@ if _scan_df is not None and len(_scan_df) > 0:
             f'MRS at scan: <span style="color:{_mrs_color};font-weight:700;">'
             f'{float(_scan_mrs):+.2f} {_scan_state or ""}</span>'
             f'&nbsp;·&nbsp;Scan date: <b style="color:#e5e7eb;">{_scan_date}</b>'
-            f'&nbsp;·&nbsp;Universe: S&amp;P 500'
+            f'&nbsp;·&nbsp;Universe: S&amp;P 500 + Nasdaq 100'
             f'&nbsp;·&nbsp;Updated nightly at 10 PM UTC'
             f'</div>',
             unsafe_allow_html=True,
@@ -1095,6 +1117,10 @@ if _scan_df is not None and len(_scan_df) > 0:
     if _display_df.empty:
         st.info('No candidates match the selected filters.')
     else:
+        def _isnan(v):
+            try: return np.isnan(float(v))
+            except: return True
+
         def _pct_s(v, dec=1):
             if v is None or (isinstance(v, float) and np.isnan(v)): return '—'
             sign = '+' if v > 0 else ''
@@ -1118,13 +1144,26 @@ if _scan_df is not None and len(_scan_df) > 0:
         _rl = _rs.replace('text-align:right', 'text-align:left')
         _rc = _rs.replace('text-align:right', 'text-align:center')
 
+        # Sector trend display config (same as sector table)
+        _TREND_CFG_S = {
+            'IMPROVING': ('↑ IMP',  '#22c55e'),
+            'FADING':    ('↓ FADE', '#f97316'),
+            'STABLE+':   ('→ STB',  '#86efac'),
+            'STABLE-':   ('→ STB',  '#f87171'),
+            'NEUTRAL':   ('— NEU',  '#6b7280'),
+        }
+
         _scan_html  = '<div style="overflow-x:auto;margin-top:8px;">'
         _scan_html += '<table style="width:100%;border-collapse:collapse;border-radius:8px;overflow:hidden;">'
         _scan_html += '<thead><tr>'
         _scan_html += '<th style="' + _hl + '">Ticker</th>'
         _scan_html += '<th style="' + _hl + '">Name</th>'
         _scan_html += '<th style="' + _hl + '">Sector</th>'
+        _scan_html += '<th style="' + _hs + '">Sect Score</th>'
+        _scan_html += '<th style="' + _hc + '">Sect Trend</th>'
         _scan_html += '<th style="' + _hs + '">Close</th>'
+        _scan_html += '<th style="' + _hs + '">52W High</th>'
+        _scan_html += '<th style="' + _hs + '">% ATH</th>'
         _scan_html += '<th style="' + _hs + '">RS Score</th>'
         _scan_html += '<th style="' + _hs + '">RS 1Y</th>'
         _scan_html += '<th style="' + _hs + '">RS 6M</th>'
@@ -1132,15 +1171,15 @@ if _scan_df is not None and len(_scan_df) > 0:
         _scan_html += '<th style="' + _hs + '">EPS QoQ</th>'
         _scan_html += '<th style="' + _hs + '">Rev QoQ</th>'
         _scan_html += '<th style="' + _hs + '">ROE</th>'
-        _scan_html += '<th style="' + _hc + '">ATR Comp</th>'
-        _scan_html += '<th style="' + _hc + '">Near Pivot</th>'
+        _scan_html += '<th style="' + _hc + '">ATR</th>'
+        _scan_html += '<th style="' + _hc + '">Squeeze</th>'
         _scan_html += '<th style="' + _hc + '">Mode</th>'
         _scan_html += '</tr></thead><tbody>'
 
         for _, row in _display_df.iterrows():
-            rs_comp = row.get('rs_composite', 0) or 0
+            rs_comp  = row.get('rs_composite', 0) or 0
             sc_color = _sc_clr(float(rs_comp))
-            mode = row.get('pass_mode', '')
+            mode     = row.get('pass_mode', '')
             mode_bg  = 'rgba(34,197,94,0.12)'  if mode == 'STRICT'  else 'rgba(251,191,36,0.10)'
             mode_col = '#22c55e'                if mode == 'STRICT'  else '#fbbf24'
 
@@ -1151,33 +1190,50 @@ if _scan_df is not None and len(_scan_df) > 0:
             rs6m = row.get('rs_6m')
             rs3m = row.get('rs_3m')
 
-            # ATR compressed indicator
-            atr_c = bool(row.get('atr_compressed', False))
-            atr_txt = '🔵 TIGHT' if atr_c else '—'
+            # Sector score + trend (join via yfinance name → display name)
+            yf_sector    = str(row.get('sector', ''))
+            display_sect = YF_TO_SECTOR.get(yf_sector, yf_sector)
+            sect_score   = _sector_score_map.get(display_sect)
+            sect_trend   = _sector_trend_map.get(display_sect, 'NEUTRAL')
+            if sect_score is not None:
+                sect_score_txt = f'{float(sect_score):+.1f}'
+                sect_score_col = _sc_clr(float(sect_score))
+            else:
+                sect_score_txt = '—'
+                sect_score_col = '#6b7280'
+            t_lbl, t_col = _TREND_CFG_S.get(sect_trend, ('— NEU', '#6b7280'))
+
+            # ATR compression
+            atr_c   = bool(row.get('atr_compressed', False))
+            atr_txt = '🔵' if atr_c else '—'
             atr_col = '#60a5fa' if atr_c else '#4b5563'
 
-            # Near pivot indicator
-            near_p = bool(row.get('near_pivot', False))
-            gap    = row.get('pivot_gap_pct')
-            if near_p and gap is not None and not (isinstance(gap, float) and np.isnan(gap)):
-                sign = '+' if float(gap) >= 0 else ''
-                pivot_txt = f'✅ {sign}{float(gap):.1f}%'
-                pivot_col = '#22c55e' if float(gap) >= 0 else '#fbbf24'
-            else:
-                pivot_txt = '—'
-                pivot_col = '#4b5563'
+            # BB/KC squeeze
+            squeeze     = bool(row.get('bb_kc_squeeze', False))
+            squeeze_txt = '⚡' if squeeze else '—'
+            squeeze_col = '#fbbf24' if squeeze else '#4b5563'
 
-            name   = str(row.get('name', ''))[:28]
-            sector = str(row.get('sector', ''))[:20]
-            ticker = str(row.get('ticker', ''))
-            close  = row.get('close')
-            close_txt = f'${float(close):,.2f}' if close is not None and not (isinstance(close, float) and np.isnan(close)) else '—'
+            # Price fields
+            ticker    = str(row.get('ticker', ''))
+            name      = str(row.get('name', ''))[:28]
+            close_v   = row.get('close')
+            high_52w  = row.get('high_52w')
+            pct_ath   = row.get('pct_from_ath')
+
+            close_txt   = f'${float(close_v):,.2f}'  if close_v  is not None and not _isnan(close_v)  else '—'
+            h52w_txt    = f'${float(high_52w):,.2f}' if high_52w is not None and not _isnan(high_52w) else '—'
+            pct_ath_txt = f'{float(pct_ath)*100:+.1f}%' if pct_ath is not None and not _isnan(pct_ath) else '—'
+            pct_ath_col = '#22c55e' if (pct_ath is not None and not _isnan(pct_ath) and float(pct_ath) > -0.05) else '#f87171' if (pct_ath is not None and not _isnan(pct_ath) and float(pct_ath) < -0.15) else '#fbbf24'
 
             _scan_html += '<tr>'
             _scan_html += f'<td style="{_rl}"><b style="color:#e5e7eb;">{ticker}</b></td>'
             _scan_html += f'<td style="{_rl}color:#9ca3af;font-size:0.75rem;">{name}</td>'
-            _scan_html += f'<td style="{_rl}color:#9ca3af;font-size:0.75rem;">{sector}</td>'
+            _scan_html += f'<td style="{_rl}color:#9ca3af;font-size:0.75rem;">{display_sect}</td>'
+            _scan_html += f'<td style="{_rs}color:{sect_score_col};font-weight:700;">{sect_score_txt}</td>'
+            _scan_html += f'<td style="{_rc}color:{t_col};font-size:0.75rem;font-weight:600;">{t_lbl}</td>'
             _scan_html += f'<td style="{_rs}">{close_txt}</td>'
+            _scan_html += f'<td style="{_rs}color:#9ca3af;">{h52w_txt}</td>'
+            _scan_html += f'<td style="{_rs}color:{pct_ath_col};font-weight:600;">{pct_ath_txt}</td>'
             _scan_html += f'<td style="{_rs}color:{sc_color};font-weight:700;">{float(rs_comp):+.1f}</td>'
             _scan_html += f'<td style="{_rs}color:{_cc(rs1y)};">{_pct_s(rs1y)}</td>'
             _scan_html += f'<td style="{_rs}color:{_cc(rs6m)};">{_pct_s(rs6m)}</td>'
@@ -1185,19 +1241,20 @@ if _scan_df is not None and len(_scan_df) > 0:
             _scan_html += f'<td style="{_rs}color:{_cc(eps)};">{_pct_s(eps)}</td>'
             _scan_html += f'<td style="{_rs}color:{_cc(rev)};">{_pct_s(rev)}</td>'
             _scan_html += f'<td style="{_rs}color:{_cc(roe)};">{_pct_s(roe)}</td>'
-            _scan_html += f'<td style="{_rc}color:{atr_col};font-size:0.75rem;">{atr_txt}</td>'
-            _scan_html += f'<td style="{_rc}color:{pivot_col};font-size:0.75rem;">{pivot_txt}</td>'
+            _scan_html += f'<td style="{_rc}color:{atr_col};font-size:0.85rem;">{atr_txt}</td>'
+            _scan_html += f'<td style="{_rc}color:{squeeze_col};font-size:0.85rem;">{squeeze_txt}</td>'
             _scan_html += f'<td style="background:{mode_bg};color:{mode_col};font-weight:700;font-size:0.75rem;text-align:center;padding:6px 10px;border-bottom:1px solid #1f2937;">{mode}</td>'
             _scan_html += '</tr>'
 
         _scan_html += '</tbody></table></div>'
         _scan_html += (
             '<div style="font-size:0.70rem;color:#6b7280;margin-top:6px;">'
-            'RS = return differential vs SPY (same formula as sector table). '
-            'EPS QoQ/Rev QoQ = YoY growth of most recent quarter. '
-            'STRICT ≥ 25% EPS + Rev, ROE ≥ 17%. RELAXED ≥ 20% EPS, ≥ 15% Rev, ROE ≥ 15%. '
-            'ATR Comp = ATR in bottom 35th pctile vs 50 bars. '
-            'Near Pivot = within 5% of recent swing high.'
+            'Sect Score/Trend = sector RS from table above. '
+            'RS = stock return differential vs SPY. '
+            '% ATH = distance from all-time high. '
+            'ATR 🔵 = bottom 35th pctile (tight base). '
+            'Squeeze ⚡ = Bollinger Bands inside Keltner Channel (±1 ATR). '
+            'STRICT ≥ 25% EPS + Rev, ROE ≥ 17%. RELAXED ≥ 20% EPS, ≥ 15% Rev, ROE ≥ 15%.'
             '</div>'
         )
 
