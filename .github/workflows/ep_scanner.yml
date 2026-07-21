@@ -55,6 +55,6 @@ jobs:
         run: |
           git config user.name  "MRS Bot"
           git config user.email "mrs-bot@epistruct.com"
-          git add MRS_WebApp/StockScanner/output/ep_results.csv
+          git add StockScanner/output/ep_results.csv
           git diff --staged --quiet || git commit -m "ep-scan: $(date -u +%Y-%m-%d-%H%M) ${{ steps.mode.outputs.mode }}"
           git push
