@@ -13,6 +13,7 @@ Password-protected. Reads mrs_history.csv and displays:
 import numpy as np
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 import plotly.graph_objects as go
 import requests
 import yfinance as yf
@@ -1074,7 +1075,7 @@ if _scan_df is not None and len(_scan_df) > 0:
             f'MRS at scan: <span style="color:{_mrs_color};font-weight:700;">'
             f'{float(_scan_mrs):+.2f} {_scan_state or ""}</span>'
             f'&nbsp;·&nbsp;Scan date: <b style="color:#e5e7eb;">{_scan_date}</b>'
-            f'&nbsp;·&nbsp;Universe: S&amp;P 500 + Nasdaq 100'
+            f'&nbsp;·&nbsp;Universe: Russell 1000'
             f'&nbsp;·&nbsp;Updated nightly at 10 PM UTC'
             f'</div>',
             unsafe_allow_html=True,
@@ -1144,14 +1145,14 @@ if _scan_df is not None and len(_scan_df) > 0:
             if v <= -0.5: return '#f97316'
             return '#6b7280'
 
-        _hs = 'background:#21262d;color:#9ca3af;font-size:0.72rem;font-weight:600;padding:7px 10px;text-align:right;border-bottom:1px solid #374151;white-space:nowrap;'
+        # ── Style templates ────────────────────────────────────────────────────
+        _hs = 'background:#21262d;color:#9ca3af;font-size:0.72rem;font-weight:600;padding:7px 10px;text-align:right;border-bottom:1px solid #374151;white-space:nowrap;cursor:pointer;user-select:none;'
         _hl = _hs.replace('text-align:right', 'text-align:left')
         _hc = _hs.replace('text-align:right', 'text-align:center')
         _rs = 'background:#161b22;color:#e5e7eb;font-size:0.80rem;padding:6px 10px;text-align:right;border-bottom:1px solid #1f2937;'
         _rl = _rs.replace('text-align:right', 'text-align:left')
         _rc = _rs.replace('text-align:right', 'text-align:center')
 
-        # Sector trend display config (same as sector table)
         _TREND_CFG_S = {
             'IMPROVING': ('↑ IMP',  '#22c55e'),
             'FADING':    ('↓ FADE', '#f97316'),
@@ -1160,26 +1161,31 @@ if _scan_df is not None and len(_scan_df) > 0:
             'NEUTRAL':   ('— NEU',  '#6b7280'),
         }
 
+        def _th(style, label, col_idx):
+            """Sortable header cell."""
+            return (f'<th style="{style}" data-col="{col_idx}" onclick="sortTbl(this)">'
+                    f'{label}<span class="sarr" id="sarr{col_idx}"></span></th>')
+
         _scan_html  = '<div style="overflow-x:auto;margin-top:8px;">'
-        _scan_html += '<table style="width:100%;border-collapse:collapse;border-radius:8px;overflow:hidden;">'
+        _scan_html += '<table id="scantbl" style="width:100%;border-collapse:collapse;border-radius:8px;overflow:hidden;">'
         _scan_html += '<thead><tr>'
-        _scan_html += '<th style="' + _hl + '">Ticker</th>'
-        _scan_html += '<th style="' + _hl + '">Name</th>'
-        _scan_html += '<th style="' + _hl + '">Sector</th>'
-        _scan_html += '<th style="' + _hs + '">Sect Score</th>'
-        _scan_html += '<th style="' + _hc + '">Sect Trend</th>'
-        _scan_html += '<th style="' + _hs + '">Close</th>'
-        _scan_html += '<th style="' + _hs + '">% ATH</th>'
-        _scan_html += '<th style="' + _hs + '">RS Score</th>'
-        _scan_html += '<th style="' + _hs + '">RS 1Y</th>'
-        _scan_html += '<th style="' + _hs + '">RS 6M</th>'
-        _scan_html += '<th style="' + _hs + '">RS 3M</th>'
-        _scan_html += '<th style="' + _hs + '">EPS QoQ</th>'
-        _scan_html += '<th style="' + _hs + '">Rev QoQ</th>'
-        _scan_html += '<th style="' + _hs + '">ROE</th>'
-        _scan_html += '<th style="' + _hc + '">ATR</th>'
-        _scan_html += '<th style="' + _hc + '">Squeeze</th>'
-        _scan_html += '<th style="' + _hc + '">Mode</th>'
+        _scan_html += _th(_hl, 'Ticker',     0)
+        _scan_html += _th(_hl, 'Name',       1)
+        _scan_html += _th(_hl, 'Sector',     2)
+        _scan_html += _th(_hs, 'Sect Score', 3)
+        _scan_html += _th(_hc, 'Sect Trend', 4)
+        _scan_html += _th(_hs, 'Close',      5)
+        _scan_html += _th(_hs, '% ATH',      6)
+        _scan_html += _th(_hs, 'RS Score',   7)
+        _scan_html += _th(_hs, 'RS 1Y',      8)
+        _scan_html += _th(_hs, 'RS 6M',      9)
+        _scan_html += _th(_hs, 'RS 3M',      10)
+        _scan_html += _th(_hs, 'EPS QoQ',    11)
+        _scan_html += _th(_hs, 'Rev QoQ',    12)
+        _scan_html += _th(_hs, 'ROE',        13)
+        _scan_html += _th(_hc, 'ATR',        14)
+        _scan_html += _th(_hc, 'Squeeze',    15)
+        _scan_html += _th(_hc, 'Mode',       16)
         _scan_html += '</tr></thead><tbody>'
 
         for _, row in _display_df.iterrows():
@@ -1196,7 +1202,6 @@ if _scan_df is not None and len(_scan_df) > 0:
             rs6m = row.get('rs_6m')
             rs3m = row.get('rs_3m')
 
-            # Sector score + trend (join via yfinance name → display name)
             yf_sector    = str(row.get('sector', ''))
             display_sect = YF_TO_SECTOR.get(yf_sector, yf_sector)
             sect_score   = _sector_score_map.get(display_sect)
@@ -1204,51 +1209,56 @@ if _scan_df is not None and len(_scan_df) > 0:
             if sect_score is not None:
                 sect_score_txt = _sector_composite_label(float(sect_score))
                 sect_score_col = _sc_clr(float(sect_score))
+                sect_score_val = float(sect_score)
             else:
                 sect_score_txt = '—'
                 sect_score_col = '#6b7280'
+                sect_score_val = -999
             t_lbl, t_col = _TREND_CFG_S.get(sect_trend, ('— NEU', '#6b7280'))
 
-            # ATR compression
-            atr_c   = bool(row.get('atr_compressed', False))
-            atr_txt = '🔵' if atr_c else '—'
-            atr_col = '#60a5fa' if atr_c else '#4b5563'
-
-            # BB/KC squeeze
+            atr_c       = bool(row.get('atr_compressed', False))
+            atr_txt     = '🔵' if atr_c else '—'
+            atr_col     = '#60a5fa' if atr_c else '#4b5563'
             squeeze     = bool(row.get('bb_kc_squeeze', False))
             squeeze_txt = '⚡' if squeeze else '—'
             squeeze_col = '#fbbf24' if squeeze else '#4b5563'
 
-            # Price fields
-            ticker    = str(row.get('ticker', ''))
-            name      = str(row.get('name', ''))[:28]
-            close_v   = row.get('close')
-            high_52w  = row.get('high_52w')
-            pct_ath   = row.get('pct_from_ath')
+            ticker  = str(row.get('ticker', ''))
+            name    = str(row.get('name', ''))[:28]
+            close_v = row.get('close')
+            pct_ath = row.get('pct_from_ath')
 
-            close_txt   = f'${float(close_v):,.2f}'  if close_v  is not None and not _isnan(close_v)  else '—'
-            h52w_txt    = f'${float(high_52w):,.2f}' if high_52w is not None and not _isnan(high_52w) else '—'
+            close_txt   = f'${float(close_v):,.2f}' if close_v is not None and not _isnan(close_v) else '—'
+            close_val   = float(close_v) if close_v is not None and not _isnan(close_v) else -999
             pct_ath_txt = f'{float(pct_ath)*100:+.1f}%' if pct_ath is not None and not _isnan(pct_ath) else '—'
-            pct_ath_col = '#22c55e' if (pct_ath is not None and not _isnan(pct_ath) and float(pct_ath) > -0.05) else '#f87171' if (pct_ath is not None and not _isnan(pct_ath) and float(pct_ath) < -0.15) else '#fbbf24'
+            pct_ath_val = float(pct_ath)*100 if pct_ath is not None and not _isnan(pct_ath) else -999
+            pct_ath_col = ('#22c55e' if (pct_ath is not None and not _isnan(pct_ath) and float(pct_ath) > -0.05)
+                           else '#f87171' if (pct_ath is not None and not _isnan(pct_ath) and float(pct_ath) < -0.15)
+                           else '#fbbf24')
+
+            def _sv(v):
+                """Raw sort value — -999 for missing so blanks sort last."""
+                if v is None or (isinstance(v, float) and np.isnan(v)): return -999
+                return float(v)
 
             _scan_html += '<tr>'
-            _scan_html += f'<td style="{_rl}"><b style="color:#e5e7eb;">{ticker}</b></td>'
-            _scan_html += f'<td style="{_rl}color:#9ca3af;font-size:0.75rem;">{name}</td>'
-            _scan_html += f'<td style="{_rl}color:#9ca3af;font-size:0.75rem;">{display_sect}</td>'
-            _scan_html += f'<td style="{_rs}color:{sect_score_col};font-weight:700;font-size:0.72rem;white-space:nowrap;">{sect_score_txt}</td>'
-            _scan_html += f'<td style="{_rc}color:{t_col};font-size:0.75rem;font-weight:600;">{t_lbl}</td>'
-            _scan_html += f'<td style="{_rs}">{close_txt}</td>'
-            _scan_html += f'<td style="{_rs}color:{pct_ath_col};font-weight:600;">{pct_ath_txt}</td>'
-            _scan_html += f'<td style="{_rs}color:{sc_color};font-weight:700;">{float(rs_comp):+.1f}</td>'
-            _scan_html += f'<td style="{_rs}color:{_cc(rs1y)};">{_pct_s(rs1y)}</td>'
-            _scan_html += f'<td style="{_rs}color:{_cc(rs6m)};">{_pct_s(rs6m)}</td>'
-            _scan_html += f'<td style="{_rs}color:{_cc(rs3m)};">{_pct_s(rs3m)}</td>'
-            _scan_html += f'<td style="{_rs}color:{_cc(eps)};">{_pct_s(eps)}</td>'
-            _scan_html += f'<td style="{_rs}color:{_cc(rev)};">{_pct_s(rev)}</td>'
-            _scan_html += f'<td style="{_rs}color:{_cc(roe)};">{_pct_s(roe)}</td>'
-            _scan_html += f'<td style="{_rc}color:{atr_col};font-size:0.85rem;">{atr_txt}</td>'
-            _scan_html += f'<td style="{_rc}color:{squeeze_col};font-size:0.85rem;">{squeeze_txt}</td>'
-            _scan_html += f'<td style="background:{mode_bg};color:{mode_col};font-weight:700;font-size:0.75rem;text-align:center;padding:6px 10px;border-bottom:1px solid #1f2937;">{mode}</td>'
+            _scan_html += f'<td style="{_rl}" data-sort="{ticker}"><b style="color:#e5e7eb;">{ticker}</b></td>'
+            _scan_html += f'<td style="{_rl}color:#9ca3af;font-size:0.75rem;" data-sort="{name}">{name}</td>'
+            _scan_html += f'<td style="{_rl}color:#9ca3af;font-size:0.75rem;" data-sort="{display_sect}">{display_sect}</td>'
+            _scan_html += f'<td style="{_rs}color:{sect_score_col};font-weight:700;font-size:0.72rem;white-space:nowrap;" data-sort="{sect_score_val}">{sect_score_txt}</td>'
+            _scan_html += f'<td style="{_rc}color:{t_col};font-size:0.75rem;font-weight:600;" data-sort="{sect_trend}">{t_lbl}</td>'
+            _scan_html += f'<td style="{_rs}" data-sort="{close_val}">{close_txt}</td>'
+            _scan_html += f'<td style="{_rs}color:{pct_ath_col};font-weight:600;" data-sort="{pct_ath_val}">{pct_ath_txt}</td>'
+            _scan_html += f'<td style="{_rs}color:{sc_color};font-weight:700;" data-sort="{float(rs_comp)}">{float(rs_comp):+.1f}</td>'
+            _scan_html += f'<td style="{_rs}color:{_cc(rs1y)};" data-sort="{_sv(rs1y)}">{_pct_s(rs1y)}</td>'
+            _scan_html += f'<td style="{_rs}color:{_cc(rs6m)};" data-sort="{_sv(rs6m)}">{_pct_s(rs6m)}</td>'
+            _scan_html += f'<td style="{_rs}color:{_cc(rs3m)};" data-sort="{_sv(rs3m)}">{_pct_s(rs3m)}</td>'
+            _scan_html += f'<td style="{_rs}color:{_cc(eps)};" data-sort="{_sv(eps)}">{_pct_s(eps)}</td>'
+            _scan_html += f'<td style="{_rs}color:{_cc(rev)};" data-sort="{_sv(rev)}">{_pct_s(rev)}</td>'
+            _scan_html += f'<td style="{_rs}color:{_cc(roe)};" data-sort="{_sv(roe)}">{_pct_s(roe)}</td>'
+            _scan_html += f'<td style="{_rc}color:{atr_col};font-size:0.85rem;" data-sort="{1 if atr_c else 0}">{atr_txt}</td>'
+            _scan_html += f'<td style="{_rc}color:{squeeze_col};font-size:0.85rem;" data-sort="{1 if squeeze else 0}">{squeeze_txt}</td>'
+            _scan_html += f'<td style="background:{mode_bg};color:{mode_col};font-weight:700;font-size:0.75rem;text-align:center;padding:6px 10px;border-bottom:1px solid #1f2937;" data-sort="{mode}">{mode}</td>'
             _scan_html += '</tr>'
 
         _scan_html += '</tbody></table></div>'
@@ -1259,11 +1269,51 @@ if _scan_df is not None and len(_scan_df) > 0:
             '% ATH = distance from all-time high. '
             'ATR 🔵 = bottom 35th pctile (tight base). '
             'Squeeze ⚡ = Bollinger Bands inside Keltner Channel (±1 ATR). '
-            'STRICT ≥ 25% EPS + Rev, ROE ≥ 17%. RELAXED ≥ 20% EPS, ≥ 15% Rev, ROE ≥ 15%.'
+            'STRICT ≥ 25% EPS + Rev. RELAXED ≥ 20% EPS, ≥ 15% Rev. Click any header to sort.'
             '</div>'
         )
 
-        st.markdown(_scan_html, unsafe_allow_html=True)
+        # ── JS sort logic ──────────────────────────────────────────────────────
+        _scan_html += '''
+<style>
+  th:hover { background:#2d333b !important; }
+  .sarr { margin-left:4px; font-size:0.65rem; opacity:0.7; }
+</style>
+<script>
+var _sCol = -1, _sAsc = true;
+function sortTbl(th) {
+  var col = parseInt(th.getAttribute('data-col'));
+  if (_sCol === col) { _sAsc = !_sAsc; } else { _sCol = col; _sAsc = false; }
+
+  // Update arrows
+  document.querySelectorAll('.sarr').forEach(function(s){ s.textContent = ''; });
+  document.getElementById('sarr' + col).textContent = _sAsc ? ' ↑' : ' ↓';
+
+  var tbody = document.querySelector('#scantbl tbody');
+  var rows  = Array.from(tbody.querySelectorAll('tr'));
+  var isNum = !isNaN(parseFloat(rows[0].cells[col].getAttribute('data-sort')));
+
+  rows.sort(function(a, b) {
+    var av = a.cells[col].getAttribute('data-sort');
+    var bv = b.cells[col].getAttribute('data-sort');
+    if (isNum) {
+      av = parseFloat(av); bv = parseFloat(bv);
+      // Push -999 (missing) to bottom regardless of direction
+      if (av === -999 && bv === -999) return 0;
+      if (av === -999) return 1;
+      if (bv === -999) return -1;
+    }
+    if (av < bv) return _sAsc ? -1 : 1;
+    if (av > bv) return _sAsc ? 1 : -1;
+    return 0;
+  });
+  rows.forEach(function(r){ tbody.appendChild(r); });
+}
+</script>
+'''
+        _row_h  = 34
+        _tbl_h  = len(_display_df) * _row_h + 120   # header + footer note
+        components.html(_scan_html, height=_tbl_h, scrolling=False)
 
         st.caption(f'{len(_display_df)} candidates shown · '
                    f'{int((_scan_df["pass_mode"] == "STRICT").sum())} strict · '
