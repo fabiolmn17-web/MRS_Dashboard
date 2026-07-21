@@ -1,0 +1,62 @@
+name: EP Scanner
+
+on:
+  schedule:
+    # Pre-market: 1:00 PM UTC = 8:00 AM ET (Mon–Fri)
+    - cron: '0 13 * * 1-5'
+    # At-open: 1:45 PM UTC = 9:45 AM ET (Mon–Fri)
+    - cron: '45 13 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Scan mode: premarket or confirmed'
+        required: false
+        default: 'confirmed'
+
+jobs:
+  ep-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Configure git credentials
+        run: git config --global url."https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Determine scan mode from schedule time
+        id: mode
+        run: |
+          # 13:00 UTC = pre-market run, 13:45 UTC = at-open confirmation
+          TOTAL_MIN=$(( $(date -u +%H) * 60 + $(date -u +%M) ))
+          if [ "$TOTAL_MIN" -lt 820 ]; then
+            echo "mode=premarket" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=confirmed" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run EP scanner
+        env:
+          EP_MODE:  ${{ inputs.mode || steps.mode.outputs.mode }}
+          UNIVERSE: russell1000
+        run: |
+          cd MRS_WebApp
+          python StockScanner/run_ep_scanner.py
+
+      - name: Commit EP results
+        run: |
+          git config user.name  "MRS Bot"
+          git config user.email "mrs-bot@epistruct.com"
+          git add MRS_WebApp/StockScanner/output/ep_results.csv
+          git diff --staged --quiet || git commit -m "ep-scan: $(date -u +%Y-%m-%d-%H%M) ${{ steps.mode.outputs.mode }}"
+          git push

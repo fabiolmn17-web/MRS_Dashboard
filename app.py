@@ -1325,6 +1325,221 @@ else:
         'You can also trigger it manually under Actions → CAN SLIM Scanner → Run workflow.'
     )
 
+# ══════════════════════════════════════════════════════════════════════════════
+# EPISODIC PIVOT SCANNER
+# ══════════════════════════════════════════════════════════════════════════════
+st.divider()
+st.markdown('<div class="section-header">Episodic Pivots</div>', unsafe_allow_html=True)
+
+try:
+    from StockScanner.ep_scanner import load_ep_results as _load_ep
+    _ep_df, _ep_date = _load_ep()
+except Exception:
+    _ep_df, _ep_date = None, None
+
+if _ep_df is not None and len(_ep_df) > 0:
+
+    # ── Banner ─────────────────────────────────────────────────────────────────
+    _ep_mode = str(_ep_df['scan_mode'].iloc[0]) if 'scan_mode' in _ep_df.columns else 'confirmed'
+    _ep_mode_lbl = 'PRE-MARKET' if _ep_mode == 'premarket' else 'AT-OPEN CONFIRMED'
+    _ep_mode_col = '#fbbf24' if _ep_mode == 'premarket' else '#22c55e'
+    st.markdown(
+        f'<div style="font-size:0.78rem;color:#9ca3af;margin-bottom:6px;">'
+        f'Mode: <span style="color:{_ep_mode_col};font-weight:700;">{_ep_mode_lbl}</span>'
+        f'&nbsp;·&nbsp;Scan date: <b style="color:#e5e7eb;">{_ep_date}</b>'
+        f'&nbsp;·&nbsp;Gap ≥10% · Volume ≥2× avg · 20 SMA &gt; 200 SMA · Price &gt; 200 SMA'
+        f'&nbsp;·&nbsp;Fires 8:00 AM ET (pre-market) &amp; 9:45 AM ET (confirmed)'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    def _ep_isnan(v):
+        try: return np.isnan(float(v))
+        except: return True
+
+    def _ep_pct(v, dec=1):
+        if v is None or _ep_isnan(v): return '—'
+        sign = '+' if float(v) > 0 else ''
+        return f'{sign}{float(v)*100:.{dec}f}%'
+
+    def _ep_cc(v):
+        if v is None or _ep_isnan(v): return '#6b7280'
+        return '#22c55e' if float(v) > 0 else '#ef4444'
+
+    # Header style (same palette as CAN SLIM table, clickable)
+    _eh = 'background:#21262d;color:#9ca3af;font-size:0.72rem;font-weight:600;padding:7px 10px;text-align:right;border-bottom:1px solid #374151;white-space:nowrap;cursor:pointer;user-select:none;'
+    _el = _eh.replace('text-align:right', 'text-align:left')
+    _ec = _eh.replace('text-align:right', 'text-align:center')
+    _er = 'background:#161b22;color:#e5e7eb;font-size:0.80rem;padding:6px 10px;text-align:right;border-bottom:1px solid #1f2937;'
+    _erl = _er.replace('text-align:right', 'text-align:left')
+    _erc = _er.replace('text-align:right', 'text-align:center')
+
+    def _ep_th(style, label, col_idx):
+        return (f'<th style="{style}" data-col="{col_idx}" onclick="sortEP(this)">'
+                f'{label}<span class="eparr" id="eparr{col_idx}"></span></th>')
+
+    _ep_html  = '<div style="overflow-x:auto;margin-top:8px;">'
+    _ep_html += '<table id="eptbl" style="width:100%;border-collapse:collapse;border-radius:8px;overflow:hidden;">'
+    _ep_html += '<thead><tr>'
+    _ep_html += _ep_th(_el, 'Ticker',     0)
+    _ep_html += _ep_th(_el, 'Name',       1)
+    _ep_html += _ep_th(_el, 'Sector',     2)
+    _ep_html += _ep_th(_eh, 'Sect Score', 3)
+    _ep_html += _ep_th(_ec, 'Sect Trend', 4)
+    _ep_html += _ep_th(_eh, 'Gap %',      5)
+    _ep_html += _ep_th(_eh, 'Open',       6)
+    _ep_html += _ep_th(_eh, 'Prev Close', 7)
+    _ep_html += _ep_th(_eh, 'Vol Ratio',  8)
+    _ep_html += _ep_th(_ec, '20>200 SMA', 9)
+    _ep_html += _ep_th(_ec, 'Mode',       10)
+    _ep_html += _ep_th(_el, 'Headline',   11)
+    _ep_html += '</tr></thead><tbody>'
+
+    _TREND_CFG_EP = {
+        'IMPROVING': ('↑ IMP',  '#22c55e'),
+        'FADING':    ('↓ FADE', '#f97316'),
+        'STABLE+':   ('→ STB',  '#86efac'),
+        'STABLE-':   ('→ STB',  '#f87171'),
+        'NEUTRAL':   ('— NEU',  '#6b7280'),
+    }
+
+    for _, row in _ep_df.iterrows():
+        ticker      = str(row.get('ticker', ''))
+        name        = str(row.get('name', ''))[:28]
+        yf_sect     = str(row.get('sector', ''))
+        disp_sect   = YF_TO_SECTOR.get(yf_sect, yf_sect)
+        gap_pct     = row.get('gap_pct')
+        today_open  = row.get('today_open')
+        prev_close  = row.get('prev_close')
+        vol_ratio   = row.get('vol_ratio')
+        sma20       = row.get('sma20')
+        sma200      = row.get('sma200')
+        ep_mode     = str(row.get('scan_mode', 'confirmed'))
+        headline    = str(row.get('headline', ''))[:80]
+        news_url    = str(row.get('news_url', ''))
+        publisher   = str(row.get('publisher', ''))
+
+        # Sector score + trend
+        ep_sect_score = _sector_score_map.get(disp_sect)
+        ep_sect_trend = _sector_trend_map.get(disp_sect, 'NEUTRAL')
+        if ep_sect_score is not None:
+            ep_ss_txt = _sector_composite_label(float(ep_sect_score))
+            ep_ss_col = _sc_clr(float(ep_sect_score))
+            ep_ss_val = float(ep_sect_score)
+        else:
+            ep_ss_txt = '—'
+            ep_ss_col = '#6b7280'
+            ep_ss_val = -999
+        ep_t_lbl, ep_t_col = _TREND_CFG_EP.get(ep_sect_trend, ('— NEU', '#6b7280'))
+
+        # Gap colour
+        gap_val = float(gap_pct) if gap_pct is not None and not _ep_isnan(gap_pct) else 0
+        gap_txt = f'+{gap_val*100:.1f}%' if gap_val else '—'
+        gap_col = '#22c55e' if gap_val >= 0.20 else '#86efac' if gap_val >= 0.10 else '#6b7280'
+
+        # Open / prev close
+        open_txt  = f'${float(today_open):,.2f}' if today_open is not None and not _ep_isnan(today_open) else '—'
+        close_txt = f'${float(prev_close):,.2f}' if prev_close is not None and not _ep_isnan(prev_close) else '—'
+        open_val  = float(today_open) if today_open is not None and not _ep_isnan(today_open) else -999
+        close_val = float(prev_close) if prev_close is not None and not _ep_isnan(prev_close) else -999
+
+        # Vol ratio
+        vr_val = float(vol_ratio) if vol_ratio is not None and not _ep_isnan(vol_ratio) else 0
+        vr_txt = f'{vr_val:.1f}×' if vr_val else '—'
+        vr_col = '#22c55e' if vr_val >= 5 else '#86efac' if vr_val >= 2 else '#f97316'
+
+        # SMA check
+        sma_ok  = (sma20 is not None and sma200 is not None
+                   and not _ep_isnan(sma20) and not _ep_isnan(sma200)
+                   and float(sma20) > float(sma200))
+        sma_txt = '✓' if sma_ok else '✗'
+        sma_col = '#22c55e' if sma_ok else '#ef4444'
+
+        # Mode badge
+        mode_bg  = 'rgba(34,197,94,0.12)'  if ep_mode == 'confirmed' else 'rgba(251,191,36,0.10)'
+        mode_col = '#22c55e'               if ep_mode == 'confirmed' else '#fbbf24'
+        mode_lbl = 'CONF' if ep_mode == 'confirmed' else 'PRE'
+
+        # Headline link
+        if news_url and headline:
+            hl_html = f'<a href="{news_url}" target="_blank" style="color:#60a5fa;text-decoration:none;font-size:0.73rem;">{headline}</a>'
+            if publisher:
+                hl_html += f' <span style="color:#6b7280;font-size:0.68rem;">({publisher})</span>'
+        elif headline:
+            hl_html = f'<span style="color:#9ca3af;font-size:0.73rem;">{headline}</span>'
+        else:
+            hl_html = '<span style="color:#4b5563;">—</span>'
+
+        _ep_html += '<tr>'
+        _ep_html += f'<td style="{_erl}" data-sort="{ticker}"><b style="color:#e5e7eb;">{ticker}</b></td>'
+        _ep_html += f'<td style="{_erl}color:#9ca3af;font-size:0.75rem;" data-sort="{name}">{name}</td>'
+        _ep_html += f'<td style="{_erl}color:#9ca3af;font-size:0.75rem;" data-sort="{disp_sect}">{disp_sect}</td>'
+        _ep_html += f'<td style="{_er}color:{ep_ss_col};font-weight:700;font-size:0.72rem;white-space:nowrap;" data-sort="{ep_ss_val}">{ep_ss_txt}</td>'
+        _ep_html += f'<td style="{_erc}color:{ep_t_col};font-size:0.75rem;font-weight:600;" data-sort="{ep_sect_trend}">{ep_t_lbl}</td>'
+        _ep_html += f'<td style="{_er}color:{gap_col};font-weight:700;" data-sort="{gap_val}">{gap_txt}</td>'
+        _ep_html += f'<td style="{_er}" data-sort="{open_val}">{open_txt}</td>'
+        _ep_html += f'<td style="{_er}" data-sort="{close_val}">{close_txt}</td>'
+        _ep_html += f'<td style="{_er}color:{vr_col};font-weight:600;" data-sort="{vr_val}">{vr_txt}</td>'
+        _ep_html += f'<td style="{_erc}color:{sma_col};font-weight:700;" data-sort="{1 if sma_ok else 0}">{sma_txt}</td>'
+        _ep_html += f'<td style="background:{mode_bg};color:{mode_col};font-weight:700;font-size:0.75rem;text-align:center;padding:6px 10px;border-bottom:1px solid #1f2937;" data-sort="{ep_mode}">{mode_lbl}</td>'
+        _ep_html += f'<td style="{_erl}max-width:340px;" data-sort="{headline}">{hl_html}</td>'
+        _ep_html += '</tr>'
+
+    _ep_html += '</tbody></table></div>'
+    _ep_html += (
+        '<div style="font-size:0.70rem;color:#6b7280;margin-top:6px;">'
+        'Gap = today open vs prior close. '
+        'Vol Ratio = intraday volume ÷ 50-day avg. '
+        'Sect Score/Trend from sector table above. '
+        'Click any header to sort. '
+        'PRE = pre-market signal · CONF = confirmed at open.'
+        '</div>'
+    )
+
+    # ── JS sort (separate namespace from CAN SLIM table) ──────────────────────
+    _ep_html += '''
+<style>
+  #eptbl th:hover { background:#2d333b !important; }
+  .eparr { margin-left:4px; font-size:0.65rem; opacity:0.7; }
+</style>
+<script>
+var _epCol = -1, _epAsc = true;
+function sortEP(th) {
+  var col = parseInt(th.getAttribute('data-col'));
+  if (_epCol === col) { _epAsc = !_epAsc; } else { _epCol = col; _epAsc = false; }
+  document.querySelectorAll('.eparr').forEach(function(s){ s.textContent = ''; });
+  document.getElementById('eparr' + col).textContent = _epAsc ? ' ↑' : ' ↓';
+  var tbody = document.querySelector('#eptbl tbody');
+  var rows  = Array.from(tbody.querySelectorAll('tr'));
+  var isNum = !isNaN(parseFloat(rows[0].cells[col].getAttribute('data-sort')));
+  rows.sort(function(a, b) {
+    var av = a.cells[col].getAttribute('data-sort');
+    var bv = b.cells[col].getAttribute('data-sort');
+    if (isNum) {
+      av = parseFloat(av); bv = parseFloat(bv);
+      if (av === -999 && bv === -999) return 0;
+      if (av === -999) return 1;
+      if (bv === -999) return -1;
+    }
+    if (av < bv) return _epAsc ? -1 : 1;
+    if (av > bv) return _epAsc ? 1 : -1;
+    return 0;
+  });
+  rows.forEach(function(r){ tbody.appendChild(r); });
+}
+</script>
+'''
+    _ep_row_h = 42   # slightly taller due to headline column
+    _ep_h     = len(_ep_df) * _ep_row_h + 130
+    components.html(_ep_html, height=_ep_h, scrolling=False)
+    st.caption(f'{len(_ep_df)} episodic pivot(s) detected today')
+
+else:
+    st.info(
+        'No Episodic Pivots detected today — or scan hasn\'t run yet. '
+        'The EP scanner fires at 8:00 AM ET (pre-market) and 9:45 AM ET (confirmed) Mon–Fri via GitHub Actions.'
+    )
+
 # ── Footer ─────────────────────────────────────────────────────────────────────
 last_upd = hist['date'].max()
 st.markdown(
