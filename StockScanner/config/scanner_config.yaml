@@ -50,7 +50,7 @@ universe:
 
   # Universe source
   # Options: "sp500", "sp500_nasdaq100", "russell1000", "russell3000", "custom"
-  source: "russell3000"
+  source: "russell1000"
   custom_tickers_file: null   # Path to custom ticker list if source is "custom"
 
 # ── Technical Filters (identical for Strict and Relaxed) ───────────────────────

@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       universe:
-        description: 'Universe: sp500 or sp500_nasdaq100'
+        description: 'Universe: sp500, sp500_nasdaq100, russell1000, russell3000'
         required: false
-        default: 'sp500_nasdaq100'
+        default: 'russell1000'
 
 jobs:
   scan:
@@ -34,7 +34,7 @@ jobs:
 
       - name: Run scanner
         env:
-          UNIVERSE: ${{ inputs.universe || 'sp500_nasdaq100' }}
+          UNIVERSE: ${{ inputs.universe || 'russell1000' }}
         run: python StockScanner/run_scanner.py
 
       - name: Commit results

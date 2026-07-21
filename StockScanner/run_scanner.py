@@ -51,7 +51,7 @@ def _read_last_mrs():
 def main():
     mrs_score_str = os.environ.get('MRS_SCORE', '').strip()
     mrs_state     = os.environ.get('MRS_STATE', '').strip()
-    universe      = os.environ.get('UNIVERSE', 'sp500_nasdaq100')
+    universe      = os.environ.get('UNIVERSE', 'russell1000')
 
     mrs_score = None
     if mrs_score_str:

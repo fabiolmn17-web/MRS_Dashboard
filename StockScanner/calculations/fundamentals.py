@@ -216,11 +216,12 @@ class FundamentalCalculator:
         return 'minimal'
 
     def _check_strict(self, r: dict) -> bool:
-        """Strict CAN SLIM: 25% EPS + 25% Rev + 17% ROE, both quarters pass."""
+        """Strict CAN SLIM: 25% EPS (both qtrs) + 25% Rev + TTM profitable.
+        ROE is recorded in output but not used as a gate — high-growth tech
+        reinvests profits and routinely has low/negative ROE despite strong EPS."""
         eps = r.get('eps_qtr_yoy')
         prev_eps = r.get('eps_prev_qtr_yoy')
         rev = r.get('rev_qtr_yoy')
-        roe = r.get('roe')
         ttm_ok = r.get('ttm_positive', False)
 
         if not ttm_ok:
@@ -231,15 +232,12 @@ class FundamentalCalculator:
             return False
         if self._is_nan(rev) or rev < self.STRICT_REV_MIN:
             return False
-        if roe is None or roe < self.STRICT_ROE_MIN:
-            return False
         return True
 
     def _check_relaxed(self, r: dict) -> bool:
-        """Relaxed: 20% EPS + 15% Rev + 15% ROE, only most recent quarter."""
+        """Relaxed: 20% EPS + 15% Rev + TTM profitable. No ROE gate."""
         eps = r.get('eps_qtr_yoy')
         rev = r.get('rev_qtr_yoy')
-        roe = r.get('roe')
         ttm_ok = r.get('ttm_positive', False)
 
         if not ttm_ok:
@@ -247,8 +245,6 @@ class FundamentalCalculator:
         if self._is_nan(eps) or eps < self.RELAXED_EPS_MIN:
             return False
         if self._is_nan(rev) or rev < self.RELAXED_REV_MIN:
-            return False
-        if roe is None or roe < self.RELAXED_ROE_MIN:
             return False
         return True
 

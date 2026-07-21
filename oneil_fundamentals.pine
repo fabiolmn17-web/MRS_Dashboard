@@ -1,0 +1,276 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0
+// © epistruct
+// Designed for DAILY charts. Financial offsets use 252 bars ≈ 1 trading year.
+
+//@version=5
+indicator("O'Neil CAN SLIM Fundamentals", overlay=true, max_lines_count=0, max_labels_count=0)
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  SETTINGS
+// ─────────────────────────────────────────────────────────────────────────────
+pos_input  = input.string("Top Right", "Table Position", group="Display", options=["Top Right","Top Left","Bottom Right","Bottom Left","Top Center","Bottom Center"])
+tsz_input  = input.string("Small", "Text Size", group="Display", options=["Auto","Tiny","Small","Normal","Large"])
+show_eps   = input.bool(true,  "Show EPS Metrics",     group="Display")
+show_sales = input.bool(true,  "Show Sales Metrics",   group="Display")
+show_qual  = input.bool(true,  "Show Quality Metrics", group="Display")
+show_rs    = input.bool(true,  "Show RS vs SPX",       group="Display")
+
+tpos = switch pos_input
+    "Top Right"     => position.top_right
+    "Top Left"      => position.top_left
+    "Bottom Right"  => position.bottom_right
+    "Bottom Left"   => position.bottom_left
+    "Top Center"    => position.top_center
+    "Bottom Center" => position.bottom_center
+    => position.top_right
+
+tsz = switch tsz_input
+    "Auto"   => size.auto
+    "Tiny"   => size.tiny
+    "Small"  => size.small
+    "Normal" => size.normal
+    "Large"  => size.large
+    => size.small
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  FINANCIAL DATA  (forward-filled — no gaps parameter)
+// ─────────────────────────────────────────────────────────────────────────────
+eps_q = request.financial(syminfo.tickerid, "EARNINGS_PER_SHARE", "FQ", ignore_invalid_symbol=true)
+rev_q = request.financial(syminfo.tickerid, "REVENUE",             "FQ", ignore_invalid_symbol=true)
+eps_y = request.financial(syminfo.tickerid, "EARNINGS_PER_SHARE", "FY", ignore_invalid_symbol=true)
+roe   = request.financial(syminfo.tickerid, "RETURN_ON_EQUITY",    "FY", ignore_invalid_symbol=true)
+de    = request.financial(syminfo.tickerid, "DEBT_TO_EQUITY",      "FY", ignore_invalid_symbol=true)
+npm   = request.financial(syminfo.tickerid, "NET_PROFIT_MARGIN",   "FY", ignore_invalid_symbol=true)
+cur_r = request.financial(syminfo.tickerid, "CURRENT_RATIO",       "FQ", ignore_invalid_symbol=true)
+
+// Bar offsets (daily chart): 252 ≈ 1yr, 63 ≈ 1 quarter
+D1Y = 252
+D1Q = 63
+
+// Q1 = most recent quarter, Q2 = prior quarter; _ya = year-ago equivalent
+eps_q1_ya = eps_q[D1Y]           // same quarter, last year
+eps_q2    = eps_q[D1Q]           // one quarter prior
+eps_q2_ya = eps_q[D1Y + D1Q]    // same prior quarter, last year
+rev_q1_ya = rev_q[D1Y]
+rev_q2    = rev_q[D1Q]
+rev_q2_ya = rev_q[D1Y + D1Q]
+eps_3ya   = eps_y[D1Y * 3]      // annual EPS from ~3 years ago
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  CALCULATIONS
+// ─────────────────────────────────────────────────────────────────────────────
+// EPS YoY growth (Q1)
+_ok_g1 = not na(eps_q) and not na(eps_q1_ya) and eps_q1_ya != 0
+eps_g1 = _ok_g1 ? (eps_q - eps_q1_ya) / math.abs(eps_q1_ya) * 100 : na
+
+// EPS YoY growth (Q2)
+_ok_g2 = not na(eps_q2) and not na(eps_q2_ya) and eps_q2_ya != 0
+eps_g2 = _ok_g2 ? (eps_q2 - eps_q2_ya) / math.abs(eps_q2_ya) * 100 : na
+
+// Annual EPS 3-year CAGR
+_ok_3yr = not na(eps_y) and not na(eps_3ya) and eps_3ya > 0
+eps_3yr = _ok_3yr ? (math.pow(eps_y / eps_3ya, 1.0 / 3.0) - 1.0) * 100 : na
+
+// Revenue YoY growth
+_ok_rg1 = not na(rev_q) and not na(rev_q1_ya) and rev_q1_ya != 0
+rev_g1  = _ok_rg1 ? (rev_q - rev_q1_ya) / math.abs(rev_q1_ya) * 100 : na
+_ok_rg2 = not na(rev_q2) and not na(rev_q2_ya) and rev_q2_ya != 0
+rev_g2  = _ok_rg2 ? (rev_q2 - rev_q2_ya) / math.abs(rev_q2_ya) * 100 : na
+
+// Acceleration: Q1 growth faster than Q2?
+eps_accel = not na(eps_g1) and not na(eps_g2)
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  RELATIVE STRENGTH vs SPX  (O'Neil weighted: 40% last 3m, 20% each prior)
+// ─────────────────────────────────────────────────────────────────────────────
+spx = request.security("SPX", timeframe.period, close)
+
+f_seg(src, a, b) => src[a] != 0 and not na(src[b]) ? src[a] / src[b] - 1.0 : na
+
+s1 = f_seg(close, 0,   D1Q)
+s2 = f_seg(close, D1Q, D1Q * 2)
+s3 = f_seg(close, D1Q * 2, D1Q * 3)
+s4 = f_seg(close, D1Q * 3, D1Y)
+
+b1 = f_seg(spx, 0,   D1Q)
+b2 = f_seg(spx, D1Q, D1Q * 2)
+b3 = f_seg(spx, D1Q * 2, D1Q * 3)
+b4 = f_seg(spx, D1Q * 3, D1Y)
+
+_ok_rs  = not na(s1) and not na(s2) and not na(s3) and not na(s4)
+rs_stock = _ok_rs ? s1 * 0.4 + s2 * 0.2 + s3 * 0.2 + s4 * 0.2 : na
+_ok_rb  = not na(b1) and not na(b2) and not na(b3) and not na(b4)
+rs_spx  = _ok_rb ? b1 * 0.4 + b2 * 0.2 + b3 * 0.2 + b4 * 0.2 : na
+rs_vs_spx = not na(rs_stock) and not na(rs_spx) ? (rs_stock - rs_spx) * 100 : na
+
+// % From 52-week high
+hi52 = ta.highest(high, D1Y)
+pct_from_hi = not na(hi52) and hi52 != 0 ? (close - hi52) / hi52 * 100 : na
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  HELPER FUNCTIONS
+// ─────────────────────────────────────────────────────────────────────────────
+f_pct(v) => na(v) ? "N/A" : (v >= 0 ? "+" : "") + str.tostring(v, "#.#") + "%"
+f_x(v)   => na(v) ? "N/A" : str.tostring(v, "#.##") + "x"
+
+f_sig(pass, warn) => pass ? "▲ PASS" : warn ? "● WATCH" : "▼ FAIL"
+f_sig_color(pass, warn) =>
+    pass ? color.new(#00C853, 0) : warn ? color.new(#FFD600, 0) : color.new(#FF5252, 0)
+
+// EPS/Annual CAGR thresholds: ≥25% pass, 15-25% watch
+c_eps_p(v) => not na(v) and v >= 25.0
+c_eps_w(v) => not na(v) and v >= 15.0 and v < 25.0
+c_eps(v)   => f_sig_color(c_eps_p(v), c_eps_w(v))
+
+// Sales: ≥20% pass, 10-20% watch
+c_rev_p(v) => not na(v) and v >= 20.0
+c_rev_w(v) => not na(v) and v >= 10.0 and v < 20.0
+c_rev(v)   => f_sig_color(c_rev_p(v), c_rev_w(v))
+
+// ROE: ≥17% pass (O'Neil minimum), 10-17% watch
+c_roe_p(v) => not na(v) and v >= 17.0
+c_roe_w(v) => not na(v) and v >= 10.0 and v < 17.0
+c_roe(v)   => f_sig_color(c_roe_p(v), c_roe_w(v))
+
+// Net margin: ≥10% pass, 5-10% watch
+c_npm_p(v) => not na(v) and v >= 10.0
+c_npm_w(v) => not na(v) and v >= 5.0 and v < 10.0
+c_npm(v)   => f_sig_color(c_npm_p(v), c_npm_w(v))
+
+// D/E: ≤0.5 pass, 0.5-1.0 watch
+c_de_p(v) => not na(v) and v <= 0.5
+c_de_w(v) => not na(v) and v > 0.5 and v <= 1.0
+c_de(v)   => f_sig_color(c_de_p(v), c_de_w(v))
+
+// RS outperformance: >10% pass, 0-10% watch
+c_rs_p(v) => not na(v) and v > 10.0
+c_rs_w(v) => not na(v) and v >= 0.0 and v <= 10.0
+c_rs(v)   => f_sig_color(c_rs_p(v), c_rs_w(v))
+
+// % From 52w high: within -15% pass, -15 to -30% watch
+c_hi_p(v) => not na(v) and v >= -15.0
+c_hi_w(v) => not na(v) and v < -15.0 and v >= -30.0
+c_hi(v)   => f_sig_color(c_hi_p(v), c_hi_w(v))
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  TABLE
+// ─────────────────────────────────────────────────────────────────────────────
+var table tbl = table.new(tpos, 3, 20, bgcolor=color.new(#1E1E2E, 8), border_width=1, border_color=color.new(#44475A, 70), frame_width=1, frame_color=color.new(#6272A4, 40))
+
+COL_LABEL = color.new(#CDD6F4, 0)
+COL_DIM   = color.new(#6272A4, 0)
+BG_HDR    = color.new(#313244, 0)
+BG_SEC    = color.new(#282A36, 30)
+BG_A      = color.new(#1E1E2E, 20)
+BG_B      = color.new(#282A36, 10)
+
+// Header
+table.cell(tbl, 0, 0, "O'NEIL  |  " + syminfo.ticker,
+    text_color=color.white, bgcolor=BG_HDR, text_size=tsz, text_halign=text.align_left)
+table.cell(tbl, 1, 0, "VALUE",
+    text_color=COL_DIM, bgcolor=BG_HDR, text_size=tsz, text_halign=text.align_center)
+table.cell(tbl, 2, 0, "SIGNAL",
+    text_color=COL_DIM, bgcolor=BG_HDR, text_size=tsz, text_halign=text.align_center)
+
+var int r = 0
+r := 1
+
+f_row(row, label, val_str, val_color, sig_str, sig_color, bg) =>
+    table.cell(tbl, 0, row, label,
+        text_color=COL_LABEL, bgcolor=bg, text_size=tsz, text_halign=text.align_left)
+    table.cell(tbl, 1, row, val_str,
+        text_color=val_color, bgcolor=bg, text_size=tsz, text_halign=text.align_right)
+    table.cell(tbl, 2, row, sig_str,
+        text_color=sig_color, bgcolor=bg, text_size=tsz, text_halign=text.align_center)
+
+f_section(row, label) =>
+    table.cell(tbl, 0, row, label,
+        text_color=COL_DIM, bgcolor=BG_SEC, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(tbl, 1, row, "", bgcolor=BG_SEC)
+    table.cell(tbl, 2, row, "", bgcolor=BG_SEC)
+
+// ── EARNINGS ─────────────────────────────────────────────────────────────────
+if show_eps
+    f_section(r, "── EARNINGS (C + A)")
+    r := r + 1
+
+    f_row(r, "EPS Growth  Q1 (YoY)",
+        f_pct(eps_g1), c_eps(eps_g1),
+        na(eps_g1) ? "–" : f_sig(c_eps_p(eps_g1), c_eps_w(eps_g1)), c_eps(eps_g1), BG_A)
+    r := r + 1
+
+    f_row(r, "EPS Growth  Q2 (YoY)",
+        f_pct(eps_g2), c_eps(eps_g2),
+        na(eps_g2) ? "–" : f_sig(c_eps_p(eps_g2), c_eps_w(eps_g2)), c_eps(eps_g2), BG_B)
+    r := r + 1
+
+    accel_pass  = eps_accel and eps_g1 > eps_g2
+    accel_str   = not eps_accel ? "N/A" : accel_pass ? "Accelerating" : "Decelerating"
+    accel_color = not eps_accel ? COL_DIM : accel_pass ? color.new(#00C853,0) : color.new(#FF5252,0)
+    table.cell(tbl, 0, r, "EPS Acceleration",
+        text_color=COL_LABEL, bgcolor=BG_A, text_size=tsz, text_halign=text.align_left)
+    table.cell(tbl, 1, r, accel_str,
+        text_color=accel_color, bgcolor=BG_A, text_size=tsz, text_halign=text.align_right)
+    table.cell(tbl, 2, r, not eps_accel ? "–" : accel_pass ? "▲ PASS" : "▼ FAIL",
+        text_color=accel_color, bgcolor=BG_A, text_size=tsz, text_halign=text.align_center)
+    r := r + 1
+
+    f_row(r, "Annual EPS  3yr CAGR",
+        f_pct(eps_3yr), c_eps(eps_3yr),
+        na(eps_3yr) ? "–" : f_sig(c_eps_p(eps_3yr), c_eps_w(eps_3yr)), c_eps(eps_3yr), BG_B)
+    r := r + 1
+
+// ── SALES ────────────────────────────────────────────────────────────────────
+if show_sales
+    f_section(r, "── SALES")
+    r := r + 1
+
+    f_row(r, "Sales Growth Q1 (YoY)",
+        f_pct(rev_g1), c_rev(rev_g1),
+        na(rev_g1) ? "–" : f_sig(c_rev_p(rev_g1), c_rev_w(rev_g1)), c_rev(rev_g1), BG_A)
+    r := r + 1
+
+    f_row(r, "Sales Growth Q2 (YoY)",
+        f_pct(rev_g2), c_rev(rev_g2),
+        na(rev_g2) ? "–" : f_sig(c_rev_p(rev_g2), c_rev_w(rev_g2)), c_rev(rev_g2), BG_B)
+    r := r + 1
+
+// ── QUALITY ──────────────────────────────────────────────────────────────────
+if show_qual
+    f_section(r, "── QUALITY")
+    r := r + 1
+
+    f_row(r, "Return on Equity",
+        f_pct(roe), c_roe(roe),
+        na(roe) ? "–" : f_sig(c_roe_p(roe), c_roe_w(roe)), c_roe(roe), BG_A)
+    r := r + 1
+
+    f_row(r, "Net Profit Margin",
+        f_pct(npm), c_npm(npm),
+        na(npm) ? "–" : f_sig(c_npm_p(npm), c_npm_w(npm)), c_npm(npm), BG_B)
+    r := r + 1
+
+    f_row(r, "Debt / Equity",
+        f_x(de), c_de(de),
+        na(de) ? "–" : f_sig(c_de_p(de), c_de_w(de)), c_de(de), BG_A)
+    r := r + 1
+
+    cr_col = na(cur_r) ? COL_DIM : cur_r >= 2.0 ? color.new(#00C853,0) : cur_r >= 1.0 ? color.new(#FFD600,0) : color.new(#FF5252,0)
+    cr_sig = na(cur_r) ? "–" : cur_r >= 2.0 ? "▲ PASS" : cur_r >= 1.0 ? "● WATCH" : "▼ FAIL"
+    f_row(r, "Current Ratio", f_x(cur_r), cr_col, cr_sig, cr_col, BG_B)
+    r := r + 1
+
+// ── RELATIVE STRENGTH ────────────────────────────────────────────────────────
+if show_rs
+    f_section(r, "── PRICE STRENGTH (L)")
+    r := r + 1
+
+    f_row(r, "RS vs SPX  (12m wtd)",
+        f_pct(rs_vs_spx), c_rs(rs_vs_spx),
+        na(rs_vs_spx) ? "–" : f_sig(c_rs_p(rs_vs_spx), c_rs_w(rs_vs_spx)), c_rs(rs_vs_spx), BG_A)
+    r := r + 1
+
+    f_row(r, "% From 52w High",
+        f_pct(pct_from_hi), c_hi(pct_from_hi),
+        na(pct_from_hi) ? "–" : f_sig(c_hi_p(pct_from_hi), c_hi_w(pct_from_hi)), c_hi(pct_from_hi), BG_B)
+    r := r + 1
