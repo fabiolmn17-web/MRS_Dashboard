@@ -49,9 +49,7 @@ jobs:
         env:
           EP_MODE:  ${{ inputs.mode || steps.mode.outputs.mode }}
           UNIVERSE: russell1000
-        run: |
-          cd MRS_WebApp
-          python StockScanner/run_ep_scanner.py
+        run: python StockScanner/run_ep_scanner.py
 
       - name: Commit EP results
         run: |
