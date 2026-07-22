@@ -1,15 +1,18 @@
 """
 fundamentals.py — CAN SLIM fundamental calculations
 =====================================================
-3-tier data cascade (most reliable → least reliable):
+Data cascade (most reliable → least reliable):
 
-  Tier 1 — ticker.info pre-computed fields
-            earningsQuarterlyGrowth, revenueQuarterlyGrowth
-            (same Yahoo Finance database as TradingView request.financial)
-
-  Tier 2 — quarterly_income_stmt parsing
+  Tier 1 — quarterly_income_stmt parsing (PRIMARY)
             Basic EPS / Net Income rows, Revenue rows
-            (raw financial statements — broad coverage, sometimes stale)
+            Computes YoY exactly as TradingView request.financial():
+              FQ[0] vs FQ[-4] (most recent quarter vs same quarter 1yr ago)
+            Most accurate — directly from SEC filings.
+
+  Tier 2 — ticker.info pre-computed fields (FALLBACK)
+            earningsQuarterlyGrowth, revenueQuarterlyGrowth
+            Yahoo pre-computes these; often stale or on a different quarter.
+            Used only when Tier 1 income stmt is unavailable/insufficient.
 
   Tier 3 — proxy / estimation
             earningsGrowth (TTM proxy for annual check)
@@ -23,6 +26,8 @@ Missing-data policy:
 Thresholds aligned with Pine Script CAN SLIM Fundamentals indicator:
   EPS growth   STRICT ≥ 25%   RELAXED ≥ 20%
   Rev growth   STRICT ≥ 25%   RELAXED ≥ 15%
+
+EPS Acceleration: eps_qtr_yoy > eps_prev_qtr_yoy (recent quarter growing faster)
 """
 
 from typing import Any, Dict, List, Optional
@@ -74,49 +79,54 @@ class FundamentalCalculator:
                 except (TypeError, ValueError):
                     pass
 
-        # ── EPS growth: Tier 1 — ticker.info ─────────────────────────────────
-        eqg = info.get('earningsQuarterlyGrowth')
-        if eqg is not None:
-            try:
-                result['eps_qtr_yoy'] = float(eqg)
-            except (TypeError, ValueError):
-                pass
-
-        # ── EPS growth: Tier 2 — quarterly_income_stmt ───────────────────────
-        if result['eps_qtr_yoy'] is None and quarterly_income is not None:
+        # ── EPS growth: Tier 1 — quarterly_income_stmt (PRIMARY, matches TV) ──
+        if quarterly_income is not None:
             try:
                 if not getattr(quarterly_income, 'empty', True):
                     eps_data = self._extract_quarterly_eps(info, quarterly_income)
-                    result['eps_qtr_yoy']      = eps_data.get('q0_yoy')
-                    result['eps_prev_qtr_yoy'] = eps_data.get('q1_yoy')
+                    if eps_data.get('q0_yoy') is not None:
+                        result['eps_qtr_yoy']      = eps_data['q0_yoy']
+                        result['eps_prev_qtr_yoy'] = eps_data.get('q1_yoy')
+                        result['eps_source']        = 'stmt'
             except Exception:
                 pass
 
-        # ── EPS acceleration (prev quarter, Tier 2 only when Tier 1 used) ────
-        if result['eps_prev_qtr_yoy'] is None and quarterly_income is not None:
-            try:
-                if not getattr(quarterly_income, 'empty', True):
-                    eps_data = self._extract_quarterly_eps(info, quarterly_income)
-                    result['eps_prev_qtr_yoy'] = eps_data.get('q1_yoy')
-            except Exception:
-                pass
+        # ── EPS growth: Tier 2 — ticker.info pre-computed (fallback) ─────────
+        if result['eps_qtr_yoy'] is None:
+            eqg = info.get('earningsQuarterlyGrowth')
+            if eqg is not None:
+                try:
+                    result['eps_qtr_yoy'] = float(eqg)
+                    result['eps_source']  = 'yahoo'
+                except (TypeError, ValueError):
+                    pass
 
-        # ── Revenue growth: Tier 1 — ticker.info ─────────────────────────────
-        rqg = info.get('revenueQuarterlyGrowth')
-        if rqg is not None:
-            try:
-                result['rev_qtr_yoy'] = float(rqg)
-            except (TypeError, ValueError):
-                pass
-
-        # ── Revenue growth: Tier 2 — quarterly_income_stmt ───────────────────
-        if result['rev_qtr_yoy'] is None and quarterly_income is not None:
+        # ── Revenue growth: Tier 1 — quarterly_income_stmt (PRIMARY) ─────────
+        if quarterly_income is not None:
             try:
                 if not getattr(quarterly_income, 'empty', True):
                     rev_data = self._extract_quarterly_revenue(quarterly_income)
-                    result['rev_qtr_yoy'] = rev_data.get('q0_yoy')
+                    if rev_data.get('q0_yoy') is not None:
+                        result['rev_qtr_yoy'] = rev_data['q0_yoy']
+                        result['rev_source']  = 'stmt'
             except Exception:
                 pass
+
+        # ── Revenue growth: Tier 2 — ticker.info pre-computed (fallback) ─────
+        if result['rev_qtr_yoy'] is None:
+            rqg = info.get('revenueQuarterlyGrowth')
+            if rqg is not None:
+                try:
+                    result['rev_qtr_yoy'] = float(rqg)
+                    result['rev_source']  = 'yahoo'
+                except (TypeError, ValueError):
+                    pass
+
+        # ── EPS acceleration ──────────────────────────────────────────────────
+        eps_now  = result.get('eps_qtr_yoy')
+        eps_prev = result.get('eps_prev_qtr_yoy')
+        if eps_now is not None and eps_prev is not None:
+            result['eps_accelerating'] = bool(eps_now > eps_prev)
 
         # ── Quality metrics (Tier 1 only — all in info) ───────────────────────
         for key, field in [
@@ -275,7 +285,10 @@ class FundamentalCalculator:
             'eps_qtr_yoy':      None,
             'eps_prev_qtr_yoy': None,
             'eps_annual_proxy': None,
+            'eps_source':       None,   # 'stmt' | 'yahoo' | None
+            'eps_accelerating': None,   # True | False | None
             'rev_qtr_yoy':      None,
+            'rev_source':       None,   # 'stmt' | 'yahoo' | None
             'roe':              None,
             'profit_margin':    None,
             'debt_to_equity':   None,

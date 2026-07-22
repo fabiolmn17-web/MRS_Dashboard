@@ -218,7 +218,10 @@ def run_scan(
             'eps_qtr_yoy':        fund.get('eps_qtr_yoy'),
             'eps_prev_qtr_yoy':   fund.get('eps_prev_qtr_yoy'),
             'eps_annual_proxy':   fund.get('eps_annual_proxy'),
+            'eps_source':         fund.get('eps_source'),        # 'stmt'|'yahoo'
+            'eps_accelerating':   fund.get('eps_accelerating'),  # True|False|None
             'rev_qtr_yoy':        fund.get('rev_qtr_yoy'),
+            'rev_source':         fund.get('rev_source'),        # 'stmt'|'yahoo'
             'roe':                fund.get('roe'),
             'profit_margin':      fund.get('profit_margin'),
             'debt_to_equity':     fund.get('debt_to_equity'),
