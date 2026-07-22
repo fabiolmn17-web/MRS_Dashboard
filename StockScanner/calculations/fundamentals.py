@@ -1,70 +1,80 @@
 """
 fundamentals.py — CAN SLIM fundamental calculations
 =====================================================
-Data source: ticker.info from yfinance.
+3-tier data cascade (most reliable → least reliable):
 
-This matches TradingView's request.financial() data — both pull from
-Yahoo Finance's pre-computed fundamental database, not raw SEC filings.
-This is far more reliable than parsing quarterly_income_stmt, which
-returns empty or malformed data for a large fraction of stocks.
+  Tier 1 — ticker.info pre-computed fields
+            earningsQuarterlyGrowth, revenueQuarterlyGrowth
+            (same Yahoo Finance database as TradingView request.financial)
 
-Key metrics (mirrors the Pine Script CAN SLIM Fundamentals indicator):
-  C  - Current quarter EPS YoY growth  (earningsQuarterlyGrowth)
-  A  - Annual EPS 3yr CAGR             (derived from trailingEps / earningsGrowth)
-  S  - Quarterly revenue YoY growth    (revenueQuarterlyGrowth)
-  Quality extras: ROE, profit margin, D/E, current ratio (all from info)
+  Tier 2 — quarterly_income_stmt parsing
+            Basic EPS / Net Income rows, Revenue rows
+            (raw financial statements — broad coverage, sometimes stale)
 
-Thresholds (aligned with Pine indicator):
-  EPS growth  PASS ≥ 25%   WATCH ≥ 15%
-  Rev growth  PASS ≥ 20%   WATCH ≥ 10%
-  (scanner strict gate: EPS ≥ 25% AND Rev ≥ 25%)
-  (scanner relaxed gate: EPS ≥ 20% AND Rev ≥ 15%)
+  Tier 3 — proxy / estimation
+            earningsGrowth (TTM proxy for annual check)
+            trailingEps sign for TTM profitability
+
+Missing-data policy:
+  - If both EPS tiers fail → eps_qtr_yoy = None → stock fails on EPS gate
+  - If TTM profitability unknown → do NOT gate on it (avoid false rejections)
+  - Revenue gate applied only when data is available
+
+Thresholds aligned with Pine Script CAN SLIM Fundamentals indicator:
+  EPS growth   STRICT ≥ 25%   RELAXED ≥ 20%
+  Rev growth   STRICT ≥ 25%   RELAXED ≥ 15%
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 import logging
 import numpy as np
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
 
 class FundamentalCalculator:
-    """Compute CAN SLIM fundamental metrics from yfinance ticker.info."""
 
-    # ── Strict thresholds ─────────────────────────────────────────────────────
-    STRICT_EPS_MIN = 0.25   # 25% quarterly EPS YoY
-    STRICT_REV_MIN = 0.25   # 25% quarterly revenue YoY
+    STRICT_EPS_MIN  = 0.25
+    STRICT_REV_MIN  = 0.25
+    RELAXED_EPS_MIN = 0.20
+    RELAXED_REV_MIN = 0.15
 
-    # ── Relaxed thresholds ────────────────────────────────────────────────────
-    RELAXED_EPS_MIN = 0.20  # 20% quarterly EPS YoY
-    RELAXED_REV_MIN = 0.15  # 15% quarterly revenue YoY
+    # ── Public API ────────────────────────────────────────────────────────────
 
     def compute(
         self,
         info: Dict[str, Any],
-        quarterly_income=None,   # kept for API compatibility, no longer primary
+        quarterly_income=None,
     ) -> dict:
-        """
-        Compute fundamental metrics from ticker.info.
-
-        Primary fields used (all from Yahoo Finance's processed database):
-          earningsQuarterlyGrowth  — most-recent-quarter EPS YoY as decimal
-          revenueQuarterlyGrowth   — most-recent-quarter revenue YoY as decimal
-          returnOnEquity           — trailing ROE as decimal
-          profitMargins            — trailing net profit margin as decimal
-          debtToEquity             — trailing D/E (yfinance returns as %)
-          currentRatio             — most recent current ratio
-          trailingEps              — TTM EPS (positive = profitable TTM)
-          earningsGrowth           — TTM earnings growth YoY (used for annual proxy)
-
-        Falls back to quarterly_income_stmt for eps_prev_qtr_yoy only when
-        earningsQuarterlyGrowth is available (prior-quarter acceleration check).
-
-        Returns dict with all metrics + pass flags.
-        """
         result = self._empty_result()
 
-        # ── Primary: earningsQuarterlyGrowth (C in CAN SLIM) ─────────────────
+        # ── TTM profitability (Tier 1: trailingEps) ───────────────────────────
+        # When unknown, we do NOT gate on it (missing ≠ unprofitable).
+        trailing_eps = info.get('trailingEps')
+        if trailing_eps is not None:
+            try:
+                result['ttm_positive'] = float(trailing_eps) > 0
+            except (TypeError, ValueError):
+                pass
+        # Fallback: positive trailing PE implies positive earnings
+        if result['ttm_positive'] is None:
+            pe = info.get('trailingPE')
+            if pe is not None:
+                try:
+                    result['ttm_positive'] = float(pe) > 0
+                except (TypeError, ValueError):
+                    pass
+        # Fallback: netIncomeToCommon
+        if result['ttm_positive'] is None:
+            ni = info.get('netIncomeToCommon')
+            if ni is not None:
+                try:
+                    result['ttm_positive'] = float(ni) > 0
+                except (TypeError, ValueError):
+                    pass
+
+        # ── EPS growth: Tier 1 — ticker.info ─────────────────────────────────
         eqg = info.get('earningsQuarterlyGrowth')
         if eqg is not None:
             try:
@@ -72,7 +82,26 @@ class FundamentalCalculator:
             except (TypeError, ValueError):
                 pass
 
-        # ── Primary: revenueQuarterlyGrowth (S in CAN SLIM) ──────────────────
+        # ── EPS growth: Tier 2 — quarterly_income_stmt ───────────────────────
+        if result['eps_qtr_yoy'] is None and quarterly_income is not None:
+            try:
+                if not getattr(quarterly_income, 'empty', True):
+                    eps_data = self._extract_quarterly_eps(info, quarterly_income)
+                    result['eps_qtr_yoy']      = eps_data.get('q0_yoy')
+                    result['eps_prev_qtr_yoy'] = eps_data.get('q1_yoy')
+            except Exception:
+                pass
+
+        # ── EPS acceleration (prev quarter, Tier 2 only when Tier 1 used) ────
+        if result['eps_prev_qtr_yoy'] is None and quarterly_income is not None:
+            try:
+                if not getattr(quarterly_income, 'empty', True):
+                    eps_data = self._extract_quarterly_eps(info, quarterly_income)
+                    result['eps_prev_qtr_yoy'] = eps_data.get('q1_yoy')
+            except Exception:
+                pass
+
+        # ── Revenue growth: Tier 1 — ticker.info ─────────────────────────────
         rqg = info.get('revenueQuarterlyGrowth')
         if rqg is not None:
             try:
@@ -80,15 +109,16 @@ class FundamentalCalculator:
             except (TypeError, ValueError):
                 pass
 
-        # ── TTM profitability check ───────────────────────────────────────────
-        trailing_eps = info.get('trailingEps')
-        if trailing_eps is not None:
+        # ── Revenue growth: Tier 2 — quarterly_income_stmt ───────────────────
+        if result['rev_qtr_yoy'] is None and quarterly_income is not None:
             try:
-                result['ttm_positive'] = float(trailing_eps) > 0
-            except (TypeError, ValueError):
+                if not getattr(quarterly_income, 'empty', True):
+                    rev_data = self._extract_quarterly_revenue(quarterly_income)
+                    result['rev_qtr_yoy'] = rev_data.get('q0_yoy')
+            except Exception:
                 pass
 
-        # ── Quality metrics (display + optional gate) ─────────────────────────
+        # ── Quality metrics (Tier 1 only — all in info) ───────────────────────
         for key, field in [
             ('roe',            'returnOnEquity'),
             ('profit_margin',  'profitMargins'),
@@ -102,14 +132,11 @@ class FundamentalCalculator:
                 except (TypeError, ValueError):
                     pass
 
-        # yfinance returns debtToEquity as a percentage (e.g. 45.6 = 0.456 ratio)
-        # normalise to a ratio to match Pine's DEBT_TO_EQUITY field
+        # yfinance returns debtToEquity as percentage (45.6 = 0.456)
         if result['debt_to_equity'] is not None:
             result['debt_to_equity'] = result['debt_to_equity'] / 100.0
 
-        # ── Annual EPS proxy (A in CAN SLIM) ─────────────────────────────────
-        # earningsGrowth = TTM earnings YoY, used as annual proxy when 3yr CAGR
-        # is unavailable. Not a strict gate, display only.
+        # ── Annual EPS proxy (Tier 1) ─────────────────────────────────────────
         eg = info.get('earningsGrowth')
         if eg is not None:
             try:
@@ -117,31 +144,18 @@ class FundamentalCalculator:
             except (TypeError, ValueError):
                 pass
 
-        # ── Prior-quarter EPS (for acceleration display) ──────────────────────
-        # Attempt from quarterly_income_stmt as a secondary source.
-        # Not used as a gate, only for the acceleration indicator.
-        if quarterly_income is not None and not getattr(quarterly_income, 'empty', True):
-            try:
-                result['eps_prev_qtr_yoy'] = self._prev_qtr_yoy(info, quarterly_income)
-            except Exception:
-                pass
-
-        # ── Data quality assessment ───────────────────────────────────────────
-        result['data_quality'] = self._assess_quality(result)
-
-        # ── Pass / fail gates ─────────────────────────────────────────────────
+        # ── Data quality + pass flags ─────────────────────────────────────────
+        result['data_quality']   = self._assess_quality(result)
         result['passes_strict']  = self._check_strict(result)
         result['passes_relaxed'] = self._check_relaxed(result)
 
         return result
 
     def fetch_and_compute(self, ticker_symbol: str) -> dict:
-        """Full round-trip: fetch from yfinance + compute. Used in batch scan."""
         try:
             import yfinance as yf
-            t    = yf.Ticker(ticker_symbol)
-            info = t.info or {}
-            # Attempt quarterly income for prev-qtr acceleration (optional)
+            t      = yf.Ticker(ticker_symbol)
+            info   = t.info or {}
             income = None
             try:
                 income = t.quarterly_income_stmt
@@ -152,48 +166,58 @@ class FundamentalCalculator:
             logger.warning(f'{ticker_symbol}: fundamental fetch error: {e}')
             return self._empty_result(f'fetch_error: {e}')
 
-    # ── Private helpers ────────────────────────────────────────────────────────
+    # ── Income statement parsers (Tier 2) ────────────────────────────────────
 
-    def _prev_qtr_yoy(self, info: dict, income) -> Optional[float]:
-        """
-        Compute prior-quarter (Q-1) EPS YoY growth from quarterly_income_stmt.
-        Used only for the acceleration display metric, not as a gate.
-        Returns None if data unavailable.
-        """
-        import numpy as np
-        import pandas as pd
-
+    def _extract_quarterly_eps(self, info: dict, income: pd.DataFrame) -> dict:
         eps_row = self._find_row(income, ['Basic EPS', 'Diluted EPS'])
-        if eps_row is None:
-            # Fallback: net income / shares
-            ni_row = self._find_row(income, ['Net Income', 'Net Income Common Stockholders'])
-            if ni_row is None or len(income.columns) < 6:
-                return None
-            shares = (info.get('sharesOutstanding') or
-                      info.get('impliedSharesOutstanding'))
-            if not shares or shares <= 0:
-                return None
-            eps_row = ni_row / shares
+        if eps_row is not None and len(income.columns) >= 5:
+            return self._yoy_growth(eps_row)
+        # Fallback: net income / shares
+        ni_row = self._find_row(income, ['Net Income', 'Net Income Common Stockholders'])
+        if ni_row is None or len(income.columns) < 5:
+            return {}
+        shares = (info.get('sharesOutstanding') or
+                  info.get('impliedSharesOutstanding'))
+        if shares and shares > 0:
+            return self._yoy_growth(ni_row / shares)
+        return self._yoy_growth(ni_row)
 
-        if eps_row is None or len(eps_row.dropna()) < 6:
-            return None
-
-        vals = eps_row.dropna()
-        # columns newest-first: [0]=Q0, [1]=Q1, [4]=Q0_ya, [5]=Q1_ya
-        q1   = float(vals.iloc[1])
-        q1ya = float(vals.iloc[5])
-        if q1ya == 0 or np.isnan(q1ya):
-            return None
-        return (q1 - q1ya) / abs(q1ya)
+    def _extract_quarterly_revenue(self, income: pd.DataFrame) -> dict:
+        rev_row = self._find_row(income, ['Total Revenue', 'Revenue', 'Net Sales'])
+        if rev_row is None or len(income.columns) < 5:
+            return {}
+        return self._yoy_growth(rev_row)
 
     @staticmethod
-    def _find_row(df, candidates):
+    def _find_row(df: pd.DataFrame, candidates: List[str]) -> Optional[pd.Series]:
         for name in candidates:
             if name in df.index:
                 row = df.loc[name]
                 if row.notna().any():
                     return row
         return None
+
+    @staticmethod
+    def _yoy_growth(series: pd.Series) -> dict:
+        """
+        Compute YoY growth for Q0 and Q1.
+        Quarterly stmt columns are newest-first:
+          col[0]=Q0, col[1]=Q1, col[4]=Q0_ya, col[5]=Q1_ya
+        """
+        vals = series.dropna()
+        if len(vals) < 5:
+            return {}
+        q0, q4 = float(vals.iloc[0]), float(vals.iloc[4])
+        q0_yoy = (q0 - q4) / abs(q4) if q4 != 0 and not np.isnan(q4) else np.nan
+        q1_yoy = np.nan
+        if len(vals) >= 6:
+            q1, q5 = float(vals.iloc[1]), float(vals.iloc[5])
+            if q5 != 0 and not np.isnan(q5):
+                q1_yoy = (q1 - q5) / abs(q5)
+        return {'q0_yoy': q0_yoy if not np.isnan(q0_yoy) else None,
+                'q1_yoy': q1_yoy if not np.isnan(q1_yoy) else None}
+
+    # ── Scoring ───────────────────────────────────────────────────────────────
 
     def _assess_quality(self, r: dict) -> str:
         has_eps = not self._is_nan(r.get('eps_qtr_yoy'))
@@ -206,8 +230,12 @@ class FundamentalCalculator:
         return 'minimal'
 
     def _check_strict(self, r: dict) -> bool:
-        """Strict: 25% EPS + 25% Rev + TTM profitable."""
-        if not r.get('ttm_positive', False):
+        """
+        STRICT: EPS ≥ 25% AND Rev ≥ 25%.
+        TTM gate: only applied when ttm_positive is explicitly False.
+        Missing TTM data → do not reject.
+        """
+        if r.get('ttm_positive') is False:   # explicitly unprofitable
             return False
         eps = r.get('eps_qtr_yoy')
         if self._is_nan(eps) or eps < self.STRICT_EPS_MIN:
@@ -218,8 +246,11 @@ class FundamentalCalculator:
         return True
 
     def _check_relaxed(self, r: dict) -> bool:
-        """Relaxed: 20% EPS + 15% Rev + TTM profitable."""
-        if not r.get('ttm_positive', False):
+        """
+        RELAXED: EPS ≥ 20% AND Rev ≥ 15%.
+        TTM gate: only applied when ttm_positive is explicitly False.
+        """
+        if r.get('ttm_positive') is False:   # explicitly unprofitable
             return False
         eps = r.get('eps_qtr_yoy')
         if self._is_nan(eps) or eps < self.RELAXED_EPS_MIN:
