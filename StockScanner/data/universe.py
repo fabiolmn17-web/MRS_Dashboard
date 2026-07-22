@@ -180,42 +180,78 @@ class UniverseManager:
             logger.warning(f"Nasdaq 100 Wikipedia fetch failed: {e}")
         return []
 
-    def _fetch_russell_from_ishares(self, etf: str = "IWV") -> List[str]:
+    # Product IDs for iShares ETF holdings CSV downloads
+    _ISHARES_URLS = {
+        "IWB": "https://www.ishares.com/us/products/239707/ishares-russell-1000-etf/1467271812596.ajax?fileType=csv&fileName=IWB_holdings&dataType=fund",
+        "IWV": "https://www.ishares.com/us/products/239714/ishares-russell-3000-etf/1467271812596.ajax?fileType=csv&fileName=IWV_holdings&dataType=fund",
+        "IWM": "https://www.ishares.com/us/products/239710/ishares-russell-2000-etf/1467271812596.ajax?fileType=csv&fileName=IWM_holdings&dataType=fund",
+    }
+
+    def _fetch_russell_from_ishares(self, etf: str = "IWB") -> List[str]:
         """
-        Fetch Russell universe from iShares ETF holdings.
+        Fetch Russell universe from iShares ETF holdings CSV.
+        IWB = Russell 1000  (default — ~1000 large/mid caps)
         IWV = Russell 3000
-        IWB = Russell 1000
         IWM = Russell 2000
+
+        iShares CSVs have a variable-length metadata header before the
+        actual holdings table, so we locate the Ticker column row and
+        use on_bad_lines='skip' to tolerate field-count mismatches.
         """
-        url = f"https://www.ishares.com/us/products/239714/ishares-russell-3000-etf/1467271812596.ajax?fileType=csv&fileName={etf}_holdings&dataType=fund"
+        url = self._ISHARES_URLS.get(etf, self._ISHARES_URLS["IWB"])
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        }
 
         try:
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            }
             resp = requests.get(url, headers=headers, timeout=30)
             resp.raise_for_status()
 
-            lines = resp.text.split("\n")
-            start_idx = 0
+            lines = resp.text.splitlines()
+
+            # Find the header row that contains the "Ticker" column
+            header_idx = None
             for i, line in enumerate(lines):
-                if "Ticker" in line:
-                    start_idx = i
+                if line.startswith("Ticker") or ",Ticker," in line or line.startswith('"Ticker"'):
+                    header_idx = i
                     break
 
-            csv_data = "\n".join(lines[start_idx:])
-            df = pd.read_csv(StringIO(csv_data))
+            if header_idx is None:
+                logger.warning(f"iShares {etf}: could not locate Ticker header row")
+                return []
 
-            if "Ticker" in df.columns:
-                tickers = df["Ticker"].dropna().tolist()
-                tickers = [t for t in tickers if isinstance(t, str) and t.strip()]
-                tickers = [t.replace(".", "-") for t in tickers]
+            csv_data = "\n".join(lines[header_idx:])
+            df = pd.read_csv(
+                StringIO(csv_data),
+                on_bad_lines="skip",   # skip metadata trailer lines with wrong field count
+                dtype=str,
+            )
+
+            ticker_col = next((c for c in df.columns if c.strip() == "Ticker"), None)
+            if ticker_col is None:
+                logger.warning(f"iShares {etf}: Ticker column not found in parsed CSV")
+                return []
+
+            tickers = df[ticker_col].dropna().tolist()
+            tickers = [t.strip().replace(".", "-") for t in tickers if isinstance(t, str) and t.strip()]
+            # Drop cash, money-market, and blank placeholder rows
+            tickers = [t for t in tickers if t and not t.startswith("-") and len(t) <= 5]
+
+            if len(tickers) > 400:
                 logger.info(f"Fetched {len(tickers)} tickers from iShares {etf}")
                 return tickers
+            else:
+                logger.warning(f"iShares {etf}: only {len(tickers)} tickers — suspiciously low, discarding")
+                return []
+
         except Exception as e:
             logger.warning(f"Failed to fetch from iShares {etf}: {e}")
-
-        return []
+            return []
 
     def _fetch_from_nasdaq_api(self) -> List[str]:
         """Fetch all NASDAQ/NYSE listed stocks from NASDAQ's API."""
