@@ -217,8 +217,12 @@ def run_scan(
             # Fundamentals
             'eps_qtr_yoy':        fund.get('eps_qtr_yoy'),
             'eps_prev_qtr_yoy':   fund.get('eps_prev_qtr_yoy'),
+            'eps_annual_proxy':   fund.get('eps_annual_proxy'),
             'rev_qtr_yoy':        fund.get('rev_qtr_yoy'),
             'roe':                fund.get('roe'),
+            'profit_margin':      fund.get('profit_margin'),
+            'debt_to_equity':     fund.get('debt_to_equity'),
+            'current_ratio':      fund.get('current_ratio'),
             'ttm_positive':       fund.get('ttm_positive'),
             'data_quality':       fund.get('data_quality', ''),
             # Patterns
