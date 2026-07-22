@@ -322,7 +322,7 @@ class UniverseManager:
                 - "all_us": All NYSE/NASDAQ/AMEX
                 - "custom": Use custom ticker file
         """
-        source = source or self.config.get("universe.source", "russell3000")
+        source = (source or self.config.get("universe.source", "russell1000")).strip()
         logger.info(f"Loading universe: {source}")
 
         tickers = []
@@ -339,8 +339,11 @@ class UniverseManager:
         elif source == "russell3000":
             tickers = self._fetch_russell_from_ishares("IWV")
             if not tickers:
-                logger.warning("iShares fallback failed, using NASDAQ API")
-                tickers = self._fetch_from_nasdaq_api()
+                logger.warning("iShares IWV failed, falling back to Russell 1000 (IWB)")
+                tickers = self._fetch_russell_from_ishares("IWB")
+            if not tickers:
+                logger.warning("iShares fallback failed, using S&P 500 + Nasdaq 100")
+                tickers = list(set(self._fetch_sp500() + self._fetch_nasdaq100()))
         elif source == "all_us":
             tickers = self._fetch_from_nasdaq_api()
         elif source == "custom":
