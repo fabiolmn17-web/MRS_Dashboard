@@ -15,6 +15,7 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import requests
 import yfinance as yf
 from pathlib import Path
@@ -883,124 +884,161 @@ if len(hist90_vix_valid) > 0:
 # ══════════════════════════════════════════════════════════════════════════════
 st.markdown('<div class="section-header">Component History</div>', unsafe_allow_html=True)
 
-# Shared colour palette (consistent across both charts)
-_COMP_COLORS = {
-    'VIX':       '#60a5fa',   # blue
-    'Extension': '#f97316',   # orange
-    'Momentum':  '#4ade80',   # green
-    'ADL':       '#c084fc',   # purple
-    'B20%':      '#fbbf24',   # yellow
-    'SKEW':      '#22d3ee',   # cyan
-    'PC Ratio':  '#f472b6',   # pink
-    'Gamma':     '#a3e635',   # lime
-}
-
-_PHI_MAP = [
-    ('VIX',       'vix_phi'),
-    ('Extension', 'ext_phi'),
-    ('Momentum',  'mom_phi'),
-    ('ADL',       'adl_phi'),
-    ('B20%',      'b20_phi'),
-    ('SKEW',      'skew_phi'),
+_PHI_CFG = [
+    # (label, phi_col, line_color)
+    ('VIX',       'vix_phi',  '#60a5fa'),
+    ('Extension', 'ext_phi',  '#f97316'),
+    ('Momentum',  'mom_phi',  '#4ade80'),
+    ('ADL',       'adl_phi',  '#c084fc'),
+    ('B20%',      'b20_phi',  '#fbbf24'),
+    ('SKEW',      'skew_phi', '#22d3ee'),
 ]
 
-_SCORE_MAP = [
-    ('VIX',       'vix_score',   1.3),
-    ('Extension', 'ext_score',   1.2),
-    ('Momentum',  'mom_score',   1.0),
-    ('ADL',       'adl_score',   1.0),
-    ('B20%',      'b20_score',   1.1),
-    ('PC Ratio',  'pc_score',    1.4),
-    ('SKEW',      'skew_score',  1.3),
-    ('Gamma',     'gamma_score', 1.0),
-]
-
+# Prepare data — rows with at least one valid phi
 _hist_phi = hist90.copy()
-# Only use rows where at least one phi is non-zero
-_phi_cols = [c for _, c in _PHI_MAP if c in _hist_phi.columns]
-_hist_phi = _hist_phi[(_hist_phi[_phi_cols] != 0).any(axis=1)]
+_phi_cols = [c for _, c, _ in _PHI_CFG if c in _hist_phi.columns]
+_hist_phi = _hist_phi[(_hist_phi[_phi_cols].fillna(0) != 0).any(axis=1)].copy()
+_hist_phi['date'] = pd.to_datetime(_hist_phi['date'])
 
-# ── Chart A: Phi trajectories ─────────────────────────────────────────────────
-_fig_phi = go.Figure()
+# ── Chart A: Small multiples (2 × 3 grid) ────────────────────────────────────
+_fig_sm = make_subplots(
+    rows=2, cols=3,
+    subplot_titles=[lbl for lbl, _, _ in _PHI_CFG],
+    shared_xaxes=True,
+    shared_yaxes=True,
+    vertical_spacing=0.14,
+    horizontal_spacing=0.04,
+)
 
-# Threshold bands
-_fig_phi.add_hrect(y0=0, y1=0.30, fillcolor='rgba(239,68,68,0.08)',
-                   line_width=0, annotation_text='Danger zone',
-                   annotation_position='top left',
-                   annotation_font=dict(size=10, color='rgba(239,68,68,0.5)'))
-_fig_phi.add_hrect(y0=0.70, y1=1.0, fillcolor='rgba(34,197,94,0.08)',
-                   line_width=0, annotation_text='Positive zone',
-                   annotation_position='bottom left',
-                   annotation_font=dict(size=10, color='rgba(34,197,94,0.5)'))
-_fig_phi.add_hline(y=0.30, line_dash='dot', line_color='rgba(239,68,68,0.4)', line_width=1)
-_fig_phi.add_hline(y=0.70, line_dash='dot', line_color='rgba(34,197,94,0.4)', line_width=1)
+_DANGER_FILL  = 'rgba(239,68,68,0.12)'
+_POSITIVE_FILL = 'rgba(34,197,94,0.12)'
+_DANGER_LINE   = 'rgba(239,68,68,0.45)'
+_POSITIVE_LINE = 'rgba(34,197,94,0.45)'
 
-for label, col in _PHI_MAP:
+for _i, (label, col, color) in enumerate(_PHI_CFG):
+    _r, _c = _i // 3 + 1, _i % 3 + 1
     if col not in _hist_phi.columns:
         continue
-    _series = _hist_phi[col].replace(0, np.nan)
-    _fig_phi.add_trace(go.Scatter(
-        x=_hist_phi['date'], y=_series,
-        mode='lines', name=label,
-        line=dict(color=_COMP_COLORS[label], width=1.8),
-        hovertemplate=f'<b>{label}</b>: %{{y:.3f}}<extra></extra>',
-    ))
 
-_fig_phi.update_layout(**{
-    **LAYOUT_BASE,
-    'height': 280,
-    'showlegend': True,
-    'legend': dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0,
-                   font=dict(size=11), bgcolor='rgba(0,0,0,0)'),
-    'yaxis': dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)',
-                  title='Percentile Rank (Φ)', title_font_size=11,
-                  tickformat='.2f', range=[-0.02, 1.02], tickfont_size=11),
-    'margin': dict(l=0, r=0, t=30, b=0),
-})
-st.plotly_chart(_fig_phi, use_container_width=True)
+    _y = _hist_phi[col].replace(0, np.nan)
+    _x = _hist_phi['date']
 
-# ── Chart B: Weighted score contributions (stacked bar) ───────────────────────
+    # Threshold bands
+    _fig_sm.add_hrect(y0=0, y1=0.30, fillcolor=_DANGER_FILL,
+                      line_width=0, row=_r, col=_c)
+    _fig_sm.add_hrect(y0=0.70, y1=1.0, fillcolor=_POSITIVE_FILL,
+                      line_width=0, row=_r, col=_c)
+    _fig_sm.add_hline(y=0.30, line_dash='dot', line_color=_DANGER_LINE,
+                      line_width=1, row=_r, col=_c)
+    _fig_sm.add_hline(y=0.70, line_dash='dot', line_color=_POSITIVE_LINE,
+                      line_width=1, row=_r, col=_c)
+
+    # Phi line
+    _fig_sm.add_trace(go.Scatter(
+        x=_x, y=_y,
+        mode='lines',
+        line=dict(color=color, width=1.8),
+        showlegend=False,
+        hovertemplate=f'<b>{label}</b> %{{x|%b %d}}: Φ=%{{y:.3f}}<extra></extra>',
+    ), row=_r, col=_c)
+
+    # Current value dot (last non-NaN point)
+    _valid_mask = _y.notna()
+    if _valid_mask.any():
+        _last_idx  = _valid_mask[_valid_mask].index[-1]
+        _last_phi  = float(_y.loc[_last_idx])
+        _last_date = _x.loc[_last_idx]
+        _dot_color = ('#ef4444' if _last_phi < 0.30
+                      else '#22c55e' if _last_phi > 0.70
+                      else color)
+        _fig_sm.add_trace(go.Scatter(
+            x=[_last_date], y=[_last_phi],
+            mode='markers',
+            marker=dict(color=_dot_color, size=7, line=dict(color='white', width=1)),
+            showlegend=False, hoverinfo='skip',
+        ), row=_r, col=_c)
+
+_fig_sm.update_layout(
+    template='plotly_dark',
+    paper_bgcolor='rgba(0,0,0,0)',
+    plot_bgcolor='rgba(0,0,0,0)',
+    height=360,
+    showlegend=False,
+    margin=dict(l=0, r=0, t=36, b=0),
+)
+# Style all axes uniformly
+_fig_sm.update_yaxes(range=[0, 1], tickformat='.1f', tickfont_size=10, showgrid=False)
+_fig_sm.update_xaxes(tickformat='%b %d', tickfont_size=10, showgrid=False)
+# Style subplot titles
+for ann in _fig_sm.layout.annotations:
+    ann.update(font=dict(size=11, color='#9ca3af'))
+
+st.plotly_chart(_fig_sm, use_container_width=True)
+
+# ── Chart B: State heatmap ────────────────────────────────────────────────────
 st.markdown(
-    '<p style="color:#6b7280;font-size:0.72rem;margin:4px 0 8px 0;">'
-    'Score contribution = raw component score × weight. Bars stack to MRS composite.</p>',
+    '<p style="color:#6b7280;font-size:0.72rem;margin:2px 0 6px 0;">'
+    'State heatmap — red: Φ&lt;0.30 (danger) · grey: neutral · green: Φ&gt;0.70 (positive)</p>',
     unsafe_allow_html=True,
 )
 
-_fig_sc = go.Figure()
+# Build z matrix: rows=components, cols=dates
+_hm_labels = [lbl for lbl, _, _ in _PHI_CFG]
+_hm_dates  = _hist_phi['date'].tolist()
+_hm_z      = []
+_hm_text   = []
 
-for label, col, _w in _SCORE_MAP:
-    if col not in _hist_phi.columns:
-        continue
-    _weighted = (_hist_phi[col] * _w).replace(0, np.nan)
-    _fig_sc.add_trace(go.Bar(
-        x=_hist_phi['date'], y=_weighted,
-        name=label,
-        marker_color=_COMP_COLORS.get(label, '#6b7280'),
-        hovertemplate=f'<b>{label}</b>: %{{y:+.2f}}<extra></extra>',
-    ))
+for label, col, _ in _PHI_CFG:
+    _row_z    = []
+    _row_text = []
+    for phi_val in (_hist_phi[col].replace(0, np.nan) if col in _hist_phi.columns
+                    else pd.Series([np.nan] * len(_hist_phi))):
+        if pd.isna(phi_val):
+            _row_z.append(np.nan)
+            _row_text.append('—')
+        else:
+            _row_z.append(float(phi_val))
+            state = ('Danger' if phi_val < 0.30
+                     else 'Positive' if phi_val > 0.70
+                     else 'Neutral')
+            _row_text.append(f'Φ={phi_val:.3f} ({state})')
+    _hm_z.append(_row_z)
+    _hm_text.append(_row_text)
 
-# MRS composite line overlay
-_fig_sc.add_trace(go.Scatter(
-    x=_hist_phi['date'], y=_hist_phi['mrs_score'],
-    mode='lines', name='MRS',
-    line=dict(color='#ffffff', width=2, dash='dot'),
-    hovertemplate='<b>MRS</b>: %{y:+.2f}<extra></extra>',
+# Custom colorscale: red → dark grey (neutral) → green, with sharp breaks at thresholds
+_hm_colorscale = [
+    [0.00, '#7f1d1d'],
+    [0.20, '#ef4444'],
+    [0.29, '#fca5a5'],
+    [0.30, '#1f2937'],   # sharp neutral start
+    [0.70, '#1f2937'],   # sharp neutral end
+    [0.71, '#86efac'],
+    [0.90, '#22c55e'],
+    [1.00, '#14532d'],
+]
+
+_fig_hm = go.Figure(go.Heatmap(
+    z=_hm_z,
+    x=_hm_dates,
+    y=_hm_labels,
+    text=_hm_text,
+    hovertemplate='<b>%{y}</b> %{x|%b %d}: %{text}<extra></extra>',
+    colorscale=_hm_colorscale,
+    zmin=0, zmax=1,
+    showscale=False,
+    xgap=1, ygap=2,
 ))
-_fig_sc.add_hline(y=0, line_color='rgba(255,255,255,0.2)', line_width=1)
 
-_fig_sc.update_layout(**{
-    **LAYOUT_BASE,
-    'height': 260,
-    'barmode': 'relative',
-    'showlegend': True,
-    'legend': dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0,
-                   font=dict(size=11), bgcolor='rgba(0,0,0,0)'),
-    'yaxis': dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)',
-                  title='Weighted Score', title_font_size=11,
-                  tickformat='+.1f', tickfont_size=11),
-    'margin': dict(l=0, r=0, t=30, b=0),
-})
-st.plotly_chart(_fig_sc, use_container_width=True)
+_fig_hm.update_layout(
+    template='plotly_dark',
+    paper_bgcolor='rgba(0,0,0,0)',
+    plot_bgcolor='rgba(0,0,0,0)',
+    height=180,
+    margin=dict(l=0, r=0, t=4, b=0),
+    xaxis=dict(tickformat='%b %d', tickfont_size=10, showgrid=False),
+    yaxis=dict(tickfont_size=11, showgrid=False, autorange='reversed'),
+)
+st.plotly_chart(_fig_hm, use_container_width=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PC RATIO CONTEXT (collapsible)
