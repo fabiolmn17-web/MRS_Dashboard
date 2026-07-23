@@ -1,1 +1,1 @@
-ticker,name,sector,industry,gap_pct,today_open,prev_close,sma20,sma200,avg_vol_50d,pct_above_sma200,vol_ratio,scan_mode,headline,news_url,publisher,scan_date
+ticker,name,sector,industry,gap_pct,today_open,prev_close,sma20,sma200,avg_vol_50d,pct_above_sma200,vol_ratio,scan_mode,earnings_flag,days_since_earnings,headline,news_url,publisher,scan_date
