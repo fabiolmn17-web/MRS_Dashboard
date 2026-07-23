@@ -946,17 +946,17 @@ for label, col in _PHI_MAP:
         hovertemplate=f'<b>{label}</b>: %{{y:.3f}}<extra></extra>',
     ))
 
-_fig_phi.update_layout(
+_fig_phi.update_layout(**{
     **LAYOUT_BASE,
-    height=280,
-    showlegend=True,
-    legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0,
-                font=dict(size=11), bgcolor='rgba(0,0,0,0)'),
-    yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)',
-               title='Percentile Rank (Φ)', title_font_size=11,
-               tickformat='.2f', range=[-0.02, 1.02], tickfont_size=11),
-    margin=dict(l=0, r=0, t=30, b=0),
-)
+    'height': 280,
+    'showlegend': True,
+    'legend': dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0,
+                   font=dict(size=11), bgcolor='rgba(0,0,0,0)'),
+    'yaxis': dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)',
+                  title='Percentile Rank (Φ)', title_font_size=11,
+                  tickformat='.2f', range=[-0.02, 1.02], tickfont_size=11),
+    'margin': dict(l=0, r=0, t=30, b=0),
+})
 st.plotly_chart(_fig_phi, use_container_width=True)
 
 # ── Chart B: Weighted score contributions (stacked bar) ───────────────────────
@@ -988,18 +988,18 @@ _fig_sc.add_trace(go.Scatter(
 ))
 _fig_sc.add_hline(y=0, line_color='rgba(255,255,255,0.2)', line_width=1)
 
-_fig_sc.update_layout(
+_fig_sc.update_layout(**{
     **LAYOUT_BASE,
-    height=260,
-    barmode='relative',
-    showlegend=True,
-    legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0,
-                font=dict(size=11), bgcolor='rgba(0,0,0,0)'),
-    yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)',
-               title='Weighted Score', title_font_size=11,
-               tickformat='+.1f', tickfont_size=11),
-    margin=dict(l=0, r=0, t=30, b=0),
-)
+    'height': 260,
+    'barmode': 'relative',
+    'showlegend': True,
+    'legend': dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0,
+                   font=dict(size=11), bgcolor='rgba(0,0,0,0)'),
+    'yaxis': dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)',
+                  title='Weighted Score', title_font_size=11,
+                  tickformat='+.1f', tickfont_size=11),
+    'margin': dict(l=0, r=0, t=30, b=0),
+})
 st.plotly_chart(_fig_sc, use_container_width=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
