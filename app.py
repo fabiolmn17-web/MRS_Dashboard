@@ -879,6 +879,130 @@ if len(hist90_vix_valid) > 0:
     st.plotly_chart(fig_vix, use_container_width=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
+# COMPONENT HISTORY CHARTS
+# ══════════════════════════════════════════════════════════════════════════════
+st.markdown('<div class="section-header">Component History</div>', unsafe_allow_html=True)
+
+# Shared colour palette (consistent across both charts)
+_COMP_COLORS = {
+    'VIX':       '#60a5fa',   # blue
+    'Extension': '#f97316',   # orange
+    'Momentum':  '#4ade80',   # green
+    'ADL':       '#c084fc',   # purple
+    'B20%':      '#fbbf24',   # yellow
+    'SKEW':      '#22d3ee',   # cyan
+    'PC Ratio':  '#f472b6',   # pink
+    'Gamma':     '#a3e635',   # lime
+}
+
+_PHI_MAP = [
+    ('VIX',       'vix_phi'),
+    ('Extension', 'ext_phi'),
+    ('Momentum',  'mom_phi'),
+    ('ADL',       'adl_phi'),
+    ('B20%',      'b20_phi'),
+    ('SKEW',      'skew_phi'),
+]
+
+_SCORE_MAP = [
+    ('VIX',       'vix_score',   1.3),
+    ('Extension', 'ext_score',   1.2),
+    ('Momentum',  'mom_score',   1.0),
+    ('ADL',       'adl_score',   1.0),
+    ('B20%',      'b20_score',   1.1),
+    ('PC Ratio',  'pc_score',    1.4),
+    ('SKEW',      'skew_score',  1.3),
+    ('Gamma',     'gamma_score', 1.0),
+]
+
+_hist_phi = hist90.copy()
+# Only use rows where at least one phi is non-zero
+_phi_cols = [c for _, c in _PHI_MAP if c in _hist_phi.columns]
+_hist_phi = _hist_phi[(_hist_phi[_phi_cols] != 0).any(axis=1)]
+
+# ── Chart A: Phi trajectories ─────────────────────────────────────────────────
+_fig_phi = go.Figure()
+
+# Threshold bands
+_fig_phi.add_hrect(y0=0, y1=0.30, fillcolor='rgba(239,68,68,0.08)',
+                   line_width=0, annotation_text='Danger zone',
+                   annotation_position='top left',
+                   annotation_font=dict(size=10, color='rgba(239,68,68,0.5)'))
+_fig_phi.add_hrect(y0=0.70, y1=1.0, fillcolor='rgba(34,197,94,0.08)',
+                   line_width=0, annotation_text='Positive zone',
+                   annotation_position='bottom left',
+                   annotation_font=dict(size=10, color='rgba(34,197,94,0.5)'))
+_fig_phi.add_hline(y=0.30, line_dash='dot', line_color='rgba(239,68,68,0.4)', line_width=1)
+_fig_phi.add_hline(y=0.70, line_dash='dot', line_color='rgba(34,197,94,0.4)', line_width=1)
+
+for label, col in _PHI_MAP:
+    if col not in _hist_phi.columns:
+        continue
+    _series = _hist_phi[col].replace(0, np.nan)
+    _fig_phi.add_trace(go.Scatter(
+        x=_hist_phi['date'], y=_series,
+        mode='lines', name=label,
+        line=dict(color=_COMP_COLORS[label], width=1.8),
+        hovertemplate=f'<b>{label}</b>: %{{y:.3f}}<extra></extra>',
+    ))
+
+_fig_phi.update_layout(
+    **LAYOUT_BASE,
+    height=280,
+    showlegend=True,
+    legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0,
+                font=dict(size=11), bgcolor='rgba(0,0,0,0)'),
+    yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)',
+               title='Percentile Rank (Φ)', title_font_size=11,
+               tickformat='.2f', range=[-0.02, 1.02], tickfont_size=11),
+    margin=dict(l=0, r=0, t=30, b=0),
+)
+st.plotly_chart(_fig_phi, use_container_width=True)
+
+# ── Chart B: Weighted score contributions (stacked bar) ───────────────────────
+st.markdown(
+    '<p style="color:#6b7280;font-size:0.72rem;margin:4px 0 8px 0;">'
+    'Score contribution = raw component score × weight. Bars stack to MRS composite.</p>',
+    unsafe_allow_html=True,
+)
+
+_fig_sc = go.Figure()
+
+for label, col, _w in _SCORE_MAP:
+    if col not in _hist_phi.columns:
+        continue
+    _weighted = (_hist_phi[col] * _w).replace(0, np.nan)
+    _fig_sc.add_trace(go.Bar(
+        x=_hist_phi['date'], y=_weighted,
+        name=label,
+        marker_color=_COMP_COLORS.get(label, '#6b7280'),
+        hovertemplate=f'<b>{label}</b>: %{{y:+.2f}}<extra></extra>',
+    ))
+
+# MRS composite line overlay
+_fig_sc.add_trace(go.Scatter(
+    x=_hist_phi['date'], y=_hist_phi['mrs_score'],
+    mode='lines', name='MRS',
+    line=dict(color='#ffffff', width=2, dash='dot'),
+    hovertemplate='<b>MRS</b>: %{y:+.2f}<extra></extra>',
+))
+_fig_sc.add_hline(y=0, line_color='rgba(255,255,255,0.2)', line_width=1)
+
+_fig_sc.update_layout(
+    **LAYOUT_BASE,
+    height=260,
+    barmode='relative',
+    showlegend=True,
+    legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0,
+                font=dict(size=11), bgcolor='rgba(0,0,0,0)'),
+    yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)',
+               title='Weighted Score', title_font_size=11,
+               tickformat='+.1f', tickfont_size=11),
+    margin=dict(l=0, r=0, t=30, b=0),
+)
+st.plotly_chart(_fig_sc, use_container_width=True)
+
+# ══════════════════════════════════════════════════════════════════════════════
 # PC RATIO CONTEXT (collapsible)
 # ══════════════════════════════════════════════════════════════════════════════
 with st.expander('PC Ratio — Five-Zone Context'):
