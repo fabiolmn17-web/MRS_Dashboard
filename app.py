@@ -1392,7 +1392,8 @@ if _ep_df is not None and len(_ep_df) > 0:
     _ep_html += _ep_th(_eh, 'Vol Ratio',  8)
     _ep_html += _ep_th(_ec, '20>200 SMA', 9)
     _ep_html += _ep_th(_ec, 'Mode',       10)
-    _ep_html += _ep_th(_el, 'Headline',   11)
+    _ep_html += _ep_th(_ec, 'Earnings',  11)
+    _ep_html += _ep_th(_el, 'Headline',  12)
     _ep_html += '</tr></thead><tbody>'
 
     _TREND_CFG_EP = {
@@ -1414,10 +1415,12 @@ if _ep_df is not None and len(_ep_df) > 0:
         vol_ratio   = row.get('vol_ratio')
         sma20       = row.get('sma20')
         sma200      = row.get('sma200')
-        ep_mode     = str(row.get('scan_mode', 'confirmed'))
-        headline    = str(row.get('headline', ''))[:80]
-        news_url    = str(row.get('news_url', ''))
-        publisher   = str(row.get('publisher', ''))
+        ep_mode          = str(row.get('scan_mode', 'confirmed'))
+        earnings_flag    = bool(row.get('earnings_flag', False))
+        days_since_earn  = row.get('days_since_earnings')
+        headline         = str(row.get('headline', ''))[:80]
+        news_url         = str(row.get('news_url', ''))
+        publisher        = str(row.get('publisher', ''))
 
         # Sector score + trend
         ep_sect_score = _sector_score_map.get(disp_sect)
@@ -1482,6 +1485,17 @@ if _ep_df is not None and len(_ep_df) > 0:
         _ep_html += f'<td style="{_er}color:{vr_col};font-weight:600;" data-sort="{vr_val}">{vr_txt}</td>'
         _ep_html += f'<td style="{_erc}color:{sma_col};font-weight:700;" data-sort="{1 if sma_ok else 0}">{sma_txt}</td>'
         _ep_html += f'<td style="background:{mode_bg};color:{mode_col};font-weight:700;font-size:0.75rem;text-align:center;padding:6px 10px;border-bottom:1px solid #1f2937;" data-sort="{ep_mode}">{mode_lbl}</td>'
+
+        # Earnings flag cell
+        if earnings_flag:
+            days_tag = f' +{days_since_earn}d' if days_since_earn is not None else ''
+            earn_html = f'<span style="color:#fbbf24;font-weight:700;font-size:0.73rem;">⚡ EPS{days_tag}</span>'
+            earn_sort = 1
+        else:
+            earn_html = '<span style="color:#4b5563;">—</span>'
+            earn_sort = 0
+        _ep_html += f'<td style="{_erc}" data-sort="{earn_sort}">{earn_html}</td>'
+
         _ep_html += f'<td style="{_erl}max-width:340px;" data-sort="{headline}">{hl_html}</td>'
         _ep_html += '</tr>'
 

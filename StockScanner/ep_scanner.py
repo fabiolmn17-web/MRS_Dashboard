@@ -37,8 +37,8 @@ EP_CSV     = OUTPUT_DIR / 'ep_results.csv'
 
 # ── Thresholds ────────────────────────────────────────────────────────────────
 MIN_GAP       = 0.10     # 10% minimum gap (open vs prev close)
-MIN_VOL_RATIO = 2.0      # 2x 50-day avg volume
-MIN_AVG_VOL   = 50_000   # minimum 50k shares average daily volume
+MIN_VOL_RATIO = 1.5      # 1.5x 50-day avg volume
+MIN_AVG_VOL   = 500_000  # minimum 500k shares average daily volume
 SMA_SHORT     = 20
 SMA_LONG      = 200
 BATCH_SIZE    = 100
@@ -114,12 +114,50 @@ def run_ep_scan(
 
         c['scan_mode'] = mode
 
-        # Name / sector / industry
+        # Name / sector / industry + earnings flag
+        c['earnings_flag']      = False
+        c['days_since_earnings'] = None
         try:
-            info = yf.Ticker(ticker).info or {}
+            t    = yf.Ticker(ticker)
+            info = t.info or {}
             c['name']     = info.get('longName') or info.get('shortName', ticker)
             c['sector']   = info.get('sector', '')
             c['industry'] = info.get('industry', '')
+
+            # Earnings flag: was there an earnings release in the last 2 days?
+            today = date.today()
+            # earningsTimestamp = Unix timestamp of most recent earnings
+            et = info.get('earningsTimestamp') or info.get('mostRecentQuarter')
+            if et:
+                try:
+                    earnings_date = date.fromtimestamp(int(et))
+                    days_diff = (today - earnings_date).days
+                    c['days_since_earnings'] = days_diff
+                    c['earnings_flag'] = 0 <= days_diff <= 2
+                except Exception:
+                    pass
+
+            # Fallback: check calendar for upcoming/recent earnings
+            if not c['earnings_flag']:
+                try:
+                    cal = t.calendar
+                    if cal is not None and not cal.empty:
+                        # calendar index has 'Earnings Date' row
+                        if 'Earnings Date' in cal.index:
+                            ed = cal.loc['Earnings Date']
+                            for val in (ed if hasattr(ed, '__iter__') else [ed]):
+                                try:
+                                    ed_date = pd.Timestamp(val).date()
+                                    days_diff = (today - ed_date).days
+                                    if 0 <= days_diff <= 2:
+                                        c['earnings_flag'] = True
+                                        c['days_since_earnings'] = days_diff
+                                        break
+                                except Exception:
+                                    pass
+                except Exception:
+                    pass
+
         except Exception:
             c['name']     = ticker
             c['sector']   = ''
@@ -148,7 +186,8 @@ def run_ep_scan(
         except Exception as e:
             logger.debug(f'{ticker}: news error: {e}')
 
-        log(f'  ✓ {ticker}: +{c["gap_pct"]*100:.1f}% gap | {vol_ratio:.1f}x vol | {c["headline"][:50]}')
+        earn_tag = ' [EARNINGS]' if c['earnings_flag'] else ''
+        log(f'  ✓ {ticker}: +{c["gap_pct"]*100:.1f}% gap | {vol_ratio:.1f}x vol{earn_tag} | {c["headline"][:50]}')
         results.append(c)
         time.sleep(RATE_DELAY)
 
@@ -365,6 +404,7 @@ def _save_empty() -> pd.DataFrame:
         'gap_pct', 'today_open', 'prev_close',
         'sma20', 'sma200', 'avg_vol_50d', 'pct_above_sma200',
         'vol_ratio', 'scan_mode',
+        'earnings_flag', 'days_since_earnings',
         'headline', 'news_url', 'publisher',
         'scan_date',
     ]
