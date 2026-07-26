@@ -900,6 +900,14 @@ _phi_cols = [c for _, c, _ in _PHI_CFG if c in _hist_phi.columns]
 _hist_phi = _hist_phi[(_hist_phi[_phi_cols].fillna(0) != 0).any(axis=1)].copy()
 _hist_phi['date'] = pd.to_datetime(_hist_phi['date'])
 
+# Normalize SPX to [0, 1] for underlay overlay
+_spy_norm = None
+if 'spx' in _hist_phi.columns:
+    _spy_raw = _hist_phi['spx'].astype(float)
+    _spy_min, _spy_max = _spy_raw.min(), _spy_raw.max()
+    if _spy_max > _spy_min:
+        _spy_norm = (_spy_raw - _spy_min) / (_spy_max - _spy_min)
+
 # ── Chart A: Small multiples (2 × 3 grid) ────────────────────────────────────
 _fig_sm = make_subplots(
     rows=2, cols=3,
@@ -922,6 +930,16 @@ for _i, (label, col, color) in enumerate(_PHI_CFG):
 
     _y = _hist_phi[col].replace(0, np.nan)
     _x = _hist_phi['date']
+
+    # SPX underlay (normalized to [0,1])
+    if _spy_norm is not None:
+        _fig_sm.add_trace(go.Scatter(
+            x=_x, y=_spy_norm.values,
+            mode='lines',
+            line=dict(color='rgba(255,255,255,0.18)', width=1.2),
+            showlegend=False,
+            hoverinfo='skip',
+        ), row=_r, col=_c)
 
     # Threshold bands
     _fig_sm.add_hrect(y0=0, y1=0.30, fillcolor=_DANGER_FILL,
