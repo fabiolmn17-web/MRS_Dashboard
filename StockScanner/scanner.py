@@ -339,6 +339,35 @@ def _batch_download(
                 except Exception as e:
                     logger.debug(f'  {ticker}: extraction error: {e}')
 
+            # ── Staleness check ───────────────────────────────────────────────
+            # yf.download() can silently return stale/cached data for a SUBSET
+            # of tickers in a batch without raising an exception — the same
+            # failure mode found in the sector table. Detect tickers whose last
+            # bar lags the batch's own most-recent date and re-fetch them
+            # individually via yf.Ticker().history() (same fix pattern used
+            # elsewhere in this codebase for cloud-infra yfinance issues).
+            if results:
+                batch_tickers = [t for t in batch if t in results]
+                if batch_tickers:
+                    max_date = max(results[t].index.max() for t in batch_tickers)
+                    stale = [t for t in batch_tickers
+                             if results[t].index.max() < max_date - pd.Timedelta(days=2)]
+                    if stale:
+                        log(f'  Batch {batch_num}: {len(stale)} stale ticker(s), re-fetching individually...')
+                        for ticker in stale:
+                            try:
+                                t = yf.Ticker(ticker)
+                                df = t.history(start=start_str, end=end_str, auto_adjust=True)
+                                if df.empty:
+                                    continue
+                                df.index = pd.to_datetime(df.index).tz_localize(None)
+                                cols = [c for c in ['Open', 'High', 'Low', 'Close', 'Volume'] if c in df.columns]
+                                df = df[cols].dropna(subset=['Close'])
+                                if not df.empty and df.index.max() > results[ticker].index.max():
+                                    results[ticker] = df
+                            except Exception as e:
+                                logger.debug(f'  {ticker}: stale re-fetch error: {e}')
+
         except Exception as e:
             log(f'  Batch {batch_num} download error: {e}')
             # Fall back to individual downloads for failed batch
