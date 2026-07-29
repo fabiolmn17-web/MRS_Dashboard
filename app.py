@@ -1129,6 +1129,20 @@ st.markdown('<div class="section-header">S&P 500 Sector Performance &amp; Relati
 _sec_closes = load_sector_data()
 _sec_df     = build_sector_table(_sec_closes)
 
+# Debug: show the actual as-of date of the fetched data, and flag any ticker
+# whose last date lags behind the most recent one (partial-fetch staleness).
+if _sec_closes is not None and len(_sec_closes) > 0:
+    _last_dates = {c: _sec_closes[c].dropna().index.max() for c in _sec_closes.columns}
+    _max_date   = max(_last_dates.values())
+    _stale      = {c: d for c, d in _last_dates.items() if d < _max_date}
+    _staleness_msg = f'Sector data as of **{_max_date.strftime("%b %d, %Y")}**'
+    if _stale:
+        _lag_list = ', '.join(f'{c} ({d.strftime("%b %d")})' for c, d in _stale.items())
+        _staleness_msg += f'  \n:warning: Lagging tickers: {_lag_list}'
+    st.caption(_staleness_msg)
+else:
+    st.caption(':warning: Sector data fetch returned nothing.')
+
 if _sec_df is not None and len(_sec_df) > 0:
     def _pct(v, decimals=1):
         if v is None or (isinstance(v, float) and np.isnan(v)): return '—'
