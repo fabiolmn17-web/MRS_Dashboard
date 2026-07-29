@@ -72,16 +72,32 @@ def load_scanner_results():
 
 @st.cache_data(ttl=3600)
 def load_sector_data():
-    """Fetch ~14 months of daily closes for 11 SPDR ETFs + SPY. Cached 1 hour."""
+    """Fetch ~14 months of daily closes for 11 SPDR ETFs + SPY. Cached 1 hour.
+
+    Uses individual yf.Ticker().history() calls per ticker rather than bulk
+    yf.download() — the bulk endpoint silently returns stale/incomplete data
+    for a subset of tickers on cloud infra (same root cause as the Jun 2026
+    mrs_history gap; see pipeline.py / backfill.py for the same fix).
+    """
     tickers = list(SECTOR_MAP.keys()) + ['SPY']
-    try:
-        raw = yf.download(tickers, period='14mo', auto_adjust=True, progress=False)
-        closes = raw['Close'] if isinstance(raw.columns, pd.MultiIndex) else raw
-        closes.index = pd.to_datetime(closes.index).normalize().tz_localize(None)
-        return closes.dropna(how='all')
-    except Exception as e:
-        print(f'[sector] fetch error: {e}')
+    series_map = {}
+    for t in tickers:
+        try:
+            h = yf.Ticker(t).history(period='14mo', auto_adjust=True)
+            if h is None or h.empty or 'Close' not in h.columns:
+                print(f'[sector] {t}: empty history')
+                continue
+            s = h['Close'].copy()
+            s.index = pd.to_datetime(s.index).normalize().tz_localize(None)
+            series_map[t] = s
+        except Exception as e:
+            print(f'[sector] {t}: fetch error: {e}')
+
+    if not series_map:
         return None
+
+    closes = pd.DataFrame(series_map)
+    return closes.dropna(how='all')
 
 def _sector_composite_label(score):
     if score >=  1.5: return 'STRUCTURAL LEADER'
