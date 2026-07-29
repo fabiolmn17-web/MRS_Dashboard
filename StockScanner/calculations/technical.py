@@ -97,11 +97,14 @@ class TechnicalCalculator:
         result['high_52w']          = high_52w
         result['pct_from_ath']      = pct_from_ath
         result['pct_from_52w_high'] = pct_from_52w_high
-        within_20 = pct_from_ath >= -0.20  # within 20% of ATH
+        # Gate on 52-week high (CAN SLIM "N" = new/near 52W highs), not all-time
+        # high — using ATH rejected stocks that peaked years ago and are now
+        # making fresh 52W highs off a proper base, a core CAN SLIM setup.
+        within_20 = pct_from_52w_high >= -0.20  # within 20% of 52W high
         result['within_20pct_ath'] = within_20
 
         if not within_20:
-            result['fail_reason'] = f'too_far_from_ath_{pct_from_ath*100:.1f}pct'
+            result['fail_reason'] = f'too_far_from_52w_high_{pct_from_52w_high*100:.1f}pct'
             return result
 
         # Volume filter
