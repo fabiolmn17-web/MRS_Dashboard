@@ -1,2 +1,1 @@
-ticker,gap_pct,today_open,prev_close,sma20,sma200,avg_vol_50d,pct_above_sma200,vol_ratio,scan_mode,earnings_flag,days_since_earnings,name,sector,industry,headline,news_url,publisher,scan_date
-MRNA,0.8428,116.02,62.96,58.38,46.86,7252738.0,34.3,4.66,confirmed,False,20,"Moderna, Inc.",Healthcare,Biotechnology,"Moderna, Merck melanoma cancer vaccine is a 'grand slam': Dr. Ezekiel Emanuel",https://finance.yahoo.com/video/moderna-merck-melanoma-cancer-vaccine-is-a-grand-slam-dr-ezekiel-emanuel-202500008.html,Yahoo Finance Video,2026-08-20
+ticker,name,sector,industry,gap_pct,today_open,prev_close,sma20,sma200,avg_vol_50d,pct_above_sma200,vol_ratio,scan_mode,earnings_flag,days_since_earnings,headline,news_url,publisher,scan_date
