@@ -2,7 +2,7 @@
 app.py — MRS Live Dashboard (Streamlit)
 ========================================
 Password-protected. Reads mrs_history.csv and displays:
-  • Current regime score (MRS v3.0 scoring, Report v7.0) + percentile + signal quality
+  • Current regime score (MRS v4.0 scoring, v8 dispersion re-test) + percentile + signal quality
   • Risk Dial: forward dispersion profile of today's band (risk_dial.py)
   • 9-component breakdown table with weights and weighted contributions
   • VIX lifecycle state layer
@@ -618,7 +618,8 @@ with _rd_left:
     Long entered at today's close, SPY, all {reg} sessions since {ctx['start'].strftime('%b %Y')} (n={_n_band}).
     Large adverse / favorable = worst drawdown / best gain from entry reaches the move size within the window.
     Bad-case drawdown = 10th percentile; good-case run-up = 90th percentile. Descriptive — the
-    RISK-OFF vs RISK-ON contrast is confirmed after multiple-testing correction (Report v7.0 §4).
+    RISK-OFF vs RISK-ON contrast is confirmed after multiple-testing correction (Report v7.0 §4);
+    the v4.0 weights were checked out of sample in the v8 study.
     </div>
     """, unsafe_allow_html=True)
 
@@ -667,12 +668,12 @@ if _deep == 'DEEP RISK-OFF':
     st.markdown(
         f'<div class="hazard-row">🔴 DEEP RISK-OFF (score ≤ P10 = {ctx["p10"]:+.2f}). Historically NOT a bottom signal: '
         'over the next 10–20 sessions downside ran fatter than usual (10-session drop ≥3% in 29% of episodes vs 11% '
-        'baseline); the wide upside tended to come later. Exploratory — did not survive multiple-testing correction '
-        '(Report v7.0 §3).</div>', unsafe_allow_html=True)
+        'baseline); the wide upside tended to come later. Exploratory, tested on v3.0 scoring — did not survive '
+        'multiple-testing correction (Report v7.0 §3).</div>', unsafe_allow_html=True)
 elif _deep == 'DEEP RISK-ON':
     st.markdown(
         f'<div class="safe-row">🟢 DEEP RISK-ON (score ≥ P90 = {ctx["p90"]:+.2f}). Historically a calm path — shallow '
-        'drawdowns along the way, but no reliable edge in returns. Exploratory (Report v7.0 §3).</div>',
+        'drawdowns along the way, but no reliable edge in returns. Exploratory, tested on v3.0 scoring (Report v7.0 §3).</div>',
         unsafe_allow_html=True)
 
 st.divider()
@@ -728,7 +729,7 @@ with left:
         _w = pipeline.COMPONENT_WEIGHTS[w_key]
         try:
             sc_float = float(sc_v)
-            sc_f = f'{sc_float:+.1f}' if not np.isnan(sc_float) else '—'
+            sc_f = f'{sc_float:+.2f}' if not np.isnan(sc_float) else '—'
             ct_f = f'{sc_float * _w:+.2f}' if not np.isnan(sc_float) else '—'
             if not np.isnan(sc_float):
                 _contrib_total += sc_float * _w
@@ -750,7 +751,7 @@ with left:
             st_v = '—'
         # Special handling for Volume state - show vs 20d avg
         if name == 'Volume':
-            st_v = vol_vs_20d
+            st_v = f'{st_v} · {vol_vs_20d} · info only'
         rows.append({'Component': name, 'Raw Value': raw_f,
                      'Phi': phi_f, 'State': str(st_v), 'Score': sc_f,
                      'Weight': f'×{_w:.2f}', 'Contribution': ct_f})
@@ -770,8 +771,11 @@ with left:
     st.markdown("""
     <div style="font-size:0.72rem;color:#6b7280;margin-top:4px;">
     Phi = percentile rank over rolling 756-session window (3 years).
-    Score = component state score · Weight = v3.0 component weight (Report v7.0 §2) ·
-    Contribution = Score × Weight; contributions sum to the MRS composite.
+    Score = component state score (positive = calmer, negative = wider swings) ·
+    Weight = MRS v4.0 weight: VIX is the anchor (scored continuously from its Phi and
+    carrying the scale offset), Extension / Momentum / PC / SKEW / Breadth are an equal-weighted
+    context block, ADL and B20 share the Breadth weight, Volume is information only ·
+    Contribution = Score × Weight; contributions sum to the MRS composite (v8 study).
     </div>
     """, unsafe_allow_html=True)
 
@@ -783,16 +787,17 @@ with right:
     except: vix_phi_f = np.nan
 
     if not np.isnan(vix_phi_f) and vix_phi_f < 0.30:
-        vix_row_cls = 'hazard-row'
-        vix_txt = (f'🔴 COMPRESSION — VIX Phi = {vix_phi_f:.3f}. Latent fragility state. '
-                   f'Exit events historically elevate VIX +8% (5D, d=+0.46) and suppress SPY (d=−0.32).')
-    elif not np.isnan(vix_phi_f) and vix_phi_f > 0.70:
-        vix_row_cls = 'neutral-row'
-        vix_txt = (f'🟡 SPIKE ZONE — VIX Phi = {vix_phi_f:.3f}. Elevated VIX. '
-                   f'Post-spike SPY recovery: mean +2.91% vs +0.38% baseline (10D). Left-tail contracted.')
-    elif not np.isnan(vix_phi_f):
         vix_row_cls = 'safe-row'
-        vix_txt = f'🟢 MID RANGE — VIX Phi = {vix_phi_f:.3f}. Normal expansion phase. No structural signal.'
+        vix_txt = (f'🟢 LOW VIX — VIX Phi = {vix_phi_f:.3f}. Calmest swings historically: large-move '
+                   f'rate about half the all-sessions rate (0.49x at 10 sessions, 2008–2026). '
+                   f'Calm bases can break — watch the context components.')
+    elif not np.isnan(vix_phi_f) and vix_phi_f > 0.70:
+        vix_row_cls = 'hazard-row'
+        vix_txt = (f'🔴 HIGH VIX — VIX Phi = {vix_phi_f:.3f}. Widest two-sided swings: large-move '
+                   f'rate 1.3–2x the all-sessions rate (High / Stress, 2008–2026). Both tails are wide.')
+    elif not np.isnan(vix_phi_f):
+        vix_row_cls = 'neutral-row'
+        vix_txt = f'🟡 MID RANGE — VIX Phi = {vix_phi_f:.3f}. Swings near to slightly below average.'
     else:
         vix_row_cls = 'neutral-row'
         vix_txt = '⚪ VIX Phi: no data'
@@ -801,12 +806,10 @@ with right:
 
     if trig_days > 0:
         days_left = int(7 - trig_days)
-        st.markdown(f'<div class="hazard-row">🔴 COMPRESSION EXIT — Day {int(trig_days)} of 7. '
-                    f'Active SPY suppression window (d=−0.32 at 5D, persists to ~21D). '
-                    f'{days_left}d remaining in tracking window.</div>',
+        st.markdown(f'<div class="neutral-row">⚪ Compression exit — day {int(trig_days)} of 7 '
+                    f'({days_left}d left). Reference only: the earlier suppression effect did not '
+                    f'replicate in the v8 re-test (0.86x large-move rate, not significant).</div>',
                     unsafe_allow_html=True)
-    else:
-        st.markdown('<div class="safe-row">🟢 No active compression exit event</div>', unsafe_allow_html=True)
 
     st.markdown('<div class="section-header" style="margin-top:16px;">Zero Gamma Position</div>',
                 unsafe_allow_html=True)
@@ -1106,14 +1109,18 @@ for _i, (label, col, color) in enumerate(_PHI_CFG):
             hoverinfo='skip',
         ), row=_r, col=_c)
 
-    # Threshold bands
-    _fig_sm.add_hrect(y0=0, y1=0.30, fillcolor=_DANGER_FILL,
+    # Threshold bands — red = zone of wider swings, green = zone of calmer swings.
+    # For VIX a HIGH Phi is the wide-swing zone, so its bands are flipped.
+    _hi_wide = (label == 'VIX')
+    _lo_fill, _hi_fill = ((_POSITIVE_FILL, _DANGER_FILL) if _hi_wide else (_DANGER_FILL, _POSITIVE_FILL))
+    _lo_line, _hi_line = ((_POSITIVE_LINE, _DANGER_LINE) if _hi_wide else (_DANGER_LINE, _POSITIVE_LINE))
+    _fig_sm.add_hrect(y0=0, y1=0.30, fillcolor=_lo_fill,
                       line_width=0, row=_r, col=_c)
-    _fig_sm.add_hrect(y0=0.70, y1=1.0, fillcolor=_POSITIVE_FILL,
+    _fig_sm.add_hrect(y0=0.70, y1=1.0, fillcolor=_hi_fill,
                       line_width=0, row=_r, col=_c)
-    _fig_sm.add_hline(y=0.30, line_dash='dot', line_color=_DANGER_LINE,
+    _fig_sm.add_hline(y=0.30, line_dash='dot', line_color=_lo_line,
                       line_width=1, row=_r, col=_c)
-    _fig_sm.add_hline(y=0.70, line_dash='dot', line_color=_POSITIVE_LINE,
+    _fig_sm.add_hline(y=0.70, line_dash='dot', line_color=_hi_line,
                       line_width=1, row=_r, col=_c)
 
     # Phi line
@@ -1131,8 +1138,9 @@ for _i, (label, col, color) in enumerate(_PHI_CFG):
         _last_idx  = _valid_mask[_valid_mask].index[-1]
         _last_phi  = float(_y.loc[_last_idx])
         _last_date = _x.loc[_last_idx]
-        _dot_color = ('#ef4444' if _last_phi < 0.30
-                      else '#22c55e' if _last_phi > 0.70
+        _lo_c, _hi_c = (('#22c55e', '#ef4444') if _hi_wide else ('#ef4444', '#22c55e'))
+        _dot_color = (_lo_c if _last_phi < 0.30
+                      else _hi_c if _last_phi > 0.70
                       else color)
         _fig_sm.add_trace(go.Scatter(
             x=[_last_date], y=[_last_phi],
@@ -1161,7 +1169,8 @@ st.plotly_chart(_fig_sm, use_container_width=True)
 # ── Chart B: State heatmap ────────────────────────────────────────────────────
 st.markdown(
     '<p style="color:#6b7280;font-size:0.72rem;margin:2px 0 6px 0;">'
-    'State heatmap — red: Φ&lt;0.30 (danger) · grey: neutral · green: Φ&gt;0.70 (positive)</p>',
+    'State heatmap (v4.0 scores) — red: component pushing toward wider swings · grey: normal state · '
+    'green: pushing toward calmer swings</p>',
     unsafe_allow_html=True,
 )
 
@@ -1171,20 +1180,34 @@ _hm_dates  = _hist_phi['date'].tolist()
 _hm_z      = []
 _hm_text   = []
 
+_HM_SCORE = {'VIX': ('vix_score', None), 'Extension': ('ext_score', 'ext'), 'Momentum': ('mom_score', 'mom'),
+             'ADL': ('adl_score', 'adl'), 'B20%': ('b20_score', 'b20'), 'SKEW': ('skew_score', 'skew')}
 for label, col, _ in _PHI_CFG:
     _row_z    = []
     _row_text = []
-    for phi_val in (_hist_phi[col].replace(0, np.nan) if col in _hist_phi.columns
-                    else pd.Series([np.nan] * len(_hist_phi))):
-        if pd.isna(phi_val):
+    _sc_col, _nk = _HM_SCORE[label]
+    _phis = (_hist_phi[col].replace(0, np.nan) if col in _hist_phi.columns
+             else pd.Series([np.nan] * len(_hist_phi), index=_hist_phi.index))
+    _scs = (_hist_phi[_sc_col] if _sc_col in _hist_phi.columns
+            else pd.Series([np.nan] * len(_hist_phi), index=_hist_phi.index))
+    for phi_val, sc_val in zip(_phis, _scs):
+        if pd.isna(phi_val) or pd.isna(sc_val):
             _row_z.append(np.nan)
             _row_text.append('—')
+            continue
+        # VIX is continuous: use its state bands (Low calm, Mid normal, High/Stress wide)
+        if _nk is None:
+            _d = 1.0 if phi_val < 0.30 else (-1.0 if phi_val >= 0.60 else 0.0)
         else:
-            _row_z.append(float(phi_val))
-            state = ('Danger' if phi_val < 0.30
-                     else 'Positive' if phi_val > 0.70
-                     else 'Neutral')
-            _row_text.append(f'Φ={phi_val:.3f} ({state})')
+            _d = float(sc_val) - pipeline.NEUTRAL_SCORE[_nk]
+        _tol = 1e-9
+        if _d < -_tol:
+            _row_z.append(0.15); _st = 'toward wider swings'
+        elif _d > _tol:
+            _row_z.append(0.85); _st = 'toward calmer swings'
+        else:
+            _row_z.append(0.5); _st = 'normal'
+        _row_text.append(f'Φ={phi_val:.3f}, score {float(sc_val):+.2f} ({_st})')
     _hm_z.append(_row_z)
     _hm_text.append(_row_text)
 
@@ -1234,31 +1257,29 @@ if _pc_stale >= 3:
         'Stale PC values caused most of the Apr–Sep 2026 drift (Report v7.0 §2.4).</div>',
         unsafe_allow_html=True)
 
-with st.expander('PC Ratio — Five-Zone Context (v3.0 scores)', expanded=_pc_stale >= 3):
+with st.expander('PC Ratio — Five-Zone Context (v4.0 scores)', expanded=_pc_stale >= 3):
     pc_sma10 = last.get('pc_sma10', np.nan)
     pc_daily = last.get('pc_ratio', np.nan)
     try:
         pc10 = float(pc_sma10)
         if pc10 < 0.686:
-            zone, note = 'Extreme LOW', ('Lowest tail risk of any zone: 21D TRR 0.56, and no 63-session return below '
-                                         '−10% in 20 years of history (63D TRR 0.00). Score +1.0.')
+            zone, note = 'Extreme LOW', ('Complacency zone. Swings a little narrower than average '
+                                         '(large-move rate 0.84x / 0.74x at 10 / 21 sessions). Score +0.25.')
             zcol = '#22c55e'
         elif pc10 < 0.732:
-            zone, note = 'Moderate LOW', ('Protective at 21 sessions (TRR 0.67) but elevated tail risk at 63 '
-                                          '(TRR 1.67) — horizon-dependent. Score +0.5.')
+            zone, note = 'Moderate LOW', 'Slightly narrower swings than average (0.77x / 0.88x). Score +0.25.'
             zcol = '#86efac'
         elif pc10 < 0.944:
-            zone, note = 'Mid', 'No distributional edge (TRR ≈ 1.0 at both horizons). Score 0.0.'
+            zone, note = 'Mid', 'Normal zone, slightly narrower swings than average (0.88x / 0.86x). Score +0.25.'
             zcol = '#6b7280'
         elif pc10 < 1.003:
-            zone, note = 'Moderate HIGH', ('Highest near-term tail-risk ratio of any zone: 21D TRR 1.45. '
-                                           'Score −1.0 (was +0.5 before v3.0).')
-            zcol = '#ef4444'
+            zone, note = 'Moderate HIGH', ('Fear building: wider swings (1.42x / 1.49x). Score −0.25.')
+            zcol = '#f59e0b'
         else:
-            zone, note = 'Extreme HIGH', ('Downside near baseline at 21 sessions (TRR 0.98) with the strongest '
-                                          'upside of any zone (P(21D > +5%) = 32% vs 13%), but elevated 63D tail '
-                                          'risk (TRR 1.43) — double-edged. Score +1.0 held; open item.')
-            zcol = '#facc15'
+            zone, note = 'Extreme HIGH', ('Heavy put buying: the widest swings of any zone in BOTH directions '
+                                          '(1.79x at 10 and 21 sessions). Its strong upside tail is part of that wide '
+                                          'distribution, not a calm signal. Score −0.5 (was +1.0 in v3.0).')
+            zcol = '#ef4444'
         col1, col2, col3 = st.columns(3)
         col1.metric('PC SMA-10', f'{pc10:.3f}')
         col2.metric('Daily PC', f'{float(pc_daily):.3f}' if not np.isnan(float(pc_daily)) else '—')
@@ -1270,18 +1291,18 @@ with st.expander('PC Ratio — Five-Zone Context (v3.0 scores)', expanded=_pc_st
         </div>
         """, unsafe_allow_html=True)
         st.markdown("""
-        | Zone | SMA-10 | v3.0 score | 21D TRR | 63D TRR | Note |
+        | Zone | SMA-10 | v4.0 score | Large-move rate 10D | 21D | v3.0 score |
         |------|--------|-----------|---------|---------|------|
-        | Extreme LOW | < 0.686 | **+1.0** | 0.56 | 0.00 | was +0.5 |
-        | Moderate LOW | 0.686–0.732 | **+0.5** | 0.67 | 1.67 | was −0.5 |
-        | Mid | 0.732–0.944 | 0.0 | 1.05 | 1.03 | |
-        | Moderate HIGH | 0.944–1.003 | **−1.0** | 1.45 | 0.84 | was +0.5 |
-        | Extreme HIGH | ≥ 1.003 | +1.0 | 0.98 | 1.43 | held — upside edge, open item |
+        | Extreme LOW | < 0.686 | **+0.25** | 0.84x | 0.74x | +1.0 |
+        | Moderate LOW | 0.686–0.732 | **+0.25** | 0.77x | 0.88x | +0.5 |
+        | Mid | 0.732–0.944 | +0.25 | 0.88x | 0.86x | 0.0 |
+        | Moderate HIGH | 0.944–1.003 | **−0.25** | 1.42x | 1.49x | −1.0 |
+        | Extreme HIGH | ≥ 1.003 | **−0.5** | 1.79x | 1.79x | +1.0 |
 
-        TRR = share of sessions followed by SPX < −5% (21D) or < −10% (63D), relative to all sessions;
-        USI:PC 2006–2026 (Report v6.1 §2.5.2). Cutoffs sit at the ~10th / 18th / 80th / 90th percentile.
-        TRRs are point estimates: on non-overlapping samples no single zone differs significantly
-        from the rest (Report v7.0 §2.5).
+        Large-move rate = share of sessions followed by a move of ±3% (10D) or ±5% (21D) in either
+        direction, relative to all sessions, 2008–2026 (v8 study). Scores are for the dashboard's
+        dispersion job: positive = calmer, negative = wider swings. Cutoffs sit at the ~10th / 18th /
+        80th / 90th percentile of the 10-day average.
         """)
     except:
         st.write('PC SMA-10 data not available.')

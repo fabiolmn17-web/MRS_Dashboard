@@ -1,5 +1,5 @@
 """
-risk_dial.py — MRS as a dispersion ("risk dial") signal  (Report v7.0)
+risk_dial.py — MRS as a dispersion ("risk dial") signal  (Report v7.0, MRS v4.0 scoring)
 ======================================================================
 Report v7.0 found that the MRS band does not reliably predict the DIRECTION
 of the next 5-60 sessions, but it does predict their SPREAD: RISK-OFF is
@@ -38,14 +38,15 @@ BAND_GUIDANCE = {
                 'volatility tends to rise from here in relative terms.'),
     'MILD RISK-ON': ('Fairly calm',
                      'Swings a little wider than RISK-ON; still a low-dispersion regime.'),
-    'NEUTRAL': ('Average dispersion',
-                'Close to the all-days baseline. No dispersion edge either way.'),
+    'NEUTRAL': ('Middle of the range',
+                'Swings wider than the calm bands but still below the all-days average '
+                '(which RISK-OFF periods pull up). No strong dispersion signal either way.'),
     'MILD RISK-OFF': ('Widening range',
-                      'Favorable excursions already exceed the all-days baseline; '
-                      'adverse excursions are close to baseline.'),
+                      'Adverse moves are about as frequent as the all-days average and '
+                      'favorable moves start to widen. The large widening happens in RISK-OFF.'),
     'RISK-OFF': ('Wide, two-sided',
                  'Largest swings both ways: a large adverse move is about 3x as likely '
-                 'as in RISK-ON, and a large favorable move about 4x. Keep initial risk '
+                 'as in RISK-ON, and a large favorable move 5x or more. Keep initial risk '
                  'small and cut quickly if a new long does not work; give a long that is '
                  'working more room, because the upside tail is widest here.'),
 }

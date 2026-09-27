@@ -31,27 +31,48 @@ PHI_W    = 756   # 3-year rolling window (~756 trading days)
 CBOE_URL = ('https://cdn.cboe.com/data/us/options/market_statistics/'
             'daily_puts_calls.csv')
 
-# ── Component Weights (MRS v3.0 — Sept 2026 calibration, Report v7.0) ─────────
-# VIX / Extension / Momentum / ADL / SKEW are set proportional to each
-# component's mean 21-day Tail Risk Ratio across 1/2/3/5-year Phi windows
-# (Report v6.1 §2.3–2.5), rescaled so the five still sum to 5.80 — the same
-# total as the v2.0 weights, so the composite's overall scale is preserved.
-# SKEW uses the extended 1990–2026 history (§2.5.3).
-# B20, PC, Gamma, Volume are unchanged (not re-tested for weight; see v7.0 §7).
-# Previous v2.0 weights (July 2026): vix 1.3, ext 1.2, mom 1.0, adl 1.0,
-# b20 1.1, pc 1.4, skew 1.3, gamma 1.0, vol 1.0.
+# ── Component Weights (MRS v4.0 — Sept 2026, v8 component re-test) ───────────
+# The dashboard is used as a DISPERSION dial: negative = wider two-sided swings
+# over the next 5-60 sessions, positive = calmer, narrower market. v4.0 weights
+# and state scores are calibrated to that job (research/studies/v8_component_retest):
+#   * State score = -ln(large-move rate in that state / all sessions), averaged
+#     over 10 and 21 sessions, 2008-2026, rounded to 0.25. Every state's sign is
+#     the same in 2008-16 and 2017-26.
+#   * VIX is the anchor (~65% of the score's variation) and is scored
+#     continuously from its Phi; VIX Phi alone matched or beat the v3.0
+#     composite out of sample.
+#   * Extension, Momentum, PC, SKEW and Breadth form an equal-weighted context
+#     block (~35%); ADL and B20 share one Breadth weight (they were
+#     double-counted before). The context block adds information within a VIX
+#     regime (clearly 2017-26, weaker 2008-16).
+#   * Volume Divergence is shown for information only (weight 0): it marks a
+#     calm uptrend, not distribution, and was not distinctive at drawdown peaks.
+#   * Out of sample (split halves) v4.0 was never worse than v3.0 or VIX alone;
+#     better than v3.0 in 5 of 8 tests, better than VIX alone in 2 of 8.
+#   * The overall scale matches v3.0 (same SD and mean over 2008-2026), so the
+#     band cut-offs 1.5 / 0.5 / -0.5 / -1.5 are unchanged.
+# Previous v3.0 weights: vix 1.34, ext 0.91, mom 1.25, adl 1.16, b20 1.10,
+# pc 1.40, skew 1.14, gamma 1.0, vol 1.0.
 COMPONENT_WEIGHTS = {
-    'vix':  1.34,  # mean 21D TRR 1.53
-    'ext':  0.91,  # mean 21D TRR 1.04 — no measurable edge at any window
-    'mom':  1.25,  # mean 21D TRR 1.43
-    'adl':  1.16,  # mean 21D TRR 1.33
-    'b20':  1.10,  # unchanged — joint B20+ADL condition not yet re-tested
-    'pc':   1.40,  # unchanged weight; zone scores revised (score_pc)
-    'skew': 1.14,  # mean 21D TRR 1.31 (extended 1990–2026 sample)
-    'gamma': 1.0,  # unchanged — no validation study yet
-    'vol':  1.0,   # unchanged — no validation study yet
+    'vix':   2.22,  # anchor; score = VIX_INTERCEPT - 3 x vix_phi (continuous)
+    'ext':   0.91,  # context block, equal weights
+    'mom':   0.91,
+    'adl':   0.45,  # Breadth = ADL + B20, half weight each
+    'b20':   0.45,
+    'pc':    0.91,
+    'skew':  0.91,
+    'gamma': 1.0,   # unchanged — zero-gamma amplifier study pending (needs GEX history)
+    'vol':   0.0,   # information only
 }
-SCORING_VERSION = 'MRS v3.0 (Sept 2026, Report v7.0)'
+# VIX score = VIX_INTERCEPT - 3 x Phi: +0.91 at Phi 0 ... 0 at Phi ~0.30 ... -2.09 at Phi 1.
+# The intercept carries the calibration offset that keeps the v3.0 scale.
+VIX_INTERCEPT = 0.906
+SCORING_VERSION = 'MRS v4.0 (Sept 2026, v8 dispersion re-test)'
+
+# Score each component sits at in its "normal" state — used to tell which
+# components are pushing the dial away from normal (signal-quality text).
+NEUTRAL_SCORE = {'ext': 0.25, 'mom': 0.25, 'adl': 0.25, 'b20': 0.25,
+                 'pc': 0.25, 'skew': 0.0, 'gamma': 0.0}
 
 HIST_COLS = [
     'date', 'spy', 'spx', 'vix', 'skew', 'pc_ratio',
@@ -107,64 +128,65 @@ def fetch_cboe_pc() -> pd.Series:
     return pd.Series(dtype=float)
 
 
-# ── Scoring functions ──────────────────────────────────────────────────────────
+# ── Scoring functions (MRS v4.0) ───────────────────────────────────────────────
+# Positive = calmer / narrower market, negative = wider two-sided swings.
+# Ratios in the comments: large-move rate vs all sessions (10D / 21D, 2008-2026).
 def score_vix(phi: float):
-    if np.isnan(phi): return  0.0, 'No data'
-    if phi < 0.30:    return  1.0, 'Low'
-    if phi < 0.60:    return  0.0, 'Mid'
-    if phi < 0.80:    return -0.5, 'High'
-    return -1.5, 'Stress'
+    """Continuous anchor. State labels keep the old cut-offs for reading."""
+    if np.isnan(phi): return 0.0, 'No data'
+    s = round(VIX_INTERCEPT - 3.0 * phi, 2)
+    if phi < 0.30:    return s, 'Low'      # 0.49x / 0.48x
+    if phi < 0.60:    return s, 'Mid'      # 0.80x / 0.75x
+    if phi < 0.80:    return s, 'High'     # 1.27x / 1.26x
+    return s, 'Stress'                     # 1.89x / 1.98x
 
 def score_extension(phi: float):
     if np.isnan(phi): return 0.0, 'No data'
-    if phi < 0.30:    return -0.5, 'Compressed'
-    if phi < 0.70:    return  0.0, 'Normal'
-    return -0.5, 'Extended'
+    if phi < 0.30:    return -0.5,  'Compressed'   # 1.65x / 1.72x
+    if phi < 0.70:    return  0.25, 'Normal'       # 0.76x / 0.71x
+    return 0.5, 'Extended'                         # 0.68x / 0.67x (was -0.5)
 
 def score_momentum(phi: float):
     if np.isnan(phi): return 0.0, 'No data'
-    if phi < 0.30:    return -1.0, 'Weak'
-    if phi < 0.70:    return  0.0, 'Normal'
-    return 0.5, 'Strong'
+    if phi < 0.30:    return -0.5,  'Weak'         # 1.58x / 1.67x
+    if phi < 0.70:    return  0.25, 'Normal'       # 0.85x / 0.84x
+    return 0.5, 'Strong'                           # 0.69x / 0.63x
 
 def score_adl(phi: float):
     if np.isnan(phi): return 0.0, 'No data'
-    if phi < 0.30:    return -1.0, 'Weak'
-    if phi < 0.70:    return  0.0, 'Normal'
-    return 0.0, 'Strong'
+    if phi < 0.30:    return -0.5,  'Weak'         # 1.48x / 1.51x
+    if phi < 0.70:    return  0.25, 'Normal'       # 0.82x / 0.80x
+    return 0.25, 'Strong'                          # 0.78x / 0.79x (was 0)
 
-def score_b20(phi: float, adl_phi: float):
+def score_b20(phi: float, adl_phi: float = np.nan):
+    """B20 Low is now scored on its own (v8: it adds short-horizon information
+    with or without ADL Weak). adl_phi kept in the signature for compatibility."""
     if np.isnan(phi): return 0.0, 'No data'
-    if phi < 0.30:
-        s = -0.5 if (not np.isnan(adl_phi) and adl_phi < 0.30) else 0.0
-        return s, 'Low'
-    if phi < 0.70: return 0.0, 'Normal'
-    return 0.5, 'High'
+    if phi < 0.30:    return -0.5,  'Low'          # 1.51x / 1.46x
+    if phi < 0.70:    return  0.25, 'Normal'       # 0.83x / 0.81x
+    return 0.25, 'High'                            # 0.74x / 0.81x
 
 def score_pc(pc: float, pc_sma10: float):
-    """Five-Zone Model — zone cutoffs from June 2026 (Studies 7 & 8);
-    zone SCORES revised Sept 2026 (Report v6.1 §2.5.2 / v7.0) from 21-day
-    Tail Risk Ratios on the 2006–2026 USI:PC history.
-    Cutoffs sit at the ~10th / 18th / 80th / 90th percentile of pc_sma10.
-    Previous scores: +0.5 / -0.5 / 0.0 / +0.5 / +1.0.
-    Extreme HIGH kept at +1.0 (open item: its edge is upside/mean, which a
-    downside-TRR score cannot capture)."""
+    """Five-Zone Model (zone cut-offs June 2026, Studies 7 & 8; ~10th / 18th /
+    80th / 90th percentile of pc_sma10). v4.0 scores are for dispersion:
+    high put/call = wider swings in BOTH directions (the upside tail of Extreme
+    HIGH is part of that wide distribution, not a calm signal)."""
     if np.isnan(pc_sma10): return 0.0, 'No data'
-    if pc_sma10 < 0.686:   return  1.0, 'Extreme LOW (complacency)'      # 21D TRR 0.56
-    if pc_sma10 < 0.732:   return  0.5, 'Moderate LOW (transition)'      # 21D TRR 0.67
-    if pc_sma10 < 0.944:   return  0.0, 'Mid'                            # 21D TRR 1.05
-    if pc_sma10 < 1.003:   return -1.0, 'Moderate HIGH (fear building)'  # 21D TRR 1.45
-    return                         1.0, 'Extreme HIGH (contrarian)'      # open item
+    if pc_sma10 < 0.686:   return  0.25, 'Extreme LOW (complacency)'  # 0.84x / 0.74x
+    if pc_sma10 < 0.732:   return  0.25, 'Moderate LOW'               # 0.77x / 0.88x
+    if pc_sma10 < 0.944:   return  0.25, 'Mid'                        # 0.88x / 0.86x
+    if pc_sma10 < 1.003:   return -0.25, 'Moderate HIGH (fear building)'  # 1.42x / 1.49x
+    return                        -0.5,  'Extreme HIGH (fear, widest swings)'  # 1.79x / 1.79x (was +1.0)
 
 def score_skew(phi: float, pc: float):
     if np.isnan(phi): return 0.0, 'No data'
     if phi < 0.30 and not np.isnan(pc) and pc > 1.00:
-        return -2.0, 'Low+HighPC(DANGER)'
+        return -0.5, 'Low+HighPC(DANGER)'          # 1.73x / 1.71x
     if phi > 0.70 and not np.isnan(pc) and pc < 0.70:
-        return  1.5, 'High+LowPC(SAFE)'
-    if phi < 0.30: return -1.0, 'Low'
-    if phi < 0.70: return  0.0, 'Mid'
-    return 0.5, 'High'
+        return  0.5, 'High+LowPC(SAFE)'            # 0.64x / 0.61x
+    if phi < 0.30: return -0.25, 'Low'             # 1.20x / 1.26x
+    if phi <= 0.70: return 0.0, 'Mid'              # 1.02x / 1.07x
+    return 0.25, 'High'                            # 0.83x / 0.76x
 
 def score_gamma(spx: float, zero_gamma: float):
     if np.isnan(spx) or np.isnan(zero_gamma) or zero_gamma <= 0:
@@ -177,18 +199,17 @@ def score_gamma(spx: float, zero_gamma: float):
 
 def score_volume_divergence(price_60d_chg: float, vol_60d_chg: float):
     """
-    Volume Divergence (MRS v2.0 - July 2026 calibration).
-
-    Bearish signal: Price rising but volume declining = distribution.
-    Condition: price_60d_chg > 0 AND vol_60d_chg < -0.10 (volume down >10%)
-
-    Statistical validation: 58% of drawdown peaks showed this pattern.
-    Raw divergence outperformed seasonal normalization (odds ratio 1.24 vs 0.61).
+    Volume Divergence — information only in v4.0 (weight 0).
+    Condition: price_60d_chg > 0 AND vol_60d_chg < -0.10 (volume down >10%).
+    v8 re-test: the flag marks a CALM uptrend (large-move rate 0.67x), with no
+    extra downside vs other up-trending sessions; it was on at 42-48% of the
+    peaks before >=10% drawdowns vs 49% of up-trending sessions, so the earlier
+    '58% of drawdown peaks' claim is not distinctive.
     """
     if np.isnan(price_60d_chg) or np.isnan(vol_60d_chg):
         return 0.0, 'No data'
     if price_60d_chg > 0 and vol_60d_chg < -0.10:
-        return -0.5, 'Divergence (bearish)'
+        return 0.0, 'Divergence (calm uptrend)'
     return 0.0, 'Normal'
 
 
@@ -226,13 +247,14 @@ def compute_recovery_signal(last: dict, hist: pd.DataFrame, ref_date) -> dict:
     recovering = []
     signals = 0
 
-    # PC Ratio in contrarian HIGH zone (fear = buying opportunity)
-    if pc_score >= 0.5:
+    # PC Ratio in contrarian HIGH zone (fear = buying opportunity).
+    # Uses the zone, not the score (v4.0 scores Extreme HIGH negative for dispersion).
+    if not np.isnan(pc_sma10) and pc_sma10 >= 1.003:
         recovering.append('PC Ratio (contrarian high)')
         signals += 2  # Weight 1.4 ≈ 2 points
 
-    # B20% showing strength
-    if b20_score > 0:
+    # B20% showing strength (High state)
+    if not np.isnan(b20_phi) and b20_phi >= 0.70:
         recovering.append('B20% (breadth expanding)')
         signals += 1
 
@@ -337,10 +359,12 @@ def compute_signal_quality(last: dict, hist: pd.DataFrame, ref_date) -> tuple:
 
     UNCONFIRMED + FRAGILE can co-occur.
 
-    Scoring threshold reference:
-      B20:  Phi < 0.30 -> -0.5  |  Phi > 0.70 -> +0.5
-      ADL:  Phi < 0.30 -> -1.0  |  Phi > 0.70 -> +0.5
-      VIX:  Phi > 0.70 -> -0.5  |  Phi < 0.30 -> +1.0
+    Scoring threshold reference (v4.0):
+      B20:  Phi < 0.30 -> -0.5  |  otherwise +0.25
+      ADL:  Phi < 0.30 -> -0.5  |  otherwise +0.25
+      VIX:  continuous (no threshold); state labels at Phi 0.30 / 0.60 / 0.80
+    Component scores are compared with their 'normal' score (NEUTRAL_SCORE), so
+    a component in its normal state counts as neutral, not as confirming.
     """
     score   = float(last.get('mrs_score', 0) or 0)
     regime  = regime_label(score)
@@ -365,22 +389,25 @@ def compute_signal_quality(last: dict, hist: pd.DataFrame, ref_date) -> tuple:
         try:    return float(v) if not pd.isna(v) else 0.0
         except: return 0.0
 
-    b20_sc  = _sc('b20_score')
-    adl_sc  = _sc('adl_score')
-    pc_sc   = _sc('pc_score')
-    skew_sc = _sc('skew_score')
-    mom_sc  = _sc('mom_score')
+    # Centered on each component's normal-state score (v4.0)
+    b20_sc  = _sc('b20_score')   - NEUTRAL_SCORE['b20']
+    adl_sc  = _sc('adl_score')   - NEUTRAL_SCORE['adl']
+    pc_sc   = _sc('pc_score')    - NEUTRAL_SCORE['pc']
+    skew_sc = _sc('skew_score')  - NEUTRAL_SCORE['skew']
+    mom_sc  = _sc('mom_score')   - NEUTRAL_SCORE['mom']
     vix_sc  = _sc('vix_score')
-    ext_sc  = _sc('ext_score')
-    gam_sc  = _sc('gamma_score')
+    ext_sc  = _sc('ext_score')   - NEUTRAL_SCORE['ext']
+    gam_sc  = _sc('gamma_score') - NEUTRAL_SCORE['gamma']
 
     # ── Breadth vs. non-breadth attribution ───────────────────────────────────
     breadth_sum = b20_sc + adl_sc
     flow_sum    = pc_sc  + skew_sc
 
     if is_pos:
-        breadth_state = 'confirming' if breadth_sum > 0 else ('opposing' if breadth_sum < 0 else 'neutral')
-        flow_state    = 'confirming' if flow_sum    > 0 else ('opposing' if flow_sum    < 0 else 'neutral')
+        # v4.0: breadth has no 'strong = extra calm' state (High scores like Normal),
+        # so a calm reading is confirmed when breadth is NOT weak.
+        breadth_state = 'opposing' if breadth_sum < 0 else 'confirming'
+        flow_state    = 'opposing' if flow_sum    < 0 else 'confirming'
     elif is_neg:
         breadth_state = 'confirming' if breadth_sum < 0 else ('opposing' if breadth_sum > 0 else 'neutral')
         flow_state    = 'confirming' if flow_sum    < 0 else ('opposing' if flow_sum    > 0 else 'neutral')
@@ -398,35 +425,15 @@ def compute_signal_quality(last: dict, hist: pd.DataFrame, ref_date) -> tuple:
                 f'B20 Phi={b20_phi:.3f} is {abs(b20_phi - 0.300):.3f} from bearish threshold '
                 f'(cross below 0.300 -> score -0.5)'
             )
-        elif b20_sc <= 0 and b20_phi > 0.70 - PROX:
-            at_risk.append(
-                f'B20 Phi={b20_phi:.3f} is {abs(0.700 - b20_phi):.3f} from bullish threshold '
-                f'(cross above 0.700 -> score +0.5)'
-            )
 
     if not np.isnan(adl_phi):
         if adl_sc >= 0 and adl_phi < 0.30 + PROX:
             at_risk.append(
                 f'ADL Phi={adl_phi:.3f} is {abs(adl_phi - 0.300):.3f} from bearish threshold '
-                f'(cross below 0.300 -> score -1.0)'
-            )
-        elif adl_sc <= 0 and adl_phi > 0.70 - PROX:
-            at_risk.append(
-                f'ADL Phi={adl_phi:.3f} is {abs(0.700 - adl_phi):.3f} from bullish threshold '
-                f'(cross above 0.700 -> score +0.5)'
+                f'(cross below 0.300 -> score -0.5)'
             )
 
-    if not np.isnan(vix_phi):
-        if vix_sc >= 0 and vix_phi > 0.70 - PROX:
-            at_risk.append(
-                f'VIX Phi={vix_phi:.3f} is {abs(0.700 - vix_phi):.3f} from bearish threshold '
-                f'(cross above 0.700 -> score -0.5)'
-            )
-        elif vix_sc <= 0 and vix_phi < 0.30 + PROX:
-            at_risk.append(
-                f'VIX Phi={vix_phi:.3f} is {abs(vix_phi - 0.300):.3f} from bullish threshold '
-                f'(cross below 0.300 -> score +1.0)'
-            )
+    # VIX is continuous in v4.0 — no threshold to be fragile around.
 
     # ── 5-session Phi trend with quantified delta ──────────────────────────────
     df5 = hist[hist['date'] <= pd.Timestamp(ref_date)].sort_values('date').tail(6)
@@ -475,8 +482,10 @@ def compute_signal_quality(last: dict, hist: pd.DataFrame, ref_date) -> tuple:
     for name, sc in [('PC Ratio', pc_sc), ('SKEW', skew_sc), ('Momentum', mom_sc),
                      ('Gamma', gam_sc), ('VIX', vix_sc), ('Extension', ext_sc),
                      ('B20', b20_sc), ('ADL', adl_sc)]:
-        if sc != 0:
-            driver_parts.append(f'{name} ({sc:+.1f})')
+        if abs(sc) > 1e-9 and name != 'VIX':
+            driver_parts.append(f'{name} ({sc:+.2f} vs normal)')
+    if not np.isnan(vix_phi):
+        driver_parts.append(f'VIX ({vix_sc:+.2f})')
     drivers_str = ', '.join(driver_parts) if driver_parts else 'no components scoring'
 
     non_breadth = [p for p in driver_parts
@@ -531,8 +540,10 @@ def compute_signal_quality(last: dict, hist: pd.DataFrame, ref_date) -> tuple:
         col = '375623'
         b20_str = f'B20 Phi={b20_phi:.3f}' if not np.isnan(b20_phi) else 'B20 N/A'
         adl_str = f'ADL Phi={adl_phi:.3f}' if not np.isnan(adl_phi) else 'ADL N/A'
+        _where = ('at least one below the 0.300 weak-breadth threshold' if is_neg
+                  else 'neither in the weak zone (below 0.300)')
         desc = (
-            f'Breadth confirms: {b20_str}, {adl_str} -- both above the 0.700 scoring threshold. '
+            f'Breadth confirms: {b20_str}, {adl_str} -- {_where}. '
             f'Drivers: {drivers_str}. '
             + (f'Breadth trend: {breadth_trend_str}. ' if breadth_trend_str else '')
             + f'{margin_desc}.{fragile_str}'
@@ -544,13 +555,12 @@ def compute_signal_quality(last: dict, hist: pd.DataFrame, ref_date) -> tuple:
         b20_str = f'B20 Phi={b20_phi:.3f}' if not np.isnan(b20_phi) else 'B20 N/A'
         adl_str = f'ADL Phi={adl_phi:.3f}' if not np.isnan(adl_phi) else 'ADL N/A'
         desc = (
-            f'Score is {score:+.2f} ({regime}) but breadth is actively opposing: '
+            f'Score is {score:+.2f} ({regime}) but breadth is weak: '
             f'{b20_str}, {adl_str}. '
-            f'Score is held up by: {drivers_str}. '
+            f'Score is held up by: {non_breadth_str}. '
             + (f'Breadth trend: {breadth_trend_str}. ' if breadth_trend_str else '')
-            + f'DIVERGENT regimes that do not recover breadth within 5-7 sessions '
-            f'historically resolve to the downside. '
-            f'Do not add risk until B20 and ADL Phi stabilize. '
+            + f'Inside a calm VIX regime, weak context components have come with wider '
+            f'swings than VIX alone suggests (v8 re-test: 2.4-4x in 2017-26, weaker in 2008-16). '
             + f'{margin_desc}.{fragile_str}'
         )
 
@@ -567,9 +577,9 @@ def compute_signal_quality(last: dict, hist: pd.DataFrame, ref_date) -> tuple:
         gap_sentence = '; '.join(gap_parts) + '.' if gap_parts else ''
 
         breadth_threshold_note = (
-            'Until B20 or ADL Phi drops below 0.300, breadth is not confirming the selloff — treat as positioning signal only.'
+            'Breadth is not weak: the wide reading is carried by VIX and the other components.'
             if is_neg else
-            'Until B20 or ADL Phi crosses 0.700, breadth is not confirming the rally — treat as positioning signal only.'
+            'Breadth is neutral.'
         )
         desc = (
             f'Score {score:+.2f} is driven by {non_breadth_str}. '
