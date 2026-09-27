@@ -31,22 +31,27 @@ PHI_W    = 756   # 3-year rolling window (~756 trading days)
 CBOE_URL = ('https://cdn.cboe.com/data/us/options/market_statistics/'
             'daily_puts_calls.csv')
 
-# ── Component Weights (MRS v2.0 - July 2026 calibration) ──────────────────────
-# Weights derived from component timing analysis:
-# - Sell-side: components that warn earliest before drawdowns
-# - Buy-side: components that recover fastest at bottoms
-# Validated robust across 1yr, 2yr, 3yr, 5yr Phi windows
+# ── Component Weights (MRS v3.0 — Sept 2026 calibration, Report v7.0) ─────────
+# VIX / Extension / Momentum / ADL / SKEW are set proportional to each
+# component's mean 21-day Tail Risk Ratio across 1/2/3/5-year Phi windows
+# (Report v6.1 §2.3–2.5), rescaled so the five still sum to 5.80 — the same
+# total as the v2.0 weights, so the composite's overall scale is preserved.
+# SKEW uses the extended 1990–2026 history (§2.5.3).
+# B20, PC, Gamma, Volume are unchanged (not re-tested for weight; see v7.0 §7).
+# Previous v2.0 weights (July 2026): vix 1.3, ext 1.2, mom 1.0, adl 1.0,
+# b20 1.1, pc 1.4, skew 1.3, gamma 1.0, vol 1.0.
 COMPONENT_WEIGHTS = {
-    'vix':  1.3,   # Strong sell-side (2nd best lead time, most first-to-warn)
-    'ext':  1.2,   # Good sell-side (3rd best lead time)
-    'mom':  1.0,   # Average timing
-    'adl':  1.0,   # Average timing
-    'b20':  1.1,   # Good buy-side (2nd fastest recovery)
-    'pc':   1.4,   # Best buy-side (fastest recovery, most first-to-recover)
-    'skew': 1.3,   # Best sell-side lead time
-    'gamma': 1.0,  # No timing data available
-    'vol':  1.0,   # Volume divergence (sell-side only)
+    'vix':  1.34,  # mean 21D TRR 1.53
+    'ext':  0.91,  # mean 21D TRR 1.04 — no measurable edge at any window
+    'mom':  1.25,  # mean 21D TRR 1.43
+    'adl':  1.16,  # mean 21D TRR 1.33
+    'b20':  1.10,  # unchanged — joint B20+ADL condition not yet re-tested
+    'pc':   1.40,  # unchanged weight; zone scores revised (score_pc)
+    'skew': 1.14,  # mean 21D TRR 1.31 (extended 1990–2026 sample)
+    'gamma': 1.0,  # unchanged — no validation study yet
+    'vol':  1.0,   # unchanged — no validation study yet
 }
+SCORING_VERSION = 'MRS v3.0 (Sept 2026, Report v7.0)'
 
 HIST_COLS = [
     'date', 'spy', 'spx', 'vix', 'skew', 'pc_ratio',
@@ -137,13 +142,19 @@ def score_b20(phi: float, adl_phi: float):
     return 0.5, 'High'
 
 def score_pc(pc: float, pc_sma10: float):
-    """Five-Zone Model — June 2026 calibration (Studies 7 & 8)."""
+    """Five-Zone Model — zone cutoffs from June 2026 (Studies 7 & 8);
+    zone SCORES revised Sept 2026 (Report v6.1 §2.5.2 / v7.0) from 21-day
+    Tail Risk Ratios on the 2006–2026 USI:PC history.
+    Cutoffs sit at the ~10th / 18th / 80th / 90th percentile of pc_sma10.
+    Previous scores: +0.5 / -0.5 / 0.0 / +0.5 / +1.0.
+    Extreme HIGH kept at +1.0 (open item: its edge is upside/mean, which a
+    downside-TRR score cannot capture)."""
     if np.isnan(pc_sma10): return 0.0, 'No data'
-    if pc_sma10 < 0.686:   return  0.5, 'Extreme LOW (complacency)'
-    if pc_sma10 < 0.732:   return -0.5, 'Moderate LOW (transition)'
-    if pc_sma10 < 0.944:   return  0.0, 'Mid'
-    if pc_sma10 < 1.003:   return  0.5, 'Moderate HIGH (fear building)'
-    return                         1.0, 'Extreme HIGH (contrarian)'
+    if pc_sma10 < 0.686:   return  1.0, 'Extreme LOW (complacency)'      # 21D TRR 0.56
+    if pc_sma10 < 0.732:   return  0.5, 'Moderate LOW (transition)'      # 21D TRR 0.67
+    if pc_sma10 < 0.944:   return  0.0, 'Mid'                            # 21D TRR 1.05
+    if pc_sma10 < 1.003:   return -1.0, 'Moderate HIGH (fear building)'  # 21D TRR 1.45
+    return                         1.0, 'Extreme HIGH (contrarian)'      # open item
 
 def score_skew(phi: float, pc: float):
     if np.isnan(phi): return 0.0, 'No data'
@@ -653,9 +664,9 @@ def score_dataframe(hist: pd.DataFrame, verbose: bool = True) -> pd.DataFrame:
     hist['trigger_days'] = trig
     hist['compressed']   = compressed_flag
 
-    # Score every row (MRS v2.0 with weights)
+    # Score every row (weighted composite — see COMPONENT_WEIGHTS)
     if verbose:
-        print('  Scoring (MRS v2.0 with component weights)...')
+        print(f'  Scoring ({SCORING_VERSION} with component weights)...')
     score_cols = ['vix_score','ext_score','mom_score','adl_score',
                   'b20_score','pc_score','skew_score','gamma_score','vol_score']
     state_cols = ['vix_state','ext_state','mom_state','adl_state',
@@ -676,7 +687,7 @@ def score_dataframe(hist: pd.DataFrame, verbose: bool = True) -> pd.DataFrame:
         gs, gst  = score_gamma(g('spx'), g('zero_gamma'))
         vols, volst = score_volume_divergence(g('price_60d_chg'), g('vol_60d_chg'))
 
-        # Apply component weights (MRS v2.0)
+        # Apply component weights
         weighted_scores = [
             vs   * COMPONENT_WEIGHTS['vix'],
             es   * COMPONENT_WEIGHTS['ext'],
@@ -700,7 +711,7 @@ def score_dataframe(hist: pd.DataFrame, verbose: bool = True) -> pd.DataFrame:
         hist[col] = res[col]
 
     if verbose:
-        print(f'  Done. Latest MRS v2.0: {hist["mrs_score"].iloc[-1]:+.2f} -- {regime_label(hist["mrs_score"].iloc[-1])}')
+        print(f'  Done. Latest {SCORING_VERSION}: {hist["mrs_score"].iloc[-1]:+.2f} -- {regime_label(hist["mrs_score"].iloc[-1])}')
 
     return hist
 
@@ -790,7 +801,9 @@ def update_history(hist: pd.DataFrame, inp_map: dict) -> pd.DataFrame:
     else:
         print('  No new market dates to append.')
 
-    # ── 4b. Retroactive carry-forward patch ───────────────────────────────────
+    # ── 4b. Retroactive fill of manual inputs ─────────────────────────────────
+    # Manual daily inputs (dashboard sidebar → backfill.py) always win: the
+    # automated run only fills a blank, it never overwrites a stored value.
     manual_cols = ['adl_level', 'b20_pct', 'zero_gamma']
     hist = hist.set_index('date')
     patched = 0
@@ -800,7 +813,7 @@ def update_history(hist: pd.DataFrame, inp_map: dict) -> pd.DataFrame:
             val = m.get(col, np.nan)
             if not np.isnan(val):
                 old = hist.loc[hist_date, col]
-                if pd.isna(old) or old != val:
+                if pd.isna(old):
                     hist.loc[hist_date, col] = val
                     patched += 1
         if not np.isnan(m['pc_ratio']) and pd.isna(hist.loc[hist_date, 'pc_ratio']):
@@ -809,7 +822,7 @@ def update_history(hist: pd.DataFrame, inp_map: dict) -> pd.DataFrame:
             hist.loc[hist_date, 'skew'] = m['skew']
     hist = hist.reset_index()
     if patched:
-        print(f'  Retroactive patch: {patched} field(s) corrected.')
+        print(f'  Retroactive fill: {patched} blank field(s) filled.')
 
     # ── 5. Score using single source of truth ─────────────────────────────────
     hist = score_dataframe(hist, verbose=True)

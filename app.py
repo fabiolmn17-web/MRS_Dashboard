@@ -2,8 +2,9 @@
 app.py — MRS Live Dashboard (Streamlit)
 ========================================
 Password-protected. Reads mrs_history.csv and displays:
-  • Current regime score + signal quality
-  • 8-component breakdown table
+  • Current regime score (MRS v3.0 scoring, Report v7.0) + percentile + signal quality
+  • Risk Dial: forward dispersion profile of today's band (risk_dial.py)
+  • 9-component breakdown table with weights and weighted contributions
   • VIX lifecycle state layer
   • Zero Gamma position
   • 90-day MRS history chart + SPX close panel + VIX state panel
@@ -21,7 +22,9 @@ import yfinance as yf
 from pathlib import Path
 from datetime import date
 from itertools import groupby
+import os
 import pipeline
+import risk_dial
 
 # ── Sector RS — constants & helpers ───────────────────────────────────────────
 # yfinance sector strings → our SECTOR_MAP display names
@@ -220,7 +223,10 @@ GITHUB_RAW_URL = 'https://raw.githubusercontent.com/fabiolmn17-web/MRS_Dashboard
 
 @st.cache_data(ttl=60)
 def load_data() -> pd.DataFrame:
-    """Load history from GitHub raw URL (always fresh), fallback to local file."""
+    """Load history from GitHub raw URL (always fresh), fallback to local file.
+    Set MRS_LOCAL_DATA=1 to read the local mrs_history.csv (testing a branch)."""
+    if os.environ.get('MRS_LOCAL_DATA') == '1':
+        return pipeline.load_history(HIST_PATH)
     try:
         df = pd.read_csv(GITHUB_RAW_URL, parse_dates=['date'])
         for col in pipeline.HIST_COLS:
@@ -254,7 +260,8 @@ with st.sidebar:
         st.sidebar.error(f'Data through {_csv_last.strftime("%b %d %Y")} — {_days_old} sessions behind')
 
     st.markdown('### Daily Inputs')
-    st.caption('Enter after market close (4 PM ET). ADL: TradingView value — auto x1000.')
+    st.caption('Enter after market close (4 PM ET). ADL: TradingView value — auto x1000. '
+               'Values entered here always take priority; the automated run only fills blanks.')
 
     # Pre-populate: prefer URL params (survive reload) then CSV last value
     _qp = st.query_params
@@ -267,9 +274,12 @@ with st.sidebar:
                                    value=round(_def_b20, 2), step=0.01)
         inp_adl = st.number_input('ADL (TradingView x1000)', value=round(_def_adl, 2), step=0.01)
         inp_zg  = st.number_input('Zero Gamma (SPX level)',  value=round(_def_zg, 2),  step=1.0)
-        inp_pc  = st.number_input('PC Ratio (0 = auto)',     value=0.0, step=0.001,
-                                   min_value=0.0, max_value=3.0,
-                                   help='Leave 0 to auto-fetch. Valid range: 0.3 – 2.0.')
+        inp_pc  = st.number_input('PC Ratio — USI:PC close', value=0.0, step=0.0001,
+                                   min_value=0.0, max_value=3.0, format='%.4f',
+                                   help=('Enter the USI:PC daily close from TradingView — the series '
+                                         'the Five-Zone cutoffs are calibrated on. Leave 0 to try the '
+                                         'CBOE feed; if it is unavailable PC is left blank (scores '
+                                         'neutral). Valid range: 0.3 – 2.0.'))
         submitted = st.form_submit_button('Submit & Update')
 
     if submitted:
@@ -481,6 +491,21 @@ def quality_color(label: str) -> str:
             return v
     return '#9ca3af'
 
+@st.cache_data(ttl=600)
+def _band_profile(h: pd.DataFrame) -> pd.DataFrame:
+    return risk_dial.band_profile(h)
+
+@st.cache_data(ttl=600)
+def _score_context(h: pd.DataFrame, score: float) -> dict:
+    return risk_dial.score_context(h, score)
+
+def _ordinal(n: int) -> str:
+    return f"{n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+
+# Risk-dial colors (validated for CVD separation and 3:1 contrast on the #171717 surface)
+ADV_COLOR = '#e66767'   # large adverse move
+FAV_COLOR = '#3987e5'   # large favorable move
+
 # ══════════════════════════════════════════════════════════════════════════════
 # HEADER ROW
 # ══════════════════════════════════════════════════════════════════════════════
@@ -490,6 +515,13 @@ rcol   = pipeline.regime_color(mrs)
 dur    = pipeline.compute_regime_duration(hist, last_dt)
 sq_lbl, sq_desc, sq_hex = pipeline.compute_signal_quality(last, hist, last_dt)
 sq_col = '#' + sq_hex
+ctx    = _score_context(hist, mrs)
+_deep  = ctx['deep_state']
+_deep_html = ''
+if _deep in ('DEEP RISK-OFF', 'DEEP RISK-ON'):
+    _dc = '#ef4444' if _deep == 'DEEP RISK-OFF' else '#22c55e'
+    _deep_html = (f'<span class="quality-chip" style="margin-top:8px;background:{_dc}20;color:{_dc};'
+                  f'border:1px solid {_dc};">{_deep}</span>')
 
 col_score, col_regime, col_sq, col_dur = st.columns([1, 2, 2.5, 1])
 
@@ -498,6 +530,10 @@ with col_score:
     <div class="metric-card">
       <div class="section-header">MRS Score</div>
       <div class="score-number" style="color:{rcol};">{mrs:+.2f}</div>
+      <div style="font-size:0.78rem;color:#9ca3af;margin-top:6px;">
+        {_ordinal(int(round(ctx['percentile'])))} percentile since {ctx['start'].year}
+      </div>
+      {_deep_html}
     </div>
     """, unsafe_allow_html=True)
 
@@ -543,6 +579,105 @@ with col_dur:
 st.divider()
 
 # ══════════════════════════════════════════════════════════════════════════════
+# RISK DIAL  (Report v7.0 §4) — MRS as a dispersion setting, not a direction call
+# ══════════════════════════════════════════════════════════════════════════════
+_bp = _band_profile(hist)
+st.markdown('<div class="section-header">Risk Dial — how far price tends to travel from here</div>',
+            unsafe_allow_html=True)
+_rd_left, _rd_right = st.columns([1.15, 1], gap='large')
+
+with _rd_left:
+    _g_title, _g_text = risk_dial.BAND_GUIDANCE.get(reg, ('', ''))
+    st.markdown(f"""
+    <div class="metric-card" style="border-left:4px solid {rcol};">
+      <div style="font-size:1.05rem;font-weight:800;color:{rcol};">{reg} · {_g_title}</div>
+      <div style="font-size:0.84rem;color:#c4cad6;margin-top:6px;line-height:1.5;">{_g_text}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    _rows = []
+    for _h in risk_dial.HORIZONS:
+        _b = _bp[(_bp['band'] == reg) & (_bp['horizon'] == _h)]
+        _a = _bp[(_bp['band'] == 'ALL') & (_bp['horizon'] == _h)]
+        if _b.empty or _a.empty:
+            continue
+        _b, _a = _b.iloc[0], _a.iloc[0]
+        _x = int(round(_b['thresh'] * 100))
+        _rows.append({
+            'Sessions': _h,
+            'Move size': f'±{_x}%',
+            'Large adverse': f"{_b['p_adverse']*100:.0f}%  (all {_a['p_adverse']*100:.0f}%)",
+            'Large favorable': f"{_b['p_favorable']*100:.0f}%  (all {_a['p_favorable']*100:.0f}%)",
+            'Bad-case drawdown': f"{_b['mae_p10']*100:+.1f}%",
+            'Good-case run-up': f"{_b['mfe_p90']*100:+.1f}%",
+        })
+    st.dataframe(pd.DataFrame(_rows), use_container_width=True, hide_index=True)
+    _n_band = int(_bp[(_bp['band'] == reg) & (_bp['horizon'] == 5)]['n'].iloc[0]) if len(_rows) else 0
+    st.markdown(f"""
+    <div style="font-size:0.72rem;color:#6b7280;margin-top:2px;line-height:1.5;">
+    Long entered at today's close, SPY, all {reg} sessions since {ctx['start'].strftime('%b %Y')} (n={_n_band}).
+    Large adverse / favorable = worst drawdown / best gain from entry reaches the move size within the window.
+    Bad-case drawdown = 10th percentile; good-case run-up = 90th percentile. Descriptive — the
+    RISK-OFF vs RISK-ON contrast is confirmed after multiple-testing correction (Report v7.0 §4).
+    </div>
+    """, unsafe_allow_html=True)
+
+with _rd_right:
+    _hsel = st.radio('Horizon (sessions)', risk_dial.HORIZONS, index=2, horizontal=True,
+                     key='rd_horizon')
+    _sub = _bp[_bp['horizon'] == _hsel].set_index('band')
+    _bands_present = [b for b in risk_dial.BANDS if b in _sub.index]
+    _labels = [b.replace('MILD ', 'MILD<br>') for b in _bands_present]
+    _fig_rd = go.Figure()
+    if reg in _bands_present:
+        _i = _bands_present.index(reg)
+        _fig_rd.add_vrect(x0=_i - 0.42, x1=_i + 0.42, fillcolor='rgba(250,204,21,0.10)',
+                          line_width=0)
+        _fig_rd.add_annotation(x=_i, y=1.0, yref='paper', text='Today', showarrow=False,
+                               font=dict(size=10, color='#facc15'), yanchor='bottom')
+    for _col, _name, _clr in [('p_adverse', 'Large adverse move', ADV_COLOR),
+                              ('p_favorable', 'Large favorable move', FAV_COLOR)]:
+        _y = (_sub.loc[_bands_present, _col] * 100).values
+        _fig_rd.add_trace(go.Scatter(
+            x=list(range(len(_bands_present))), y=_y, name=_name, mode='lines+markers',
+            line=dict(color=_clr, width=2), marker=dict(size=9, color=_clr, line=dict(color='#171717', width=2)),
+            customdata=_bands_present,
+            hovertemplate='<b>%{customdata}</b><br>' + _name + ': %{y:.0f}% of sessions<extra></extra>',
+        ))
+        if 'ALL' in _sub.index:
+            _fig_rd.add_hline(y=float(_sub.loc['ALL', _col]) * 100, line_width=1,
+                              line_color=_clr, opacity=0.35)
+    _thr = int(round(risk_dial.THRESH[_hsel] * 100))
+    _fig_rd.update_layout(
+        template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+        height=270, margin=dict(l=10, r=10, t=24, b=10), hovermode='closest',
+        legend=dict(orientation='h', yanchor='bottom', y=-0.42, x=0, font=dict(size=11, color='#c4cad6')),
+        xaxis=dict(tickmode='array', tickvals=list(range(len(_bands_present))), ticktext=_labels,
+                   tickfont=dict(size=10, color='#9ca3af'), showgrid=False, range=[-0.5, len(_bands_present) - 0.5]),
+        yaxis=dict(title=dict(text=f'% of sessions, move ≥ {_thr}%', font=dict(size=10, color='#9ca3af')),
+                   ticksuffix='%', tickfont=dict(size=10, color='#9ca3af'),
+                   gridcolor='rgba(255,255,255,0.06)', rangemode='tozero'),
+    )
+    st.plotly_chart(_fig_rd, use_container_width=True)
+    st.markdown('<div style="font-size:0.72rem;color:#6b7280;">Thin lines: same measure over all sessions. '
+                'The dial steps through all five bands — read it as how much room and size a trade '
+                'needs, not which way the market goes.</div>', unsafe_allow_html=True)
+
+if _deep == 'DEEP RISK-OFF':
+    st.markdown(
+        f'<div class="hazard-row">🔴 DEEP RISK-OFF (score ≤ P10 = {ctx["p10"]:+.2f}). Historically NOT a bottom signal: '
+        'over the next 10–20 sessions downside ran fatter than usual (10-session drop ≥3% in 29% of episodes vs 11% '
+        'baseline); the wide upside tended to come later. Exploratory — did not survive multiple-testing correction '
+        '(Report v7.0 §3).</div>', unsafe_allow_html=True)
+elif _deep == 'DEEP RISK-ON':
+    st.markdown(
+        f'<div class="safe-row">🟢 DEEP RISK-ON (score ≥ P90 = {ctx["p90"]:+.2f}). Historically a calm path — shallow '
+        'drawdowns along the way, but no reliable edge in returns. Exploratory (Report v7.0 §3).</div>',
+        unsafe_allow_html=True)
+
+st.divider()
+
+# ══════════════════════════════════════════════════════════════════════════════
 # TWO-COLUMN LAYOUT
 # ══════════════════════════════════════════════════════════════════════════════
 left, right = st.columns([1.4, 1], gap='large')
@@ -558,15 +693,15 @@ with left:
         )
     st.markdown('<div class="section-header">Component Breakdown</div>', unsafe_allow_html=True)
     COMP_DEF = [
-        ('VIX',        'vix_phi',  'vix_score',  'vix_state',   'vix'),
-        ('Extension',  'ext_phi',  'ext_score',  'ext_state',   'ext_raw'),
-        ('Momentum',   'mom_phi',  'mom_score',  'mom_state',   'mom_raw'),
-        ('ADL Trend',  'adl_phi',  'adl_score',  'adl_state',   'adl_level'),
-        ('B20%',       'b20_phi',  'b20_score',  'b20_state',   'b20_pct'),
-        ('PC Ratio',   None,       'pc_score',   'pc_state',    'pc_sma10'),
-        ('SKEW',       'skew_phi', 'skew_score', 'skew_state',  'skew'),
-        ('Zero Gamma', None,       'gamma_score','gamma_state', 'zero_gamma'),
-        ('Volume',     None,       'vol_score',  'vol_state',   'volume'),
+        ('VIX',        'vix_phi',  'vix_score',  'vix_state',   'vix',        'vix'),
+        ('Extension',  'ext_phi',  'ext_score',  'ext_state',   'ext_raw',    'ext'),
+        ('Momentum',   'mom_phi',  'mom_score',  'mom_state',   'mom_raw',    'mom'),
+        ('ADL Trend',  'adl_phi',  'adl_score',  'adl_state',   'adl_level',  'adl'),
+        ('B20%',       'b20_phi',  'b20_score',  'b20_state',   'b20_pct',    'b20'),
+        ('PC Ratio',   None,       'pc_score',   'pc_state',    'pc_sma10',   'pc'),
+        ('SKEW',       'skew_phi', 'skew_score', 'skew_state',  'skew',       'skew'),
+        ('Zero Gamma', None,       'gamma_score','gamma_state', 'zero_gamma', 'gamma'),
+        ('Volume',     None,       'vol_score',  'vol_state',   'volume',     'vol'),
     ]
 
     # Compute volume vs 20d average for display
@@ -582,18 +717,24 @@ with left:
                 vol_vs_20d = f'vs 20d: {pct_diff:+.0f}%'
 
     rows = []
-    for name, phi_key, sc_key, st_key, raw_key in COMP_DEF:
+    _contrib_total = 0.0
+    for name, phi_key, sc_key, st_key, raw_key, w_key in COMP_DEF:
         phi_v = last.get(phi_key, np.nan) if phi_key else np.nan
         sc_v  = last.get(sc_key, np.nan)
         st_v  = last.get(st_key, '—') or '—'
         raw_v = last.get(raw_key, np.nan)
         try: phi_f = f'{float(phi_v):.3f}' if not np.isnan(float(phi_v)) else '—'
         except: phi_f = '—'
+        _w = pipeline.COMPONENT_WEIGHTS[w_key]
         try:
             sc_float = float(sc_v)
             sc_f = f'{sc_float:+.1f}' if not np.isnan(sc_float) else '—'
+            ct_f = f'{sc_float * _w:+.2f}' if not np.isnan(sc_float) else '—'
+            if not np.isnan(sc_float):
+                _contrib_total += sc_float * _w
         except:
             sc_f = '—'
+            ct_f = '—'
         try:
             raw_float = float(raw_v)
             if np.isnan(raw_float):
@@ -611,7 +752,10 @@ with left:
         if name == 'Volume':
             st_v = vol_vs_20d
         rows.append({'Component': name, 'Raw Value': raw_f,
-                     'Phi': phi_f, 'State': str(st_v), 'Score': sc_f})
+                     'Phi': phi_f, 'State': str(st_v), 'Score': sc_f,
+                     'Weight': f'×{_w:.2f}', 'Contribution': ct_f})
+    rows.append({'Component': 'MRS composite', 'Raw Value': '', 'Phi': '', 'State': reg,
+                 'Score': '', 'Weight': '', 'Contribution': f'{_contrib_total:+.2f}'})
     df_comp = pd.DataFrame(rows)
     def color_score(val):
         try:
@@ -621,12 +765,13 @@ with left:
             return 'color: #6b7280'
         except:
             return ''
-    styled = df_comp.style.map(color_score, subset=['Score'])
+    styled = df_comp.style.map(color_score, subset=['Score', 'Contribution'])
     st.dataframe(styled, use_container_width=True, hide_index=True)
     st.markdown("""
     <div style="font-size:0.72rem;color:#6b7280;margin-top:4px;">
     Phi = percentile rank over rolling 756-session window (3 years).
-    Score = discretized contribution to the MRS composite.
+    Score = component state score · Weight = v3.0 component weight (Report v7.0 §2) ·
+    Contribution = Score × Weight; contributions sum to the MRS composite.
     </div>
     """, unsafe_allow_html=True)
 
@@ -761,11 +906,15 @@ band_defs = [
     (-1.5, -0.5, 'rgba(217,119,6,0.10)',  'MILD RISK-OFF'),
     (-5.0, -1.5, 'rgba(185,28,28,0.12)',  'RISK-OFF'),
 ]
+_ylo = min(-4.5, float(hist90['mrs_score'].min()) - 0.5) if len(hist90) else -4.5
+_yhi = max(4.5, float(hist90['mrs_score'].max()) + 0.5) if len(hist90) else 4.5
+band_defs[0] = (1.5, 12.0, band_defs[0][2], band_defs[0][3])
+band_defs[-1] = (-12.0, -1.5, band_defs[-1][2], band_defs[-1][3])
 for y0, y1, fill, label in band_defs:
     fig.add_hrect(y0=y0, y1=y1, fillcolor=fill, line_width=0)
     fig.add_annotation(
         x=1.01, xref='paper',
-        y=(y0 + y1) / 2, yref='y',
+        y=(max(y0, _ylo) + min(y1, _yhi)) / 2, yref='y',
         text=label, showarrow=False,
         font=dict(size=9, color='#6b7280'),
         xanchor='left',
@@ -779,14 +928,14 @@ fig.add_trace(go.Scatter(
     hovertemplate='<b>%{x|%b %d}</b><br>MRS: %{y:+.2f}<extra></extra>',
 ))
 fig.add_hline(y=0, line_dash='dash', line_color='rgba(255,255,255,0.25)', line_width=1)
-fig.add_shape(type='line', x0=last_dt_str, x1=last_dt_str, y0=-4.5, y1=4.5,
+fig.add_shape(type='line', x0=last_dt_str, x1=last_dt_str, y0=_ylo, y1=_yhi,
               line=dict(dash='dot', color='rgba(250,204,21,0.6)', width=1.5))
-fig.add_annotation(x=last_dt_str, y=4.2, text='Today', showarrow=False,
+fig.add_annotation(x=last_dt_str, y=_yhi - 0.3, text='Today', showarrow=False,
                    font=dict(size=10, color='#facc15'), xanchor='left')
 fig.update_layout(**LAYOUT_BASE,
     margin=dict(l=10, r=130, t=10, b=30), height=300,
     yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.06)',
-               tickformat='+.1f', range=[-4.5, 4.5], tickfont_size=11),
+               tickformat='+.1f', range=[_ylo, _yhi], tickfont_size=11),
 )
 st.plotly_chart(fig, use_container_width=True)
 
@@ -1077,26 +1226,39 @@ st.plotly_chart(_fig_hm, use_container_width=True)
 # ══════════════════════════════════════════════════════════════════════════════
 # PC RATIO CONTEXT (collapsible)
 # ══════════════════════════════════════════════════════════════════════════════
-with st.expander('PC Ratio — Five-Zone Context'):
+_pc_stale = risk_dial.pc_stale_sessions(hist)
+if _pc_stale >= 3:
+    st.markdown(
+        f'<div class="neutral-row">🟡 PC ratio has carried the same value ({float(last.get("pc_ratio", np.nan)):.3f}) '
+        f'for {_pc_stale} sessions. Check the input — enter the USI:PC close in the sidebar. '
+        'Stale PC values caused most of the Apr–Sep 2026 drift (Report v7.0 §2.4).</div>',
+        unsafe_allow_html=True)
+
+with st.expander('PC Ratio — Five-Zone Context (v3.0 scores)', expanded=_pc_stale >= 3):
     pc_sma10 = last.get('pc_sma10', np.nan)
     pc_daily = last.get('pc_ratio', np.nan)
     try:
         pc10 = float(pc_sma10)
         if pc10 < 0.686:
-            zone, note = 'Extreme LOW', 'Complacency. Both tails compressed. T+63 TRR+=1.26×, TRR-=0.75×.'
-            zcol = '#f97316'
+            zone, note = 'Extreme LOW', ('Lowest tail risk of any zone: 21D TRR 0.56, and no 63-session return below '
+                                         '−10% in 20 years of history (63D TRR 0.00). Score +1.0.')
+            zcol = '#22c55e'
         elif pc10 < 0.732:
-            zone, note = 'Moderate LOW — TRANSITION ZONE', 'EXIT from complacency is the danger. T+63 TRR-=1.49× (p=0.007).'
-            zcol = '#ef4444'
+            zone, note = 'Moderate LOW', ('Protective at 21 sessions (TRR 0.67) but elevated tail risk at 63 '
+                                          '(TRR 1.67) — horizon-dependent. Score +0.5.')
+            zcol = '#86efac'
         elif pc10 < 0.944:
-            zone, note = 'Mid', 'No distributional edge. Baseline.'
+            zone, note = 'Mid', 'No distributional edge (TRR ≈ 1.0 at both horizons). Score 0.0.'
             zcol = '#6b7280'
         elif pc10 < 1.003:
-            zone, note = 'Moderate HIGH', 'Early contrarian signal. Fear building.'
-            zcol = '#22c55e'
+            zone, note = 'Moderate HIGH', ('Highest near-term tail-risk ratio of any zone: 21D TRR 1.45. '
+                                           'Score −1.0 (was +0.5 before v3.0).')
+            zcol = '#ef4444'
         else:
-            zone, note = 'Extreme HIGH', 'Sustained fear fully priced. T+21 TRR+=1.67× (p<0.0001).'
-            zcol = '#22c55e'
+            zone, note = 'Extreme HIGH', ('Downside near baseline at 21 sessions (TRR 0.98) with the strongest '
+                                          'upside of any zone (P(21D > +5%) = 32% vs 13%), but elevated 63D tail '
+                                          'risk (TRR 1.43) — double-edged. Score +1.0 held; open item.')
+            zcol = '#facc15'
         col1, col2, col3 = st.columns(3)
         col1.metric('PC SMA-10', f'{pc10:.3f}')
         col2.metric('Daily PC', f'{float(pc_daily):.3f}' if not np.isnan(float(pc_daily)) else '—')
@@ -1108,13 +1270,18 @@ with st.expander('PC Ratio — Five-Zone Context'):
         </div>
         """, unsafe_allow_html=True)
         st.markdown("""
-        | Zone | SMA-10 | Score | T+63 TRR+ | T+63 TRR- |
-        |------|--------|-------|-----------|-----------|
-        | Extreme LOW | < 0.686 | +0.5 | 1.26× | 0.75× |
-        | Moderate LOW ⚠ | 0.686–0.732 | **−0.5** | 0.82× | **1.49×** |
-        | Mid | 0.732–0.944 | 0.0 | baseline | baseline |
-        | Moderate HIGH | 0.944–1.003 | +0.5 | — | — |
-        | Extreme HIGH | > 1.003 | +1.0 | **1.67×** | — |
+        | Zone | SMA-10 | v3.0 score | 21D TRR | 63D TRR | Note |
+        |------|--------|-----------|---------|---------|------|
+        | Extreme LOW | < 0.686 | **+1.0** | 0.56 | 0.00 | was +0.5 |
+        | Moderate LOW | 0.686–0.732 | **+0.5** | 0.67 | 1.67 | was −0.5 |
+        | Mid | 0.732–0.944 | 0.0 | 1.05 | 1.03 | |
+        | Moderate HIGH | 0.944–1.003 | **−1.0** | 1.45 | 0.84 | was +0.5 |
+        | Extreme HIGH | ≥ 1.003 | +1.0 | 0.98 | 1.43 | held — upside edge, open item |
+
+        TRR = share of sessions followed by SPX < −5% (21D) or < −10% (63D), relative to all sessions;
+        USI:PC 2006–2026 (Report v6.1 §2.5.2). Cutoffs sit at the ~10th / 18th / 80th / 90th percentile.
+        TRRs are point estimates: on non-overlapping samples no single zone differs significantly
+        from the rest (Report v7.0 §2.5).
         """)
     except:
         st.write('PC SMA-10 data not available.')
@@ -1770,6 +1937,7 @@ st.markdown(
     '<div style="text-align:center;font-size:0.72rem;color:#4b5563;margin-top:24px;">'
     'Epistruct &nbsp;|&nbsp;'
     'Data through ' + last_upd.strftime('%B %d, %Y') + ' &nbsp;|&nbsp;'
+    + pipeline.SCORING_VERSION + ' &nbsp;|&nbsp;'
     'Updates daily at 4:30 PM ET'
     '</div>',
     unsafe_allow_html=True,

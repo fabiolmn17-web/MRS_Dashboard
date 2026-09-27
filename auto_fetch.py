@@ -151,7 +151,7 @@ def fetch_b20() -> float:
         print(f'  [WARN] B20 fetch failed: {e}')
         return np.nan
 
-# ── PC Ratio — CBOE tickers + SPY options proxy fallback ──────────────────────
+# ── PC Ratio — CBOE tickers only (no proxy fallback; see Report v7.0) ─────────
 def fetch_pc_ratio() -> float:
     # Try 1: Yahoo Finance CBOE tickers
     for ticker in ['^CPCE', '^CPC', '^CPCI']:
@@ -174,28 +174,15 @@ def fetch_pc_ratio() -> float:
             print(f'  [WARN] {ticker} failed: {e}')
             continue
 
-    # Try 2: Compute from SPY options chain via yfinance
-    try:
-        print('  PC: computing from SPY options chain...')
-        spy = yf.Ticker('SPY')
-        expiries = spy.options
-        if not expiries:
-            raise ValueError('No expiries available')
-        total_puts  = 0.0
-        total_calls = 0.0
-        for exp in expiries[:2]:   # nearest 2 expiries for volume
-            chain = spy.option_chain(exp)
-            total_puts  += chain.puts['volume'].fillna(0).sum()
-            total_calls += chain.calls['volume'].fillna(0).sum()
-        if total_calls < 100:
-            raise ValueError(f'Insufficient call volume: {total_calls}')
-        val = round(total_puts / total_calls, 3)
-        print(f'  PC Ratio (SPY options proxy): {val:.3f}')
-        return val
-    except Exception as e:
-        print(f'  [WARN] PC options proxy failed: {e}')
-
-    print('  [WARN] PC Ratio: all sources failed — carrying forward from history')
+    # NOTE (Sept 2026, Report v7.0 §2): the former "SPY options-chain proxy"
+    # fallback was removed. It measured a different quantity (SPY-only,
+    # nearest-2-expiry volume) than the USI:PC series every PC threshold was
+    # calibrated on, and produced values such as 0.075 / 1.295 that pushed
+    # the Five-Zone score into the wrong bucket. If no calibrated source is
+    # available, PC is left blank (scores neutral) — enter the USI:PC close
+    # from TradingView in the dashboard sidebar instead.
+    print('  [WARN] PC Ratio: no calibrated source available — left blank. '
+          'Enter USI:PC close manually in the dashboard.')
     return np.nan
 
 # ── SKEW — CBOE SKEW Index ─────────────────────────────────────────────────────

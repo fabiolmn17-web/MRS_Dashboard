@@ -181,7 +181,15 @@ def main():
         # Merge: base → env override (env wins)
         manual = {**base_manual, **env_override}
 
-        pc_val = float(pc_series.loc[dt]) if dt in pc_series.index else manual['pc_ratio']
+        # PC priority: value entered in the dashboard (USI:PC close) > CBOE feed > blank.
+        # A blank PC scores neutral; the last value is NOT carried forward (stale
+        # carry-forward caused most of the Apr–Sep 2026 drift — Report v7.0 §2.4).
+        if 'pc_ratio' in env_override:
+            pc_val = env_override['pc_ratio']
+        elif dt in pc_series.index:
+            pc_val = float(pc_series.loc[dt])
+        else:
+            pc_val = np.nan
 
         print(f'\n  {dt.date()}:')
         print(f'    SPX={spx_val:.2f}  VIX={vix_val:.2f}  SPY={spy_val:.2f}  SKEW={skew_val:.2f}')
