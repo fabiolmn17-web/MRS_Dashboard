@@ -148,9 +148,10 @@ def score_extension(phi: float):
 
 def score_momentum(phi: float):
     if np.isnan(phi): return 0.0, 'No data'
-    if phi < 0.30:    return -0.5,  'Weak'         # 1.58x / 1.67x
-    if phi < 0.70:    return  0.25, 'Normal'       # 0.85x / 0.84x
-    return 0.5, 'Strong'                           # 0.69x / 0.63x
+    # Ratios re-derived Oct 2026 on the % slope (2008-2026, same v4.0 rule):
+    if phi < 0.30:    return -0.5,  'Weak'         # 1.57x / 1.67x
+    if phi < 0.70:    return  0.25, 'Normal'       # 0.78x / 0.74x
+    return 0.25, 'Strong'                          # 0.75x / 0.71x (was +0.5 on the $ slope)
 
 def score_adl(phi: float):
     if np.isnan(phi): return 0.0, 'No data'
@@ -634,7 +635,9 @@ def score_dataframe(hist: pd.DataFrame, verbose: bool = True) -> pd.DataFrame:
 
     hist['sma50']    = spy.rolling(50, min_periods=1).mean()
     hist['ext_raw']  = (spy - hist['sma50']) / hist['sma50']
-    hist['mom_raw']  = hist['sma50'] - hist['sma50'].shift(5)  # 5-day SMA50 slope
+    # 5-day % change of SMA50 (Oct 2026 fix: was a dollar difference, which made the
+    # 3-year percentile drift upward as SPY's price level rose)
+    hist['mom_raw']  = hist['sma50'] / hist['sma50'].shift(5) - 1
     hist['pc_sma10'] = pc.rolling(10, min_periods=1).mean()
     hist['pc_sma20'] = pc.rolling(20, min_periods=1).mean()
     hist['pc_sma50'] = pc.rolling(50, min_periods=1).mean()

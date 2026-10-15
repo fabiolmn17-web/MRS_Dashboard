@@ -22,7 +22,7 @@ def test_state_scores():
     assert pipeline.score_vix(0.5) == (-0.59, 'Mid')
     assert pipeline.score_extension(0.9) == (0.5, 'Extended')
     assert pipeline.score_extension(0.1) == (-0.5, 'Compressed')
-    assert pipeline.score_momentum(0.1)[0] == -0.5 and pipeline.score_momentum(0.9)[0] == 0.5
+    assert pipeline.score_momentum(0.1)[0] == -0.5 and pipeline.score_momentum(0.9)[0] == 0.25
     assert pipeline.score_adl(0.9) == (0.25, 'Strong')
     assert pipeline.score_b20(0.1, 0.9)[0] == -0.5   # B20 Low scored without ADL Weak
     for sma, exp in [(0.60, 0.25), (0.70, 0.25), (0.80, 0.25), (0.97, -0.25), (1.10, -0.5)]:

@@ -742,6 +742,8 @@ with left:
                 raw_f = '—'
             elif name == 'Volume':
                 raw_f = f'{raw_float/1e6:.1f}M'  # Format volume in millions
+            elif name in ('Extension', 'Momentum'):
+                raw_f = f'{raw_float*100:+.2f}%'  # % above SMA50 / 5-day % change of SMA50
             else:
                 raw_f = f'{raw_float:,.2f}'
         except:
