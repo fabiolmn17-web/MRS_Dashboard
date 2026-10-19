@@ -1400,10 +1400,10 @@ if _sec_df is not None and len(_sec_df) > 0:
     _ind_as_of = None
     if _ind_df is not None and 'as_of' in _ind_df.columns and len(_ind_df):
         _ind_as_of = str(_ind_df['as_of'].iloc[0])
-    _drill_html, _drill_h = sector_view.build_drilldown_html(
+    _drill_html = sector_view.build_drilldown_html(
         _sec_df, _ind_df, _hold_df, sort_col, sort_asc, ind_as_of=_ind_as_of)
-    # The table resizes itself when rows are opened; scrolling is a fallback.
-    components.html(_drill_html, height=_drill_h, scrolling=True)
+    # Native <details> rows rendered in the page itself (no iframe, so no height limit).
+    st.markdown(_drill_html, unsafe_allow_html=True)
 else:
     st.info('Sector data temporarily unavailable.')
 
