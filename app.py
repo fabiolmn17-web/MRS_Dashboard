@@ -27,6 +27,7 @@ import os
 import pipeline
 import risk_dial
 import sector_view
+import rotation_view
 
 # ── Sector RS — constants & helpers ───────────────────────────────────────────
 # yfinance sector strings → our SECTOR_MAP display names
@@ -593,6 +594,23 @@ with col_dur:
       </div>
     </div>
     """, unsafe_allow_html=True)
+
+# ── Sector rotation at a glance (rotation_view.py) ─────────────────────────────
+try:
+    _rot_pts = rotation_view.rotation_points(load_sector_data(), SECTOR_MAP)
+    if len(_rot_pts):
+        _rot_ind, _ = load_industry_data()
+        _rot_asof = str(_rot_ind['as_of'].iloc[0]) if _rot_ind is not None and 'as_of' in _rot_ind.columns else None
+        st.markdown('<div class="section-header" style="margin-top:6px;">Sector rotation — relative strength vs SPY</div>',
+                    unsafe_allow_html=True)
+        _rot_l, _rot_r = st.columns([1.35, 1], gap='large')
+        with _rot_l:
+            st.plotly_chart(rotation_view.rotation_figure(_rot_pts), use_container_width=True,
+                            config={'displayModeBar': False})
+        with _rot_r:
+            st.markdown(rotation_view.rotation_summary_html(_rot_pts, _rot_ind, _rot_asof), unsafe_allow_html=True)
+except Exception as _rot_err:
+    print(f'[rotation] {_rot_err}')
 
 st.divider()
 
