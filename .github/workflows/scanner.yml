@@ -44,3 +44,22 @@ jobs:
           git add StockScanner/output/scan_results.csv
           git diff --staged --quiet || git commit -m "scanner: $(date +%Y-%m-%d)"
           git push
+
+      # ── Industry drill-down for the sector table (industry ETFs + top 10 holdings) ──
+      # Runs even if the CAN SLIM scan fails, and commits only its own two files.
+      - name: Run industry RS
+        if: always()
+        continue-on-error: true
+        run: python StockScanner/run_industry.py
+
+      - name: Commit industry results
+        if: always()
+        run: |
+          git config user.name  "MRS Bot"
+          git config user.email "mrs-bot@epistruct.com"
+          if [ -f StockScanner/output/industry_rs.csv ]; then
+            git add StockScanner/output/industry_rs.csv StockScanner/output/industry_holdings.csv
+            git diff --staged --quiet || git commit -m "industry: $(date +%Y-%m-%d)"
+            git pull --rebase --autostash || true
+            git push
+          fi
