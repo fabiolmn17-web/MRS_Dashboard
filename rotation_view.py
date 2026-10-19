@@ -46,10 +46,12 @@ def quadrant(rs6, rs3):
 
 def _rs_at(s: pd.Series, spy: pd.Series, n: int, lag: int):
     """RS vs SPY over n bars, measured as of `lag` bars ago (same formula as the sector table)."""
+    # Base bar = iloc[-n] at lag 0, exactly as rs() in app.build_sector_table, so the map
+    # and the sector table always agree (the earlier version used iloc[-n-1], one bar older).
     if len(s) <= n + lag or len(spy) <= n + lag:
         return np.nan
-    p_now, p_ago = float(s.iloc[-1 - lag]), float(s.iloc[-1 - lag - n])
-    q_now, q_ago = float(spy.iloc[-1 - lag]), float(spy.iloc[-1 - lag - n])
+    p_now, p_ago = float(s.iloc[-1 - lag]), float(s.iloc[-n - lag])
+    q_now, q_ago = float(spy.iloc[-1 - lag]), float(spy.iloc[-n - lag])
     if p_ago == 0 or q_ago == 0:
         return np.nan
     return p_now / p_ago - q_now / q_ago
