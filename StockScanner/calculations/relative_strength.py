@@ -7,6 +7,8 @@ RS at period n = (stock_now / stock_n_ago) - (SPY_now / SPY_n_ago)
   = stock_return(n) - SPY_return(n)   [as multipliers, not percentage points]
 
 Composite = sc(rs_1y) + sc(rs_6m) + sc(rs_3m)
+  (RS 1M, n = 21 bars, is reported with the same formula but is NOT part of the
+  composite, so scores and labels stay comparable with their history.)
   where sc(v) = +0.5 if v > 0, -0.5 if v < 0, 0.0 if v == 0 or NaN
   Range: -1.5 to +1.5 in 0.5 steps
 """
@@ -20,6 +22,7 @@ _PERIOD_BARS = {
     '1y': 252,
     '6m': 126,
     '3m': 63,
+    '1m': 21,
 }
 
 
@@ -57,7 +60,7 @@ class RelativeStrengthCalculator:
             spy_df:   SPY price history (OHLCV), DatetimeIndex
 
         Returns dict with:
-            rs_1y, rs_6m, rs_3m (raw differentials)
+            rs_1y, rs_6m, rs_3m, rs_1m (raw differentials)
             rs_composite (-1.5 to +1.5)
             rs_label (str)
             rs_ok (bool, composite > 0)
@@ -66,6 +69,7 @@ class RelativeStrengthCalculator:
             'rs_1y': np.nan,
             'rs_6m': np.nan,
             'rs_3m': np.nan,
+            'rs_1m': np.nan,
             'rs_composite': 0.0,
             'rs_label': 'NEUTRAL',
             'rs_ok': False,
@@ -96,12 +100,14 @@ class RelativeStrengthCalculator:
         rs_1y = rs(_PERIOD_BARS['1y'])
         rs_6m = rs(_PERIOD_BARS['6m'])
         rs_3m = rs(_PERIOD_BARS['3m'])
+        rs_1m = rs(_PERIOD_BARS['1m'])
 
         composite = _sc(rs_1y) + _sc(rs_6m) + _sc(rs_3m)
 
         result['rs_1y']       = rs_1y
         result['rs_6m']       = rs_6m
         result['rs_3m']       = rs_3m
+        result['rs_1m']       = rs_1m
         result['rs_composite'] = composite
         result['rs_label']    = _composite_label(composite)
         result['rs_ok']       = composite > 0.0  # outperforming in at least 2 of 3 periods

@@ -159,8 +159,8 @@ def build_sector_table(closes):
             return (p / s.iloc[-n]) - (spy_now / spy.iloc[-n])
 
         r_ytd = p / ytd_base - 1
-        r_1y, r_6m, r_3m = ret(252), ret(126), ret(63)
-        rs_1y, rs_6m, rs_3m = rs(252), rs(126), rs(63)
+        r_1y, r_6m, r_3m, r_1m = ret(252), ret(126), ret(63), ret(21)
+        rs_1y, rs_6m, rs_3m, rs_1m = rs(252), rs(126), rs(63), rs(21)   # RS 1M: shown, not scored
 
         sc = lambda v: (0.5 if v > 0 else -0.5 if v < 0 else 0.0) if not (v is None or np.isnan(v)) else 0.0
         composite = sc(rs_1y) + sc(rs_6m) + sc(rs_3m)
@@ -176,8 +176,8 @@ def build_sector_table(closes):
 
         rows.append({
             'Sector': sector, 'ETF': etf, 'Close': p, 'DailyChg': daily_chg,
-            'YTD': r_ytd, '1Y': r_1y, '6M': r_6m, '3M': r_3m,
-            'RS 1Y': rs_1y, 'RS 6M': rs_6m, 'RS 3M': rs_3m,
+            'YTD': r_ytd, '1Y': r_1y, '6M': r_6m, '3M': r_3m, '1M': r_1m,
+            'RS 1Y': rs_1y, 'RS 6M': rs_6m, 'RS 3M': rs_3m, 'RS 1M': rs_1m,
             'Score': composite, 'Label': _sector_composite_label(composite),
             'Trend': trend,
         })
@@ -299,6 +299,10 @@ with st.sidebar:
                                          'the Five-Zone cutoffs are calibrated on. Leave 0 to try the '
                                          'CBOE feed; if it is unavailable PC is left blank (scores '
                                          'neutral). Valid range: 0.3 – 2.0.'))
+        inp_same_ok = st.checkbox('Same B20% and ADL as the last stored session (intended)', value=False,
+                                  help='The form starts from the last stored values. If B20% and ADL are both '
+                                       'unchanged, the update is held back unless this box is ticked, so a second '
+                                       'click with the pre-filled numbers cannot overwrite the values just entered.')
         submitted = st.form_submit_button('Submit & Update')
 
     if submitted:
@@ -314,6 +318,13 @@ with st.sidebar:
             _errors.append(f'Zero Gamma {inp_zg:.0f} is outside a valid SPX range.')
         if inp_pc > 3.0:
             _errors.append(f'PC Ratio {inp_pc:.3f} looks like an SPX price, not a ratio. Use 0 for auto-fetch.')
+        # Guard against re-submitting the pre-filled (previous) values: on 23 Oct 2026 a second submit with the
+        # form defaults overwrote the B20% / ADL / zero gamma entered a minute earlier for 22 Oct.
+        _prev_b20, _prev_adl = _last_val('b20_pct'), _last_val('adl_level')
+        if (not inp_same_ok and _prev_b20 == _prev_b20 and _prev_adl == _prev_adl
+                and abs(inp_b20 - _prev_b20) < 1e-6 and abs(inp_adl * 1000 - _prev_adl) < 1e-3):
+            _errors.append(f'B20% {inp_b20:.2f} and ADL {inp_adl:.2f} are the same as the last stored session. '
+                           'Enter today\'s values, or tick "Same B20% and ADL ..." if this is intended.')
 
         if _errors:
             for e in _errors:
@@ -603,12 +614,16 @@ try:
         _rot_asof = str(_rot_ind['as_of'].iloc[0]) if _rot_ind is not None and 'as_of' in _rot_ind.columns else None
         st.markdown('<div class="section-header" style="margin-top:6px;">Sector rotation — relative strength vs SPY</div>',
                     unsafe_allow_html=True)
+        _rot_h_lbl = st.radio('Map horizon', ['6M vs 3M (standard)', '3M vs 1M (short-term)'], index=0,
+                              horizontal=True, key='rot_horizon', label_visibility='collapsed')
+        _rot_h = 'short' if _rot_h_lbl.startswith('3M') else 'standard'
         _rot_l, _rot_r = st.columns([1.35, 1], gap='large')
         with _rot_l:
-            st.plotly_chart(rotation_view.rotation_figure(_rot_pts), use_container_width=True,
+            st.plotly_chart(rotation_view.rotation_figure(_rot_pts, horizon=_rot_h), use_container_width=True,
                             config={'displayModeBar': False})
         with _rot_r:
-            st.markdown(rotation_view.rotation_summary_html(_rot_pts, _rot_ind, _rot_asof), unsafe_allow_html=True)
+            st.markdown(rotation_view.rotation_summary_html(_rot_pts, _rot_ind, _rot_asof, horizon=_rot_h),
+                        unsafe_allow_html=True)
 except Exception as _rot_err:
     print(f'[rotation] {_rot_err}')
 
@@ -1208,7 +1223,8 @@ st.plotly_chart(_fig_sm, use_container_width=True)
 st.markdown(
     '<p style="color:#6b7280;font-size:0.72rem;margin:2px 0 6px 0;">'
     'State heatmap (v4.0 scores) — red: component pushing toward wider swings · grey: normal state · '
-    'green: pushing toward calmer swings</p>',
+    'green: pushing toward calmer swings. B20% and ADL score a high reading the same as a normal one (v4.0 re-test), '
+    'so their rows are only ever red or grey.</p>',
     unsafe_allow_html=True,
 )
 
@@ -1397,9 +1413,11 @@ if _sec_df is not None and len(_sec_df) > 0:
     # ── Sort controls ──────────────────────────────────────────────────────────
     SORT_OPTIONS = {
         'Composite Score': 'Score',
+        'RS 1M':  'RS 1M',
         'RS 3M':  'RS 3M',
         'RS 6M':  'RS 6M',
         'RS 1Y':  'RS 1Y',
+        '1M Return': '1M',
         '3M Return': '3M',
         '6M Return': '6M',
         '1Y Return': '1Y',
@@ -1557,12 +1575,13 @@ if _scan_df is not None and len(_scan_df) > 0:
         _scan_html += _th(_hs, 'RS 1Y',      8)
         _scan_html += _th(_hs, 'RS 6M',      9)
         _scan_html += _th(_hs, 'RS 3M',      10)
-        _scan_html += _th(_hs, 'EPS QoQ',    11)
-        _scan_html += _th(_hs, 'Rev QoQ',    12)
-        _scan_html += _th(_hs, 'ROE',        13)
-        _scan_html += _th(_hc, 'ATR',        14)
-        _scan_html += _th(_hc, 'Squeeze',    15)
-        _scan_html += _th(_hc, 'Mode',       16)
+        _scan_html += _th(_hs, 'RS 1M',      11)
+        _scan_html += _th(_hs, 'EPS QoQ',    12)
+        _scan_html += _th(_hs, 'Rev QoQ',    13)
+        _scan_html += _th(_hs, 'ROE',        14)
+        _scan_html += _th(_hc, 'ATR',        15)
+        _scan_html += _th(_hc, 'Squeeze',    16)
+        _scan_html += _th(_hc, 'Mode',       17)
         _scan_html += '</tr></thead><tbody>'
 
         for _, row in _display_df.iterrows():
@@ -1578,6 +1597,7 @@ if _scan_df is not None and len(_scan_df) > 0:
             rs1y = row.get('rs_1y')
             rs6m = row.get('rs_6m')
             rs3m = row.get('rs_3m')
+            rs1m = row.get('rs_1m')
 
             yf_sector    = str(row.get('sector', ''))
             display_sect = YF_TO_SECTOR.get(yf_sector, yf_sector)
@@ -1630,6 +1650,7 @@ if _scan_df is not None and len(_scan_df) > 0:
             _scan_html += f'<td style="{_rs}color:{_cc(rs1y)};" data-sort="{_sv(rs1y)}">{_pct_s(rs1y)}</td>'
             _scan_html += f'<td style="{_rs}color:{_cc(rs6m)};" data-sort="{_sv(rs6m)}">{_pct_s(rs6m)}</td>'
             _scan_html += f'<td style="{_rs}color:{_cc(rs3m)};" data-sort="{_sv(rs3m)}">{_pct_s(rs3m)}</td>'
+            _scan_html += f'<td style="{_rs}color:{_cc(rs1m)};" data-sort="{_sv(rs1m)}">{_pct_s(rs1m)}</td>'
             _scan_html += f'<td style="{_rs}color:{_cc(eps)};" data-sort="{_sv(eps)}">{_pct_s(eps)}</td>'
             _scan_html += f'<td style="{_rs}color:{_cc(rev)};" data-sort="{_sv(rev)}">{_pct_s(rev)}</td>'
             _scan_html += f'<td style="{_rs}color:{_cc(roe)};" data-sort="{_sv(roe)}">{_pct_s(roe)}</td>'

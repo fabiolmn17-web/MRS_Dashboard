@@ -61,12 +61,12 @@ def _e(s):
     return _html.escape(str(s), quote=True)
 
 
-GRID = 'grid-template-columns:minmax(190px,2.2fr) 0.55fr 0.95fr repeat(7,minmax(58px,0.75fr)) 1.05fr minmax(190px,1.9fr);'
+GRID = 'grid-template-columns:minmax(190px,2.2fr) 0.55fr 0.95fr repeat(9,minmax(56px,0.72fr)) 1.05fr minmax(190px,1.9fr);'
 
 CSS = (
     '<style>'
     '.sv{overflow-x:auto;margin-top:6px;font-size:0.80rem;}'
-    '.sv .in{min-width:1150px;}'
+    '.sv .in{min-width:1290px;}'
     '.sv .g{display:grid;' + GRID + 'align-items:center;}'
     '.sv .g>div{padding:6px 10px;text-align:right;white-space:nowrap;color:#e5e7eb;}'
     '.sv .g>div.l{text-align:left;} .sv .g>div.c{text-align:center;}'
@@ -110,7 +110,7 @@ def _metric_cells(r, score_txt=True):
         dcc = GREEN if (not _nan(dc) and float(dc) >= 0) else LRED
         dct = '' if _nan(dc) else f'<br><span class="sub" style="color:{dcc};">{"+" if float(dc) >= 0 else ""}{float(dc) * 100:.2f}%</span>'
         out += f'<div>${float(r["Close"]):,.2f}{dct}</div>'
-    for k in ['YTD', '1Y', '6M', '3M', 'RS 1Y', 'RS 6M', 'RS 3M']:
+    for k in ['YTD', '1Y', '6M', '3M', '1M', 'RS 1Y', 'RS 6M', 'RS 3M', 'RS 1M']:
         out += f'<div style="color:{_col(r.get(k))};">{_pct(r.get(k))}</div>'
     t_lbl, t_col, t_bg = TREND_CFG.get(r.get('Trend', 'NEUTRAL'), TREND_CFG['NEUTRAL'])
     bg = '' if t_bg == 'rgba(0,0,0,0)' else f'background:{t_bg};'
@@ -130,7 +130,7 @@ def _holdings_table(h: pd.DataFrame) -> str:
         return '<div class="note" style="margin:4px 0;">Holdings not available for this ETF.</div>'
     s = '<table class="hold"><thead><tr>'
     for lbl, cls in [('#', 'c'), ('Ticker', 'l'), ('Name', 'l'), ('Weight', ''), ('Close', ''), ('% 52W Hi', ''),
-                     ('RS Score', ''), ('RS 1Y', ''), ('RS 6M', ''), ('RS 3M', ''), ('ATR', 'c'), ('Squeeze', 'c')]:
+                     ('RS Score', ''), ('RS 1Y', ''), ('RS 6M', ''), ('RS 3M', ''), ('RS 1M', ''), ('ATR', 'c'), ('Squeeze', 'c')]:
         s += f'<th class="{cls}">{lbl}</th>'
     s += '</tr></thead><tbody>'
     for _, r in h.sort_values('rank').iterrows():
@@ -163,7 +163,7 @@ def _holdings_table(h: pd.DataFrame) -> str:
         s += f'<td>{close_txt}</td>'
         s += f'<td style="color:{ath_col};font-weight:600;">{ath_txt}</td>'
         s += f'<td style="color:{_score_col(rc)};font-weight:700;">{rc_txt}</td>'
-        for k in ['rs_1y', 'rs_6m', 'rs_3m']:
+        for k in ['rs_1y', 'rs_6m', 'rs_3m', 'rs_1m']:
             s += f'<td style="color:{_col(r.get(k))};">{_pct(r.get(k))}</td>'
         s += f'<td class="c" style="color:{"#60a5fa" if atr else "#4b5563"};">{"🔵" if atr else "—"}</td>'
         s += f'<td class="c" style="color:{"#fbbf24" if sq else "#4b5563"};">{"⚡" if sq else "—"}</td>'
@@ -194,7 +194,7 @@ def build_drilldown_html(sec_df: pd.DataFrame, ind_df, hold_df, sort_col: str, s
           else 'Industry drill-down not available yet: it is produced by the nightly scanner job.')
     h += '</div><div class="in"><div class="g hd">'
     for lbl, cls in [('Sector / Industry', 'l'), ('ETF', ''), ('Close', ''), ('YTD', ''), ('1Y', ''), ('6M', ''),
-                     ('3M', ''), ('RS 1Y', ''), ('RS 6M', ''), ('RS 3M', ''), ('6M&#8594;3M Trend', 'c'), ('Score', '')]:
+                     ('3M', ''), ('1M', ''), ('RS 1Y', ''), ('RS 6M', ''), ('RS 3M', ''), ('RS 1M', ''), ('6M&#8594;3M Trend', 'c'), ('Score', '')]:
         h += f'<div class="{cls}">{lbl}</div>'
     h += '</div>'
 
@@ -220,7 +220,8 @@ def build_drilldown_html(sec_df: pd.DataFrame, ind_df, hold_df, sort_col: str, s
 
     h += '</div>'
     note = ('RS = additive return differential vs SPY. Trend = RS sign shift 6M to 3M. '
-            'Score = sign-based composite (range -1.5 to +1.5). Sector rows: live, cached hourly. ')
+            'Score = sign-based composite of RS 1Y / 6M / 3M (range -1.5 to +1.5); RS 1M (21 sessions, same formula) is shown but not scored. '
+            'Sector rows: live, cached hourly. ')
     if have_ind:
         note += (f'Industry rows (industry ETFs, same formula) and top 10 holdings: nightly'
                  f'{", as of " + _e(ind_as_of) if ind_as_of else ""}. '

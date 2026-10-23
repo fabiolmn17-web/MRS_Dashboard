@@ -133,7 +133,8 @@ def rs_row(s: pd.Series, spy: pd.Series) -> Optional[dict]:
     """Returns, RS vs SPY, composite and trend for one close series.
 
     Identical formula to build_sector_table() in app.py:
-      RS(n)     = s_now / s_n_ago - spy_now / spy_n_ago   (n = 252, 126, 63 bars)
+      RS(n)     = s_now / s_n_ago - spy_now / spy_n_ago   (n = 252, 126, 63, 21 bars)
+      RS 1M (21 bars) is reported but not scored, as in the sector table
       Score     = sum of sign(RS) * 0.5 over the three periods (-1.5 .. +1.5)
       Trend     = sign shift between RS 6M and RS 3M
       YTD base  = last close of the previous calendar year
@@ -156,7 +157,7 @@ def rs_row(s: pd.Series, spy: pd.Series) -> Optional[dict]:
             return np.nan
         return (p / float(s.iloc[-n])) - (spy_now / float(spy.iloc[-n]))
 
-    rs_1y, rs_6m, rs_3m = rs(252), rs(126), rs(63)
+    rs_1y, rs_6m, rs_3m, rs_1m = rs(252), rs(126), rs(63), rs(21)
     sc = lambda v: 0.0 if (v is None or np.isnan(v)) else (0.5 if v > 0 else -0.5 if v < 0 else 0.0)
     score = sc(rs_1y) + sc(rs_6m) + sc(rs_3m)
 
@@ -172,8 +173,8 @@ def rs_row(s: pd.Series, spy: pd.Series) -> Optional[dict]:
 
     return {
         'Close': p, 'DailyChg': (p / p_prev - 1) if p_prev else 0.0,
-        'YTD': p / ytd_base - 1, '1Y': ret(252), '6M': ret(126), '3M': ret(63),
-        'RS 1Y': rs_1y, 'RS 6M': rs_6m, 'RS 3M': rs_3m,
+        'YTD': p / ytd_base - 1, '1Y': ret(252), '6M': ret(126), '3M': ret(63), '1M': ret(21),
+        'RS 1Y': rs_1y, 'RS 6M': rs_6m, 'RS 3M': rs_3m, 'RS 1M': rs_1m,
         'Score': score, 'Label': composite_label(score), 'Trend': trend,
     }
 
@@ -225,8 +226,8 @@ def build_industry_tables(price_data: Dict[str, pd.DataFrame],
             r = rs_row(df['Close'], spy) if df is not None and not df.empty else None
             row = {'Sector': sector, 'SectorETF': SECTOR_ETF[sector], 'Industry': industry, 'ETF': etf}
             if r is None:
-                row.update({k: np.nan for k in ['Close', 'DailyChg', 'YTD', '1Y', '6M', '3M',
-                                                 'RS 1Y', 'RS 6M', 'RS 3M', 'Score']})
+                row.update({k: np.nan for k in ['Close', 'DailyChg', 'YTD', '1Y', '6M', '3M', '1M',
+                                                 'RS 1Y', 'RS 6M', 'RS 3M', 'RS 1M', 'Score']})
                 row.update({'Label': 'NO DATA', 'Trend': 'NEUTRAL'})
             else:
                 row.update(r)
@@ -259,14 +260,14 @@ def build_industry_tables(price_data: Dict[str, pd.DataFrame],
                     # (computed here: the scanner's TechnicalCalculator skips it
                     # for stocks that fail its trend filters)
                     'pct_from_52w_high': float(c.iloc[-1] / c.iloc[-252:].max() - 1),
-                    'rs_1y': rs['rs_1y'], 'rs_6m': rs['rs_6m'], 'rs_3m': rs['rs_3m'],
+                    'rs_1y': rs['rs_1y'], 'rs_6m': rs['rs_6m'], 'rs_3m': rs['rs_3m'], 'rs_1m': rs.get('rs_1m'),
                     'rs_composite': rs['rs_composite'], 'rs_label': rs['rs_label'],
                     'atr_compressed': bool(pat.get('atr_compressed', False)),
                     'bb_kc_squeeze': bool(pat.get('bb_kc_squeeze', False)),
                 })
             else:
                 row.update({'close': np.nan, 'daily_chg': np.nan, 'pct_from_52w_high': np.nan,
-                            'rs_1y': np.nan, 'rs_6m': np.nan, 'rs_3m': np.nan,
+                            'rs_1y': np.nan, 'rs_6m': np.nan, 'rs_3m': np.nan, 'rs_1m': np.nan,
                             'rs_composite': np.nan, 'rs_label': 'NO DATA',
                             'atr_compressed': False, 'bb_kc_squeeze': False})
             row['as_of'] = as_of

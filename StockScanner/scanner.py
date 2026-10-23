@@ -122,6 +122,7 @@ def run_scan(
             'rs_1y':             rs['rs_1y'],
             'rs_6m':             rs['rs_6m'],
             'rs_3m':             rs['rs_3m'],
+            'rs_1m':             rs.get('rs_1m'),
             'rs_composite':      rs['rs_composite'],
             'rs_label':          rs['rs_label'],
             'passes_technical':  tech['passes_technical'],
@@ -212,6 +213,7 @@ def run_scan(
             'rs_1y':              row['rs_1y'],
             'rs_6m':              row['rs_6m'],
             'rs_3m':              row['rs_3m'],
+            'rs_1m':              row.get('rs_1m'),
             'rs_composite':       row['rs_composite'],
             'rs_label':           row['rs_label'],
             # Fundamentals
