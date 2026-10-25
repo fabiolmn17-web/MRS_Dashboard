@@ -472,7 +472,7 @@ st.markdown("""
     padding: 10px 16px;
     margin-bottom: 6px;
     font-size: 0.90rem;
-    color: #f4a062;
+    color: #b9805a;
   }
   .safe-row {
     background: #132322;
@@ -481,7 +481,7 @@ st.markdown("""
     padding: 10px 16px;
     margin-bottom: 6px;
     font-size: 0.90rem;
-    color: #85cac5;
+    color: #649995;
   }
   .neutral-row {
     background: #1a1918;
@@ -519,9 +519,9 @@ def _f(key, fmt='{:.2f}'):
 QUALITY_COLORS = {
     'CONFIRMED':              '#85cac5',
     'NEUTRAL — BULLISH LEAN': '#85cac5',
-    'NEUTRAL — BEARISH LEAN': '#f4a062',
+    'NEUTRAL — BEARISH LEAN': '#b9805a',
     'NEUTRAL — NO EDGE':      '#a89f95',
-    'UNCONFIRMED':            '#f4a062',
+    'UNCONFIRMED':            '#b9805a',
     'DIVERGENT':              '#f4a062',
     'FRAGILE':                '#e3b48e',
 }
@@ -1119,8 +1119,8 @@ st.markdown('<div class="section-header">Component History</div>', unsafe_allow_
 _PHI_CFG = [
     # (label, phi_col, line_color)
     ('VIX',       'vix_phi',  '#e8dccb'),
-    ('Extension', 'ext_phi',  '#f4a062'),
-    ('Momentum',  'mom_phi',  '#85cac5'),
+    ('Extension', 'ext_phi',  '#b9805a'),
+    ('Momentum',  'mom_phi',  '#649995'),
     ('ADL',       'adl_phi',  '#9b958f'),
     ('B20%',      'b20_phi',  '#e3b48e'),
     ('SKEW',      'skew_phi', '#e8dccb'),
@@ -1150,8 +1150,8 @@ _fig_sm = make_subplots(
     horizontal_spacing=0.04,
 )
 
-_DANGER_FILL  = 'rgba(244,160,98,0.12)'
-_POSITIVE_FILL = 'rgba(133,202,197,0.12)'
+_DANGER_FILL  = 'rgba(244,160,98,0.18)'
+_POSITIVE_FILL = 'rgba(133,202,197,0.18)'
 _DANGER_LINE   = 'rgba(244,160,98,0.45)'
 _POSITIVE_LINE = 'rgba(133,202,197,0.45)'
 
@@ -1280,10 +1280,10 @@ for label, col, _ in _PHI_CFG:
 _hm_colorscale = [
     [0.00, '#74492e'],
     [0.20, '#f4a062'],
-    [0.29, '#f4a062'],
+    [0.29, '#b9805a'],
     [0.30, '#1a1918'],   # sharp neutral start
     [0.70, '#1a1918'],   # sharp neutral end
-    [0.71, '#85cac5'],
+    [0.71, '#649995'],
     [0.90, '#85cac5'],
     [1.00, '#3d5d5a'],
 ]
@@ -1333,7 +1333,7 @@ with st.expander('PC Ratio — Five-Zone Context (v4.0 scores)', expanded=_pc_st
             zcol = '#85cac5'
         elif pc10 < 0.732:
             zone, note = 'Moderate LOW', 'Slightly narrower swings than average (0.77x / 0.88x). Score +0.25.'
-            zcol = '#85cac5'
+            zcol = '#649995'
         elif pc10 < 0.944:
             zone, note = 'Mid', 'Normal zone, slightly narrower swings than average (0.88x / 0.86x). Score +0.25.'
             zcol = '#9b958f'
@@ -1408,16 +1408,16 @@ if _sec_df is not None and len(_sec_df) > 0:
 
     def _score_color(v):
         if v >= 1.0:  return '#85cac5'
-        if v >= 0.5:  return '#85cac5'
+        if v >= 0.5:  return '#649995'
         if v <= -1.0: return '#f4a062'
-        if v <= -0.5: return '#f4a062'
+        if v <= -0.5: return '#b9805a'
         return '#9b958f'
 
     TREND_CFG = {
-        'IMPROVING': ('↑ IMPROVING',  '#85cac5', 'rgba(133,202,197,0.12)'),
-        'FADING':    ('↓ FADING',     '#f4a062', 'rgba(244,160,98,0.12)'),
-        'STABLE+':  ('→ STABLE',      '#85cac5', 'rgba(0,0,0,0)'),
-        'STABLE-':  ('→ STABLE',      '#f4a062', 'rgba(0,0,0,0)'),
+        'IMPROVING': ('↑ IMPROVING',  '#85cac5', 'rgba(133,202,197,0.18)'),
+        'FADING':    ('↓ FADING',     '#f4a062', 'rgba(244,160,98,0.18)'),
+        'STABLE+':  ('→ STABLE',      '#649995', 'rgba(0,0,0,0)'),
+        'STABLE-':  ('→ STABLE',      '#b9805a', 'rgba(0,0,0,0)'),
         'NEUTRAL':  ('— NEUTRAL',     '#9b958f', 'rgba(0,0,0,0)'),
     }
 
@@ -1475,7 +1475,7 @@ if _scan_df is not None and len(_scan_df) > 0:
     _scan_mrs = _scan_df['mrs_score'].iloc[0] if 'mrs_score' in _scan_df.columns else None
     _scan_state = _scan_df['mrs_state'].iloc[0] if 'mrs_state' in _scan_df.columns else None
     if _scan_mrs is not None and not (isinstance(_scan_mrs, float) and np.isnan(_scan_mrs)):
-        _mrs_color = '#85cac5' if float(_scan_mrs) > 0 else '#f4a062'
+        _mrs_color = '#85cac5' if float(_scan_mrs) > 0 else '#b9805a'
         st.markdown(
             f'<div style="font-size:0.78rem;color:#a89f95;margin-bottom:6px;">'
             f'MRS at scan: <span style="color:{_mrs_color};font-weight:700;">'
@@ -1546,9 +1546,9 @@ if _scan_df is not None and len(_scan_df) > 0:
 
         def _sc_clr(v):
             if v >= 1.0:  return '#85cac5'
-            if v >= 0.5:  return '#85cac5'
+            if v >= 0.5:  return '#649995'
             if v <= -1.0: return '#f4a062'
-            if v <= -0.5: return '#f4a062'
+            if v <= -0.5: return '#b9805a'
             return '#9b958f'
 
         # ── Style templates ────────────────────────────────────────────────────
@@ -1562,8 +1562,8 @@ if _scan_df is not None and len(_scan_df) > 0:
         _TREND_CFG_S = {
             'IMPROVING': ('↑ IMP',  '#85cac5'),
             'FADING':    ('↓ FADE', '#f4a062'),
-            'STABLE+':   ('→ STB',  '#85cac5'),
-            'STABLE-':   ('→ STB',  '#f4a062'),
+            'STABLE+':   ('→ STB',  '#649995'),
+            'STABLE-':   ('→ STB',  '#b9805a'),
             'NEUTRAL':   ('— NEU',  '#9b958f'),
         }
 
@@ -1599,7 +1599,7 @@ if _scan_df is not None and len(_scan_df) > 0:
             rs_comp  = row.get('rs_composite', 0) or 0
             sc_color = _sc_clr(float(rs_comp))
             mode     = row.get('pass_mode', '')
-            mode_bg  = 'rgba(133,202,197,0.12)'  if mode == 'STRICT'  else 'rgba(227,180,142,0.10)'
+            mode_bg  = 'rgba(133,202,197,0.18)'  if mode == 'STRICT'  else 'rgba(227,180,142,0.10)'
             mode_col = '#85cac5'                if mode == 'STRICT'  else '#e3b48e'
 
             eps  = row.get('eps_qtr_yoy')
@@ -1641,7 +1641,7 @@ if _scan_df is not None and len(_scan_df) > 0:
             pct_ath_txt = f'{float(pct_ath)*100:+.1f}%' if pct_ath is not None and not _isnan(pct_ath) else '—'
             pct_ath_val = float(pct_ath)*100 if pct_ath is not None and not _isnan(pct_ath) else -999
             pct_ath_col = ('#85cac5' if (pct_ath is not None and not _isnan(pct_ath) and float(pct_ath) > -0.05)
-                           else '#f4a062' if (pct_ath is not None and not _isnan(pct_ath) and float(pct_ath) < -0.15)
+                           else '#b9805a' if (pct_ath is not None and not _isnan(pct_ath) and float(pct_ath) < -0.15)
                            else '#e3b48e')
 
             def _sv(v):

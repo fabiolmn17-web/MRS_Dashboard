@@ -36,13 +36,13 @@ SHORT = {
 # quadrant -> (label, colour). Same semantic colours as the sector table's trend cells.
 QUAD = {
     'LEADING':   ('Leading',   '#85cac5'),
-    'IMPROVING': ('Improving', '#85cac5'),
-    'FADING':    ('Fading',    '#f4a062'),
+    'IMPROVING': ('Improving', '#649995'),
+    'FADING':    ('Fading',    '#b9805a'),
     'LAGGING':   ('Lagging',   '#f4a062'),
 }
 INK, MUTED, GRID = '#f3ece2', '#a89f95', '#2a2724'
 DIR_THRESH = 0.01      # RS 3M change over 5 sessions (1 pt) needed for a direction tag
-DIR = {'UP': ('↑', 'strengthening', '#85cac5'), 'DOWN': ('↓', 'weakening', '#f4a062')}
+DIR = {'UP': ('↑', 'strengthening', '#85cac5'), 'DOWN': ('↓', 'weakening', '#b9805a')}
 
 # x / y columns of rotation_points() and their labels for each map horizon
 HORIZONS = {
@@ -266,7 +266,7 @@ def rotation_summary_html(points: pd.DataFrame, ind_df, ind_as_of=None, n_ind: i
                                   for r in t[['Industry', icol]].itertuples(index=False))
         h += ('<div style="margin-top:10px;border-top:1px solid #2a2724;padding-top:8px;">'
               f'<div><b style="color:#85cac5;">Strongest industries</b> <span style="color:#9b958f;">({icol})</span>: {fmt(top)}</div>'
-              f'<div><b style="color:#f4a062;">Weakest industries</b>: {fmt(bot)}</div></div>')
+              f'<div><b style="color:#b9805a;">Weakest industries</b>: {fmt(bot)}</div></div>')
     h += (f'<div style="font-size:0.70rem;color:#9b958f;margin-top:8px;">Map ({H["name"]}): RS vs SPY, tails show the position '
           f'5 and 10 sessions ago. {H["note"]}; ↑ / ↓ = {yl} up / down by more than '
           f'{DIR_THRESH * 100:.0f} pt over the last 5 sessions. RS 1M = 21 sessions. Descriptive, not a forecast.'

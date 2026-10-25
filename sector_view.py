@@ -14,13 +14,13 @@ import math
 import pandas as pd
 
 # ── palette (same as the rest of the dashboard) ───────────────────────────────
-GREEN, LGREEN, RED, LRED, ORANGE, GREY = '#85cac5', '#85cac5', '#f4a062', '#f4a062', '#f4a062', '#9b958f'
+GREEN, LGREEN, RED, LRED, ORANGE, GREY = '#85cac5', '#649995', '#f4a062', '#b9805a', '#b9805a', '#9b958f'
 
 TREND_CFG = {
-    'IMPROVING': ('↑ IMPROVING', '#85cac5', 'rgba(133,202,197,0.12)'),
-    'FADING':    ('↓ FADING',    '#f4a062', 'rgba(244,160,98,0.12)'),
-    'STABLE+':   ('→ STABLE',    '#85cac5', 'rgba(0,0,0,0)'),
-    'STABLE-':   ('→ STABLE',    '#f4a062', 'rgba(0,0,0,0)'),
+    'IMPROVING': ('↑ IMPROVING', '#85cac5', 'rgba(133,202,197,0.18)'),
+    'FADING':    ('↓ FADING',    '#f4a062', 'rgba(244,160,98,0.18)'),
+    'STABLE+':   ('→ STABLE',    '#649995', 'rgba(0,0,0,0)'),
+    'STABLE-':   ('→ STABLE',    '#b9805a', 'rgba(0,0,0,0)'),
     'NEUTRAL':   ('— NEUTRAL',   '#9b958f', 'rgba(0,0,0,0)'),
 }
 
@@ -226,7 +226,7 @@ def build_drilldown_html(sec_df: pd.DataFrame, ind_df, hold_df, sort_col: str, s
         note += (f'Industry rows (industry ETFs, same formula) and top 10 holdings: nightly'
                  f'{", as of " + _e(ind_as_of) if ind_as_of else ""}. '
                  'Holdings: weight in the ETF, % 52W Hi = distance from the 52-week closing high, '
-                 'RS Score = same composite, ATR &#3d5d5a; = bottom 35th pctile, Squeeze &#9889; = Bollinger inside Keltner. '
+                 'RS Score = same composite, ATR <span style="color:#e8dccb">●</span> = bottom 35th pctile, Squeeze &#9889; = Bollinger inside Keltner. '
                  'Some industry ETFs hold non-US listings.')
     h += f'<div class="note">{note}</div></div>'
     return h.replace('\n', ' ')
