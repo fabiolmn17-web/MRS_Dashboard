@@ -323,11 +323,11 @@ def regime_label(mrs: float) -> str:
 
 def regime_color(mrs: float) -> str:
     """Hex color for regime band (web display)."""
-    if mrs >= 1.5:  return '#1a7f37'
-    if mrs >= 0.5:  return '#57a66b'
-    if mrs >= -0.5: return '#6b7280'
-    if mrs >= -1.5: return '#d97706'
-    return '#b91c1c'
+    if mrs >= 1.5:  return '#85cac5'   # risk-on: right-tail
+    if mrs >= 0.5:  return '#8fb0ad'   # mild risk-on: weaker teal
+    if mrs >= -0.5: return '#a89f95'   # neutral: ink-muted
+    if mrs >= -1.5: return '#b98d6e'   # mild risk-off: weaker orange
+    return '#f4a062'                   # risk-off: left-tail
 
 def compute_regime_duration(hist: pd.DataFrame, ref_date) -> int:
     df = hist[hist['date'] <= pd.Timestamp(ref_date)].sort_values('date')

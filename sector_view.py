@@ -14,14 +14,14 @@ import math
 import pandas as pd
 
 # ── palette (same as the rest of the dashboard) ───────────────────────────────
-GREEN, LGREEN, RED, LRED, ORANGE, GREY = '#22c55e', '#86efac', '#ef4444', '#f87171', '#f97316', '#6b7280'
+GREEN, LGREEN, RED, LRED, ORANGE, GREY = '#85cac5', '#85cac5', '#f4a062', '#f4a062', '#f4a062', '#9b958f'
 
 TREND_CFG = {
-    'IMPROVING': ('↑ IMPROVING', '#22c55e', 'rgba(34,197,94,0.12)'),
-    'FADING':    ('↓ FADING',    '#f97316', 'rgba(249,115,22,0.12)'),
-    'STABLE+':   ('→ STABLE',    '#86efac', 'rgba(0,0,0,0)'),
-    'STABLE-':   ('→ STABLE',    '#f87171', 'rgba(0,0,0,0)'),
-    'NEUTRAL':   ('— NEUTRAL',   '#6b7280', 'rgba(0,0,0,0)'),
+    'IMPROVING': ('↑ IMPROVING', '#85cac5', 'rgba(133,202,197,0.12)'),
+    'FADING':    ('↓ FADING',    '#f4a062', 'rgba(244,160,98,0.12)'),
+    'STABLE+':   ('→ STABLE',    '#85cac5', 'rgba(0,0,0,0)'),
+    'STABLE-':   ('→ STABLE',    '#f4a062', 'rgba(0,0,0,0)'),
+    'NEUTRAL':   ('— NEUTRAL',   '#9b958f', 'rgba(0,0,0,0)'),
 }
 
 
@@ -68,34 +68,34 @@ CSS = (
     '.sv{overflow-x:auto;margin-top:6px;font-size:0.80rem;}'
     '.sv .in{min-width:1290px;}'
     '.sv .g{display:grid;' + GRID + 'align-items:center;}'
-    '.sv .g>div{padding:6px 10px;text-align:right;white-space:nowrap;color:#e5e7eb;}'
+    '.sv .g>div{padding:6px 10px;text-align:right;white-space:nowrap;color:#f3ece2;}'
     '.sv .g>div.l{text-align:left;} .sv .g>div.c{text-align:center;}'
-    '.sv .hd{background:#21262d;border-bottom:1px solid #374151;}'
-    '.sv .hd>div{color:#9ca3af !important;font-size:0.72rem;font-weight:600;padding:7px 10px;}'
-    '.sv .sr{background:#161b22;border-bottom:1px solid #1f2937;}'
+    '.sv .hd{background:#2a2724;border-bottom:1px solid #2a2724;}'
+    '.sv .hd>div{color:#a89f95 !important;font-size:0.72rem;font-weight:600;padding:7px 10px;}'
+    '.sv .sr{background:#121212;border-bottom:1px solid #1a1918;}'
     '.sv details>summary{list-style:none;cursor:pointer;}'
     '.sv details>summary::-webkit-details-marker{display:none;}'
     '.sv details>summary::marker{content:"";}'
-    '.sv details.sec>summary:hover{background:#1c2330;}'
-    '.sv .ir{background:#10151c;border-bottom:1px solid #1f2937;font-size:0.77rem;}'
-    '.sv details.ind>summary:hover{background:#18202b;}'
+    '.sv details.sec>summary:hover{background:#1a1918;}'
+    '.sv .ir{background:#0a0a0a;border-bottom:1px solid #1a1918;font-size:0.77rem;}'
+    '.sv details.ind>summary:hover{background:#121212;}'
     '.sv .ir>div.l{padding-left:30px;}'
-    '.sv .car{display:inline-block;width:16px;color:#9ca3af;font-size:0.85rem;}'
+    '.sv .car{display:inline-block;width:16px;color:#a89f95;font-size:0.85rem;}'
     '.sv .car::before{content:"▸";}'
     '.sv details[open]>summary .car::before{content:"▾";}'
     '.sv .sub{font-size:0.70rem;}'
-    '.sv .cnt{color:#6b7280;font-size:0.68rem;font-weight:400;margin-left:6px;}'
-    '.sv .hp{background:#0b0f14;padding:4px 10px 10px 30px;border-bottom:1px solid #1f2937;}'
+    '.sv .cnt{color:#9b958f;font-size:0.68rem;font-weight:400;margin-left:6px;}'
+    '.sv .hp{background:#0a0a0a;padding:4px 10px 10px 30px;border-bottom:1px solid #1a1918;}'
     '.sv table.hold{width:100%;border-collapse:collapse;margin:2px 0 0 0;}'
-    '.sv table.hold th{background:#1a1f27;color:#9ca3af;font-size:0.68rem;font-weight:600;padding:5px 8px;'
-    'text-align:right;border-bottom:1px solid #2b3340;white-space:nowrap;}'
+    '.sv table.hold th{background:#121212;color:#a89f95;font-size:0.68rem;font-weight:600;padding:5px 8px;'
+    'text-align:right;border-bottom:1px solid #2a2724;white-space:nowrap;}'
     '.sv table.hold th.l{text-align:left;} .sv table.hold th.c{text-align:center;}'
-    '.sv table.hold td{background:#0f141a;font-size:0.75rem;padding:5px 8px;border-bottom:1px solid #1a2029;'
-    'text-align:right;white-space:nowrap;color:#e5e7eb;}'
+    '.sv table.hold td{background:#0a0a0a;font-size:0.75rem;padding:5px 8px;border-bottom:1px solid #121212;'
+    'text-align:right;white-space:nowrap;color:#f3ece2;}'
     '.sv table.hold td.l{text-align:left;} .sv table.hold td.c{text-align:center;}'
     '.sv table.hold,.sv table.hold th,.sv table.hold td{border-left:none;border-right:none;border-top:none;}'
-    '.sv .ctl{font-size:0.72rem;color:#9ca3af;margin:2px 0 6px 0;}'
-    '.sv .note{font-size:0.70rem;color:#6b7280;margin-top:6px;line-height:1.5;white-space:normal;}'
+    '.sv .ctl{font-size:0.72rem;color:#a89f95;margin:2px 0 6px 0;}'
+    '.sv .note{font-size:0.70rem;color:#9b958f;margin-top:6px;line-height:1.5;white-space:normal;}'
     '</style>'
 )
 
@@ -117,7 +117,7 @@ def _metric_cells(r, score_txt=True):
     out += f'<div class="c" style="{bg}color:{t_col};font-weight:700;font-size:0.75rem;align-self:stretch;display:flex;align-items:center;justify-content:center;">{t_lbl}</div>'
     sc = r.get('Score')
     if _nan(sc):
-        out += '<div style="color:#6b7280;">no data</div>'
+        out += '<div style="color:#9b958f;">no data</div>'
     else:
         sc = float(sc)
         lbl = r.get('Label', '')
@@ -150,23 +150,23 @@ def _holdings_table(h: pd.DataFrame) -> str:
         else:
             ath = float(ath)
             ath_txt = f'{ath * 100:+.1f}%'
-            ath_col = GREEN if ath > -0.05 else LRED if ath < -0.15 else '#fbbf24'
+            ath_col = GREEN if ath > -0.05 else LRED if ath < -0.15 else '#e3b48e'
         rc = r.get('rs_composite')
         rc_txt = '—' if _nan(rc) else f'{float(rc):+.1f}'
         atr = str(r.get('atr_compressed')).lower() == 'true'
         sq = str(r.get('bb_kc_squeeze')).lower() == 'true'
         s += '<tr>'
-        s += f'<td class="c" style="color:#6b7280;">{int(r["rank"])}</td>'
-        s += f'<td class="l"><b style="color:#e5e7eb;">{_e(r["ticker"])}</b></td>'
-        s += f'<td class="l" style="color:#9ca3af;">{_e(str(r.get("name", ""))[:30])}</td>'
-        s += f'<td style="color:#9ca3af;">{w_txt}</td>'
+        s += f'<td class="c" style="color:#9b958f;">{int(r["rank"])}</td>'
+        s += f'<td class="l"><b style="color:#f3ece2;">{_e(r["ticker"])}</b></td>'
+        s += f'<td class="l" style="color:#a89f95;">{_e(str(r.get("name", ""))[:30])}</td>'
+        s += f'<td style="color:#a89f95;">{w_txt}</td>'
         s += f'<td>{close_txt}</td>'
         s += f'<td style="color:{ath_col};font-weight:600;">{ath_txt}</td>'
         s += f'<td style="color:{_score_col(rc)};font-weight:700;">{rc_txt}</td>'
         for k in ['rs_1y', 'rs_6m', 'rs_3m', 'rs_1m']:
             s += f'<td style="color:{_col(r.get(k))};">{_pct(r.get(k))}</td>'
-        s += f'<td class="c" style="color:{"#60a5fa" if atr else "#4b5563"};">{"🔵" if atr else "—"}</td>'
-        s += f'<td class="c" style="color:{"#fbbf24" if sq else "#4b5563"};">{"⚡" if sq else "—"}</td>'
+        s += f'<td class="c" style="color:{"#e8dccb" if atr else "#6e675f"};">{"●" if atr else "—"}</td>'
+        s += f'<td class="c" style="color:{"#e3b48e" if sq else "#6e675f"};">{"⚡" if sq else "—"}</td>'
         s += '</tr>'
     s += '</tbody></table>'
     return s
@@ -203,17 +203,17 @@ def build_drilldown_html(sec_df: pd.DataFrame, ind_df, hold_df, sort_col: str, s
         inds = _sort(inds, sort_col, sort_asc)
         click = len(inds) > 0
         cnt = (f'<span class="cnt">{len(inds)} industr{"y" if len(inds) == 1 else "ies"}</span>' if click else '')
-        cells = (f'<div class="l"><span class="car"></span><b style="color:#e5e7eb;">{_e(srow["Sector"])}</b>{cnt}</div>'
+        cells = (f'<div class="l"><span class="car"></span><b style="color:#f3ece2;">{_e(srow["Sector"])}</b>{cnt}</div>'
                  if click else f'<div class="l"><span style="display:inline-block;width:14px;"></span>'
-                               f'<b style="color:#e5e7eb;">{_e(srow["Sector"])}</b></div>')
-        cells += f'<div style="color:#9ca3af;">{_e(srow["ETF"])}</div>' + _metric_cells(srow)
+                               f'<b style="color:#f3ece2;">{_e(srow["Sector"])}</b></div>')
+        cells += f'<div style="color:#a89f95;">{_e(srow["ETF"])}</div>' + _metric_cells(srow)
         if not click:
             h += f'<div class="g sr">{cells}</div>'
             continue
         h += f'<details class="sec"><summary class="g sr">{cells}</summary>'
         for _, irow in inds.iterrows():
-            icells = (f'<div class="l"><span class="car"></span><span style="color:#d1d5db;">{_e(irow["Industry"])}</span></div>'
-                      f'<div style="color:#9ca3af;">{_e(irow["ETF"])}</div>' + _metric_cells(irow))
+            icells = (f'<div class="l"><span class="car"></span><span style="color:#a89f95;">{_e(irow["Industry"])}</span></div>'
+                      f'<div style="color:#a89f95;">{_e(irow["ETF"])}</div>' + _metric_cells(irow))
             h += (f'<details class="ind"><summary class="g ir">{icells}</summary>'
                   f'<div class="hp">{_holdings_table(hold_by_etf.get(irow["ETF"]))}</div></details>')
         h += '</details>'
@@ -226,7 +226,7 @@ def build_drilldown_html(sec_df: pd.DataFrame, ind_df, hold_df, sort_col: str, s
         note += (f'Industry rows (industry ETFs, same formula) and top 10 holdings: nightly'
                  f'{", as of " + _e(ind_as_of) if ind_as_of else ""}. '
                  'Holdings: weight in the ETF, % 52W Hi = distance from the 52-week closing high, '
-                 'RS Score = same composite, ATR &#128309; = bottom 35th pctile, Squeeze &#9889; = Bollinger inside Keltner. '
+                 'RS Score = same composite, ATR &#3d5d5a; = bottom 35th pctile, Squeeze &#9889; = Bollinger inside Keltner. '
                  'Some industry ETFs hold non-US listings.')
     h += f'<div class="note">{note}</div></div>'
     return h.replace('\n', ' ')

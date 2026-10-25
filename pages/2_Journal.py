@@ -34,6 +34,11 @@ st.set_page_config(
     initial_sidebar_state='collapsed',
 )
 
+import sys as _sys, pathlib as _pl
+_sys.path.insert(0, str(_pl.Path(__file__).resolve().parent.parent))
+import atn_brand
+atn_brand.inject(st, 'Trading journal')
+
 # ── Password gate (mirrors app.py) ────────────────────────────────────────────
 def _check_password() -> bool:
     if st.session_state.get('authenticated'):
@@ -730,13 +735,13 @@ with tab_analytics:
             if not np.isnan(dur_win):
                 fig_dur.add_trace(go.Bar(
                     name='Winners', x=['Winners'], y=[dur_win],
-                    marker_color='#26a69a',
+                    marker_color='#85cac5',
                     text=[f'{dur_win:.0f}d'], textposition='auto',
                 ))
             if not np.isnan(dur_loss):
                 fig_dur.add_trace(go.Bar(
                     name='Losers', x=['Losers'], y=[dur_loss],
-                    marker_color='#ef5350',
+                    marker_color='#f4a062',
                     text=[f'{dur_loss:.0f}d'], textposition='auto',
                 ))
             fig_dur.update_layout(
@@ -757,11 +762,11 @@ with tab_analytics:
                 fig_mf = go.Figure()
                 if len(mae_s) > 0:
                     fig_mf.add_trace(go.Box(
-                        y=mae_s, name='MAE %', marker_color='#ef5350', boxmean=True,
+                        y=mae_s, name='MAE %', marker_color='#f4a062', boxmean=True,
                     ))
                 if len(mfe_s) > 0:
                     fig_mf.add_trace(go.Box(
-                        y=mfe_s, name='MFE %', marker_color='#26a69a', boxmean=True,
+                        y=mfe_s, name='MFE %', marker_color='#85cac5', boxmean=True,
                     ))
                 fig_mf.update_layout(
                     height=280,

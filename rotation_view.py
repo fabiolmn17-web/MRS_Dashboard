@@ -35,14 +35,14 @@ SHORT = {
 
 # quadrant -> (label, colour). Same semantic colours as the sector table's trend cells.
 QUAD = {
-    'LEADING':   ('Leading',   '#22c55e'),
-    'IMPROVING': ('Improving', '#86efac'),
-    'FADING':    ('Fading',    '#f97316'),
-    'LAGGING':   ('Lagging',   '#f87171'),
+    'LEADING':   ('Leading',   '#85cac5'),
+    'IMPROVING': ('Improving', '#85cac5'),
+    'FADING':    ('Fading',    '#f4a062'),
+    'LAGGING':   ('Lagging',   '#f4a062'),
 }
-INK, MUTED, GRID = '#e5e7eb', '#9ca3af', '#2b3340'
+INK, MUTED, GRID = '#f3ece2', '#a89f95', '#2a2724'
 DIR_THRESH = 0.01      # RS 3M change over 5 sessions (1 pt) needed for a direction tag
-DIR = {'UP': ('↑', 'strengthening', '#22c55e'), 'DOWN': ('↓', 'weakening', '#f97316')}
+DIR = {'UP': ('↑', 'strengthening', '#85cac5'), 'DOWN': ('↓', 'weakening', '#f4a062')}
 
 # x / y columns of rotation_points() and their labels for each map horizon
 HORIZONS = {
@@ -168,8 +168,8 @@ def rotation_figure(points: pd.DataFrame, height: int = 300, horizon: str = 'sta
                       fillcolor=col, opacity=0.06, layer='below')
         fig.add_annotation(x=xa, y=ya, text=lbl.upper(), showarrow=False, xanchor=xan, yanchor=yan,
                            font=dict(size=10, color=col), opacity=0.85)
-    fig.add_hline(y=0, line_color='#4b5563', line_width=1)
-    fig.add_vline(x=0, line_color='#4b5563', line_width=1)
+    fig.add_hline(y=0, line_color='#6e675f', line_width=1)
+    fig.add_vline(x=0, line_color='#6e675f', line_width=1)
 
     # tails (10 and 5 sessions ago -> now)
     for sector, g in points.dropna(subset=[xc, yc]).groupby('Sector'):
@@ -191,7 +191,7 @@ def rotation_figure(points: pd.DataFrame, height: int = 300, horizon: str = 'sta
                                                         now['rs1'] if 'rs1' in now else [np.nan] * len(now),
                                                         now.dir, now.d5)]
     fig.add_trace(go.Scatter(x=now[xc] * 100, y=now[yc] * 100, mode='markers',
-                             marker=dict(size=11, color=cols, line=dict(color='#252538', width=2)),
+                             marker=dict(size=11, color=cols, line=dict(color='#121212', width=2)),
                              hovertext=hover, hoverinfo='text', showlegend=False))
     # direct labels, placed to avoid collisions
     pos = _place_labels(now, xr, yr, w_px=600, h_px=height - 44, xc=xc, yc=yc)
@@ -212,7 +212,7 @@ def rotation_figure(points: pd.DataFrame, height: int = 300, horizon: str = 'sta
                    gridcolor=GRID, zeroline=False, ticksuffix='%', tickfont=dict(size=9)),
         yaxis=dict(range=yr, title=dict(text=f'{yl} vs SPY (%)', font=dict(size=10)),
                    gridcolor=GRID, zeroline=False, ticksuffix='%', tickfont=dict(size=9)),
-        hoverlabel=dict(bgcolor='#161b22', bordercolor='#374151', font=dict(color=INK, size=11)),
+        hoverlabel=dict(bgcolor='#121212', bordercolor='#2a2724', font=dict(color=INK, size=11)),
     )
     return fig
 
@@ -229,7 +229,7 @@ def rotation_summary_html(points: pd.DataFrame, ind_df, ind_as_of=None, n_ind: i
     now['q'] = [quadrant(a, b) for a, b in zip(now[xc], now[yc])]
     now = _with_dir(points, now, yc)
     then = points[points['lag'] == 10].set_index('Sector')
-    h = '<div style="font-size:0.80rem;line-height:1.65;color:#d1d5db;">'
+    h = '<div style="font-size:0.80rem;line-height:1.65;color:#a89f95;">'
     for key in ['LEADING', 'IMPROVING', 'FADING', 'LAGGING']:
         lbl, col = QUAD[key]
         grp = now[now.q == key].sort_values(yc, ascending=False)
@@ -239,7 +239,7 @@ def rotation_summary_html(points: pd.DataFrame, ind_df, ind_as_of=None, n_ind: i
             if r.Sector in then.index:
                 q0 = quadrant(then.loc[r.Sector, xc], then.loc[r.Sector, yc])
                 if q0 and q0 != key:
-                    moved = f' <span style="color:#6b7280;">(from {QUAD[q0][0].lower()})</span>'
+                    moved = f' <span style="color:#9b958f;">(from {QUAD[q0][0].lower()})</span>'
             tag = ''
             if r.dir:
                 arrow, word, dcol = DIR[r.dir]
@@ -247,27 +247,27 @@ def rotation_summary_html(points: pd.DataFrame, ind_df, ind_as_of=None, n_ind: i
             names.append(_e(SHORT.get(r.Sector, r.Sector)) + tag + moved)
         h += (f'<div><span style="display:inline-block;width:9px;height:9px;border-radius:50%;'
               f'background:{col};margin-right:7px;"></span><b style="color:{col};">{lbl}</b>'
-              f'<span style="color:#6b7280;"> &nbsp;·&nbsp; </span>{", ".join(names) if names else "—"}</div>')
+              f'<span style="color:#9b958f;"> &nbsp;·&nbsp; </span>{", ".join(names) if names else "—"}</div>')
     # sectors moving against their corner: still above the y line but falling, or below it but rising
     turn = now[((now.q.isin(['LEADING', 'IMPROVING'])) & (now.dir == 'DOWN')) |
                ((now.q.isin(['FADING', 'LAGGING'])) & (now.dir == 'UP'))]
     turn = turn.reindex(turn['d5'].abs().sort_values(ascending=False).index).head(4)    # the 4 largest moves
     if len(turn):
-        items = [f'{_e(SHORT.get(r.Sector, r.Sector))} <span style="color:#9ca3af;">{QUAD[r.q][0].lower()}</span> '
+        items = [f'{_e(SHORT.get(r.Sector, r.Sector))} <span style="color:#a89f95;">{QUAD[r.q][0].lower()}</span> '
                  f'<span style="color:{DIR[r.dir][2]};">{DIR[r.dir][0]} {DIR[r.dir][1]}</span> '
-                 f'<span style="color:#6b7280;">({yl} {r.d5 * 100:+.1f} pts in 5 sessions)</span>' for r in turn.itertuples()]
-        h += f'<div style="margin-top:6px;"><b style="color:#e5e7eb;">Turning</b><span style="color:#6b7280;"> &nbsp;·&nbsp; </span>{", ".join(items)}</div>'
+                 f'<span style="color:#9b958f;">({yl} {r.d5 * 100:+.1f} pts in 5 sessions)</span>' for r in turn.itertuples()]
+        h += f'<div style="margin-top:6px;"><b style="color:#f3ece2;">Turning</b><span style="color:#9b958f;"> &nbsp;·&nbsp; </span>{", ".join(items)}</div>'
     icol = H['ind'] if (ind_df is not None and H['ind'] in ind_df.columns) else 'RS 3M'
     if ind_df is not None and len(ind_df) and icol in ind_df.columns and ind_df[icol].notna().any():
         d = ind_df.dropna(subset=[icol])
         top = d.nlargest(n_ind, icol)
         bot = d.nsmallest(n_ind, icol)
-        fmt = lambda t: ', '.join(f'{_e(r[0])} <span style="color:#9ca3af;">{r[1] * 100:+.0f}%</span>'
+        fmt = lambda t: ', '.join(f'{_e(r[0])} <span style="color:#a89f95;">{r[1] * 100:+.0f}%</span>'
                                   for r in t[['Industry', icol]].itertuples(index=False))
-        h += ('<div style="margin-top:10px;border-top:1px solid #374151;padding-top:8px;">'
-              f'<div><b style="color:#22c55e;">Strongest industries</b> <span style="color:#6b7280;">({icol})</span>: {fmt(top)}</div>'
-              f'<div><b style="color:#f87171;">Weakest industries</b>: {fmt(bot)}</div></div>')
-    h += (f'<div style="font-size:0.70rem;color:#6b7280;margin-top:8px;">Map ({H["name"]}): RS vs SPY, tails show the position '
+        h += ('<div style="margin-top:10px;border-top:1px solid #2a2724;padding-top:8px;">'
+              f'<div><b style="color:#85cac5;">Strongest industries</b> <span style="color:#9b958f;">({icol})</span>: {fmt(top)}</div>'
+              f'<div><b style="color:#f4a062;">Weakest industries</b>: {fmt(bot)}</div></div>')
+    h += (f'<div style="font-size:0.70rem;color:#9b958f;margin-top:8px;">Map ({H["name"]}): RS vs SPY, tails show the position '
           f'5 and 10 sessions ago. {H["note"]}; ↑ / ↓ = {yl} up / down by more than '
           f'{DIR_THRESH * 100:.0f} pt over the last 5 sessions. RS 1M = 21 sessions. Descriptive, not a forecast.'
           + (f' Industries as of {_e(ind_as_of)}.' if ind_as_of else '') + '</div>')
