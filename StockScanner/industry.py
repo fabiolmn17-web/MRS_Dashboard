@@ -8,6 +8,10 @@ SAME metrics and score as the sector table in app.py (returns, RS vs SPY over
 the same RS metrics the CAN SLIM scanner shows (plus distance from the
 52-week high, ATR compression and squeeze).
 
+Industry labels use the 3-day hold, days in label and RS 1M tag from rs_labels.py
+(app root), same as the sector table. Price history: PRICE_DAYS x 1.5 calendar days
+(~430 sessions), so ~180 sessions of label history for the hold.
+
 Outputs (written by run_industry.py, read by app.py):
     StockScanner/output/industry_rs.csv        one row per industry ETF
     StockScanner/output/industry_holdings.csv  top 10 holdings per industry ETF
@@ -26,6 +30,13 @@ import numpy as np
 import pandas as pd
 
 from .calculations import RelativeStrengthCalculator, PatternDetector
+
+# rs_labels.py lives in the app root (shared with app.py's sector table)
+import sys as _sys
+_ROOT = str(Path(__file__).resolve().parent.parent)
+if _ROOT not in _sys.path:
+    _sys.path.insert(0, _ROOT)
+import rs_labels  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -120,23 +131,18 @@ SECTOR_ETF = {
 
 def composite_label(score: float) -> str:
     """Same labels as _sector_composite_label() in app.py."""
-    if score >= 1.5:  return 'STRUCTURAL LEADER'
-    if score >= 1.0:  return 'STRONG OUTPERFORMER'
-    if score >= 0.5:  return 'OUTPERFORMING'
-    if score <= -1.5: return 'STRUCTURAL LAGGARD'
-    if score <= -1.0: return 'STRONG UNDERPERFORMER'
-    if score <= -0.5: return 'UNDERPERFORMING'
-    return 'NEUTRAL'
+    return rs_labels.composite_label(score)
 
 
 def rs_row(s: pd.Series, spy: pd.Series) -> Optional[dict]:
-    """Returns, RS vs SPY, composite and trend for one close series.
+    """Returns, RS vs SPY, held composite label and trend for one close series.
 
-    Identical formula to build_sector_table() in app.py:
+    Same formula as build_sector_table() in app.py (both use rs_labels.label_info):
       RS(n)     = s_now / s_n_ago - spy_now / spy_n_ago   (n = 252, 126, 63, 21 bars)
-      RS 1M (21 bars) is reported but not scored, as in the sector table
-      Score     = sum of sign(RS) * 0.5 over the three periods (-1.5 .. +1.5)
-      Trend     = sign shift between RS 6M and RS 3M
+      Score     = sum of sign(RS) * 0.5 over 1Y / 6M / 3M (-1.5 .. +1.5); RS 1M not scored
+      Hold      = the sign state changes only after 3 consecutive sessions at the new value
+      Trend     = sign shift between RS 6M and RS 3M of the held state
+      Extra     = RawScore, DaysInLabel, PendingLabel/PendingDays, Tag1M (1M early warning)
       YTD base  = last close of the previous calendar year
     """
     s = s.dropna()
@@ -145,37 +151,19 @@ def rs_row(s: pd.Series, spy: pd.Series) -> Optional[dict]:
         return None
     p = float(s.iloc[-1])
     p_prev = float(s.iloc[-2]) if len(s) >= 2 else p
-    spy_now = float(spy.iloc[-1])
     prev_year = s[s.index.year < s.index[-1].year]
     ytd_base = float(prev_year.iloc[-1]) if len(prev_year) else float(s.iloc[0])
 
     def ret(n):
         return (p / float(s.iloc[-n]) - 1) if len(s) > n else np.nan
 
-    def rs(n):
-        if len(s) <= n or len(spy) <= n:
-            return np.nan
-        return (p / float(s.iloc[-n])) - (spy_now / float(spy.iloc[-n]))
-
-    rs_1y, rs_6m, rs_3m, rs_1m = rs(252), rs(126), rs(63), rs(21)
-    sc = lambda v: 0.0 if (v is None or np.isnan(v)) else (0.5 if v > 0 else -0.5 if v < 0 else 0.0)
-    score = sc(rs_1y) + sc(rs_6m) + sc(rs_3m)
-
-    def sgn(v):
-        if v is None or np.isnan(v): return 0
-        return 1 if v > 0 else -1 if v < 0 else 0
-    s6, s3 = sgn(rs_6m), sgn(rs_3m)
-    if s3 > s6:   trend = 'IMPROVING'
-    elif s3 < s6: trend = 'FADING'
-    elif s3 > 0:  trend = 'STABLE+'
-    elif s3 < 0:  trend = 'STABLE-'
-    else:         trend = 'NEUTRAL'
-
+    li = rs_labels.label_info(s, spy)
+    if li is None:
+        return None
     return {
         'Close': p, 'DailyChg': (p / p_prev - 1) if p_prev else 0.0,
         'YTD': p / ytd_base - 1, '1Y': ret(252), '6M': ret(126), '3M': ret(63), '1M': ret(21),
-        'RS 1Y': rs_1y, 'RS 6M': rs_6m, 'RS 3M': rs_3m, 'RS 1M': rs_1m,
-        'Score': score, 'Label': composite_label(score), 'Trend': trend,
+        **li,
     }
 
 
@@ -227,8 +215,10 @@ def build_industry_tables(price_data: Dict[str, pd.DataFrame],
             row = {'Sector': sector, 'SectorETF': SECTOR_ETF[sector], 'Industry': industry, 'ETF': etf}
             if r is None:
                 row.update({k: np.nan for k in ['Close', 'DailyChg', 'YTD', '1Y', '6M', '3M', '1M',
-                                                 'RS 1Y', 'RS 6M', 'RS 3M', 'RS 1M', 'Score']})
-                row.update({'Label': 'NO DATA', 'Trend': 'NEUTRAL'})
+                                                 'RS 1Y', 'RS 6M', 'RS 3M', 'RS 1M', 'Score',
+                                                 'RawScore', 'DaysInLabel', 'PendingDays', 'LabelHistory']})
+                row.update({'Label': 'NO DATA', 'Trend': 'NEUTRAL', 'RawLabel': '', 'PendingLabel': '',
+                            'Tag1M': '', 'DaysCapped': False})
             else:
                 row.update(r)
             row['as_of'] = as_of

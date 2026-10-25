@@ -96,6 +96,11 @@ CSS = (
     '.sv table.hold,.sv table.hold th,.sv table.hold td{border-left:none;border-right:none;border-top:none;}'
     '.sv .ctl{font-size:0.72rem;color:#a89f95;margin:2px 0 6px 0;}'
     '.sv .note{font-size:0.70rem;color:#9b958f;margin-top:6px;line-height:1.5;white-space:normal;}'
+    '.sv .meta{font-weight:400;font-size:0.68rem;}'
+    '.sv .dl{color:#a89f95;font-family:"IBM Plex Mono",monospace;}'
+    '.sv .pend{color:#e3b48e;margin-left:4px;}'
+    '.chip{display:inline-block;border:1px solid;border-radius:3px;padding:0 4px;margin-left:4px;font-size:0.66rem;'
+    'font-weight:700;line-height:1.35;}'
     '</style>'
 )
 
@@ -121,8 +126,44 @@ def _metric_cells(r, score_txt=True):
     else:
         sc = float(sc)
         lbl = r.get('Label', '')
-        out += f'<div style="color:{_score_col(sc)};font-weight:700;">{"+" if sc > 0 else ""}{sc:.1f}&nbsp; {_e(lbl)}</div>'
+        out += (f'<div style="color:{_score_col(sc)};font-weight:700;">{"+" if sc > 0 else ""}{sc:.1f}&nbsp; {_e(lbl)}'
+                f'{_label_meta(r)}</div>')
     return out
+
+
+def _txt(v):
+    return '' if _nan(v) and not isinstance(v, str) else str(v)
+
+
+def chip_1m(tag: str) -> str:
+    """RS 1M early-warning chip (shown, not scored)."""
+    if tag == '1M ↓':
+        return ('<span class="chip" style="color:#f4a062;background:rgba(244,160,98,0.18);border-color:#f4a062;"'
+                ' title="Structural leader whose RS 1M is negative: the last month is lagging SPY">1M ↓</span>')
+    if tag == '1M ↑':
+        return ('<span class="chip" style="color:#85cac5;background:rgba(133,202,197,0.18);border-color:#85cac5;"'
+                ' title="Outperforming name whose RS 1M is positive: the last month is leading SPY">1M ↑</span>')
+    return ''
+
+
+def _label_meta(r) -> str:
+    """Second line of the Score cell: days in label, pending change, RS 1M chip."""
+    parts = []
+    d = r.get('DaysInLabel')
+    if not _nan(d):
+        capped = str(r.get('DaysCapped')).lower() == 'true'
+        parts.append(f'<span class="dl" title="Sessions since the held label last changed">'
+                     f'{"≥" if capped else ""}{int(float(d))}d</span>')
+    pl = _txt(r.get('PendingLabel'))
+    if pl:
+        pdays = r.get('PendingDays')
+        k = 0 if _nan(pdays) else int(float(pdays))
+        parts.append(f'<span class="pend" title="Raw label differs; it replaces the held label after 3 sessions in a row">'
+                     f'→ {_e(pl.title())} {k}/3</span>')
+    c = chip_1m(_txt(r.get('Tag1M')))
+    if c:
+        parts.append(c)
+    return ('<br><span class="meta">' + ' '.join(parts) + '</span>') if parts else ''
 
 
 def _holdings_table(h: pd.DataFrame) -> str:
@@ -221,6 +262,9 @@ def build_drilldown_html(sec_df: pd.DataFrame, ind_df, hold_df, sort_col: str, s
     h += '</div>'
     note = ('RS = additive return differential vs SPY. Trend = RS sign shift 6M to 3M. '
             'Score = sign-based composite of RS 1Y / 6M / 3M (range -1.5 to +1.5); RS 1M (21 sessions, same formula) is shown but not scored. '
+            'Label hold: the label (and trend) change only after the new reading has held 3 sessions in a row; '
+            'Nd = sessions in the current label, "→ X k/3" = a change in progress. '
+            '1M ↓ = structural leader with negative RS 1M; 1M ↑ = outperforming name with positive RS 1M (early warning, not scored). '
             'Sector rows: live, cached hourly. ')
     if have_ind:
         note += (f'Industry rows (industry ETFs, same formula) and top 10 holdings: nightly'

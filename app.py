@@ -28,6 +28,8 @@ import pipeline
 import risk_dial
 import sector_view
 import rotation_view
+import rs_labels
+import market_state
 
 # ── Sector RS — constants & helpers ───────────────────────────────────────────
 # yfinance sector strings → our SECTOR_MAP display names
@@ -94,7 +96,7 @@ def load_industry_data():
 
 @st.cache_data(ttl=3600)
 def load_sector_data():
-    """Fetch ~14 months of daily closes for 11 SPDR ETFs + SPY. Cached 1 hour.
+    """Fetch ~2 years of daily closes for 11 SPDR ETFs + SPY. Cached 1 hour.
 
     Uses individual yf.Ticker().history() calls per ticker rather than bulk
     yf.download() — the bulk endpoint silently returns stale/incomplete data
@@ -105,7 +107,7 @@ def load_sector_data():
     series_map = {}
     for t in tickers:
         try:
-            h = yf.Ticker(t).history(period='14mo', auto_adjust=True)
+            h = yf.Ticker(t).history(period='2y', auto_adjust=True)   # 2y: ~250 sessions of label history for the 3-day hold
             if h is None or h.empty or 'Close' not in h.columns:
                 print(f'[sector] {t}: empty history')
                 continue
@@ -154,32 +156,19 @@ def build_sector_table(closes):
 
         def ret(n):
             return (p / s.iloc[-n] - 1) if len(s) > n else np.nan
-        def rs(n):
-            if len(s) <= n or len(spy) <= n: return np.nan
-            return (p / s.iloc[-n]) - (spy_now / spy.iloc[-n])
 
         r_ytd = p / ytd_base - 1
         r_1y, r_6m, r_3m, r_1m = ret(252), ret(126), ret(63), ret(21)
-        rs_1y, rs_6m, rs_3m, rs_1m = rs(252), rs(126), rs(63), rs(21)   # RS 1M: shown, not scored
 
-        sc = lambda v: (0.5 if v > 0 else -0.5 if v < 0 else 0.0) if not (v is None or np.isnan(v)) else 0.0
-        composite = sc(rs_1y) + sc(rs_6m) + sc(rs_3m)
-
-        # Momentum trend: sign shift between RS 6M and RS 3M
-        def _sgn(v): return 1 if (v is not None and not np.isnan(v) and v > 0) else (-1 if (v is not None and not np.isnan(v) and v < 0) else 0)
-        s6, s3 = _sgn(rs_6m), _sgn(rs_3m)
-        if   s3 > s6:  trend = 'IMPROVING'
-        elif s3 < s6:  trend = 'FADING'
-        elif s3 > 0:   trend = 'STABLE+'
-        elif s3 < 0:   trend = 'STABLE-'
-        else:           trend = 'NEUTRAL'
+        # RS, score, 3-day held label, 6M->3M trend, days in label, RS 1M tag (rs_labels.py)
+        li = rs_labels.label_info(s, spy)
+        if li is None:
+            continue
 
         rows.append({
             'Sector': sector, 'ETF': etf, 'Close': p, 'DailyChg': daily_chg,
             'YTD': r_ytd, '1Y': r_1y, '6M': r_6m, '3M': r_3m, '1M': r_1m,
-            'RS 1Y': rs_1y, 'RS 6M': rs_6m, 'RS 3M': rs_3m, 'RS 1M': rs_1m,
-            'Score': composite, 'Label': _sector_composite_label(composite),
-            'Trend': trend,
+            **li,
         })
 
     df = pd.DataFrame(rows).sort_values('Score', ascending=False).reset_index(drop=True)
@@ -616,6 +605,18 @@ with col_dur:
       </div>
     </div>
     """, unsafe_allow_html=True)
+
+# ── Market state banner (market_state.py): momentum light, swing size, rotation, leaders ──
+try:
+    _spy_hist = hist.sort_values('date').set_index('date')['spy'].astype(float)
+    _mom_light = rs_labels.momentum_light(_spy_hist, reg)
+    _ms_ind, _ms_hold = load_industry_data()
+    _leaders = rs_labels.leaders_shortlist(_ms_ind)
+    st.markdown(market_state.banner_html(_mom_light, reg, rcol, _band_profile(hist), _leaders),
+                unsafe_allow_html=True)
+except Exception as _ms_err:
+    print(f'[market_state] {_ms_err}')
+    _mom_light, _leaders = None, None
 
 # ── Sector rotation at a glance (rotation_view.py) ─────────────────────────────
 try:
@@ -1421,9 +1422,21 @@ if _sec_df is not None and len(_sec_df) > 0:
         'NEUTRAL':  ('— NEUTRAL',     '#9b958f', 'rgba(0,0,0,0)'),
     }
 
+    # ── Leaders to buy (industries first; sectors are context) ────────────────
+    try:
+        _ld_ind, _ld_hold = load_industry_data()
+        _ld_asof = str(_ld_ind['as_of'].iloc[0]) if _ld_ind is not None and 'as_of' in _ld_ind.columns else None
+        _ld_light = _mom_light if _mom_light is not None else rs_labels.momentum_light(
+            hist.sort_values('date').set_index('date')['spy'].astype(float), reg)
+        st.markdown(market_state.leaders_html(rs_labels.leaders_shortlist(_ld_ind), _ld_light, _ld_hold, _ld_asof),
+                    unsafe_allow_html=True)
+    except Exception as _ld_err:
+        print(f'[leaders] {_ld_err}')
+
     # ── Sort controls ──────────────────────────────────────────────────────────
     SORT_OPTIONS = {
         'Composite Score': 'Score',
+        'Days in label': 'DaysInLabel',
         'RS 1M':  'RS 1M',
         'RS 3M':  'RS 3M',
         'RS 6M':  'RS 6M',
