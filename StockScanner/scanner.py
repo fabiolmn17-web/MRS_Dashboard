@@ -183,9 +183,17 @@ def run_scan(
     mom_names = [t for t, m in mom_by.items() if m.get('mom_list')]
     log(f'\n[4b] Momentum & trend list: {len(mom_names)} names (held RS >= +1, above SMA200, SMA50 > SMA200)')
     meta = {}
-    for i, ticker in enumerate(sorted(set(mom_names) | set(tech_pass))):
+    gics = momentum.sp500_meta()          # sector / industry for every stock (one request)
+    log(f'  sector metadata for {len(gics)} S&P 500 names')
+    # also the stocks held by the industry ETFs (top 10 each): the dashboard filters on "in a leader industry"
+    try:
+        _hold = pd.read_csv(OUTPUT_DIR / 'industry_holdings.csv')
+        held = set(_hold['ticker'].astype(str)) & set(t for t in mom_by)
+    except Exception:
+        held = set()
+    for i, ticker in enumerate(sorted(set(mom_names) | set(tech_pass) | held)):
         m = {'next_earnings': momentum.next_earnings(ticker)}
-        if ticker not in fund_results:
+        if ticker not in fund_results and ticker not in gics:
             try:
                 info = yf.Ticker(ticker).info or {}
                 m.update({'name': info.get('longName') or info.get('shortName', ticker),
@@ -227,9 +235,9 @@ def run_scan(
         all_rows.append({
             # Identity
             'ticker':             ticker,
-            'name':               fund.get('name') or mt.get('name', ticker),
-            'sector':             fund.get('sector') or mt.get('sector', ''),
-            'industry':           fund.get('industry') or mt.get('industry', ''),
+            'name':               fund.get('name') or mt.get('name') or gics.get(ticker, {}).get('name', ticker),
+            'sector':             fund.get('sector') or mt.get('sector') or gics.get(ticker, {}).get('sector', ''),
+            'industry':           fund.get('industry') or mt.get('industry') or gics.get(ticker, {}).get('industry', ''),
             # Price
             'close':              row['price'],
             'sma50':              row['sma50'],

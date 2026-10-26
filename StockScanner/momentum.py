@@ -139,7 +139,40 @@ def next_earnings(ticker: str) -> str:
             ds = sorted(pd.to_datetime(pd.Series(list(dates))).dt.date)
             today = pd.Timestamp.today().date()
             fut = [x for x in ds if x >= today]
-            return (fut[0] if fut else ds[-1]).isoformat()
+            # only a date still ahead; a past date means the next one is not announced yet
+            return fut[0].isoformat() if fut else ''
     except Exception as e:
         logger.debug(f'{ticker}: earnings date error: {e}')
     return ''
+
+
+# GICS sector names -> the yfinance names the dashboard maps (YF_TO_SECTOR in app.py)
+GICS_TO_YF = {
+    'Information Technology': 'Technology', 'Health Care': 'Healthcare', 'Financials': 'Financial Services',
+    'Consumer Discretionary': 'Consumer Cyclical', 'Communication Services': 'Communication Services',
+    'Industrials': 'Industrials', 'Consumer Staples': 'Consumer Defensive', 'Energy': 'Energy',
+    'Utilities': 'Utilities', 'Real Estate': 'Real Estate', 'Materials': 'Basic Materials',
+}
+
+
+def sp500_meta() -> dict:
+    """ticker -> {name, sector (yfinance naming), industry (GICS sub-industry)} for the S&P 500, one request.
+    Fills the sector of every scanned stock, not only the CAN SLIM candidates. {} on failure."""
+    try:
+        import requests
+        from io import StringIO
+        url = 'https://raw.githubusercontent.com/datasets/s-and-p-500-companies/main/data/constituents.csv'
+        r = requests.get(url, timeout=20, headers={'User-Agent': 'Mozilla/5.0'})
+        r.raise_for_status()
+        df = pd.read_csv(StringIO(r.text))
+        sym = 'Symbol' if 'Symbol' in df.columns else df.columns[0]
+        out = {}
+        for _, row in df.iterrows():
+            t = str(row[sym]).replace('.', '-').strip()
+            out[t] = {'name': str(row.get('Security', t)),
+                      'sector': GICS_TO_YF.get(str(row.get('GICS Sector', '')), str(row.get('GICS Sector', ''))),
+                      'industry': str(row.get('GICS Sub-Industry', ''))}
+        return out
+    except Exception as e:
+        logger.warning(f'S&P 500 metadata fetch failed: {e}')
+        return {}
