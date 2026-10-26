@@ -112,8 +112,10 @@ def label_info(s: pd.Series, spy: pd.Series, hold: int = HOLD_DAYS) -> Optional[
         capped = run == len(scores)
         pend_state = cand if (cand is not None and 0.5 * sum(cand) != scores[-1]) else None
         hist_days = len(scores)
+        prev_state = held[-2] if len(held) >= 2 else None
     else:
         state, run, capped, pend_state, k, hist_days = raw_state, np.nan, True, None, 0, 0
+        prev_state = None
 
     score = 0.5 * sum(state)
     label = composite_label(score)
@@ -128,9 +130,14 @@ def label_info(s: pd.Series, spy: pd.Series, hold: int = HOLD_DAYS) -> Optional[
         elif 0.5 <= score < 1.5 and r1 > 0:
             tag_1m = '1M ↑'
 
+    r1_prev = rh['RS 1M'].iloc[-2] if len(rh) >= 2 else np.nan
     return {
         **rs_now,
         'Score': score, 'Label': label, 'Trend': trend,
+        # previous session's held reading (for "what changed since yesterday")
+        'PrevScore': 0.5 * sum(prev_state) if prev_state is not None else np.nan,
+        'PrevTrend': trend_tag(prev_state[1], prev_state[2]) if prev_state is not None else '',
+        'PrevRS1M': float(r1_prev) if pd.notna(r1_prev) else np.nan,
         'RawScore': raw_score, 'RawLabel': composite_label(raw_score),
         'DaysInLabel': run, 'DaysCapped': bool(capped), 'LabelHistory': hist_days,
         'PendingLabel': composite_label(0.5 * sum(pend_state)) if pend_state is not None else '',
@@ -164,6 +171,23 @@ def momentum_light(spy: pd.Series, band: str) -> dict:
     return {'on': on, 'spy_12m': r12, 'risk_off': off, 'why': why}
 
 
+def _on_list(score, trend, rs1m):
+    """Boolean Series: the buy-leaders filter applied to score / trend / RS 1M columns."""
+    score = pd.to_numeric(score, errors='coerce')
+    rs1m = pd.to_numeric(rs1m, errors='coerce')
+    return ((score >= 1.5) & ~(rs1m < 0)) | ((score == 0.5) & (trend == 'IMPROVING'))
+
+
+def shortlist_changes(ind: pd.DataFrame):
+    """(added, dropped) industry rows vs the previous session's held labels. Empty if the CSV predates PrevScore."""
+    if ind is None or len(ind) == 0 or 'PrevScore' not in ind.columns:
+        return pd.DataFrame(), pd.DataFrame()
+    now = _on_list(ind['Score'], ind['Trend'], ind.get('RS 1M'))
+    prev = _on_list(ind['PrevScore'], ind['PrevTrend'], ind.get('PrevRS1M'))
+    has_prev = pd.to_numeric(ind['PrevScore'], errors='coerce').notna()
+    return ind[now & ~prev & has_prev], ind[prev & ~now & has_prev]
+
+
 def leaders_shortlist(ind: pd.DataFrame) -> pd.DataFrame:
     """Industry ETFs to look at first for longs (sectors are context only).
 
@@ -180,4 +204,6 @@ def leaders_shortlist(ind: pd.DataFrame) -> pd.DataFrame:
     b = (d['Score'] == 0.5) & (d['Trend'] == 'IMPROVING')
     out = d[a | b].copy()
     out['Why'] = np.where(a[a | b], 'Structural leader, 1M not turning down', 'Outperforming + improving')
+    added, _ = shortlist_changes(ind)
+    out['New'] = out['ETF'].isin(added['ETF']) if len(added) else False
     return out.sort_values('RS 3M', ascending=False).reset_index(drop=True)

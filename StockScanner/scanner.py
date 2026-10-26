@@ -11,6 +11,12 @@ Pipeline:
   5. Compute actionability (patterns) for all fundamentally-passing stocks
   6. Save results to output/scan_results.csv
 
+Momentum & trend scan (added 26 Oct 2026, momentum.py): every scanned stock also gets the held RS
+label, trend (close > SMA200, SMA50 > SMA200), Ext-Mom extension / momentum zones and 5-day pullback,
+and `mom_list` = held RS score >= +1.0 and both trend conditions. Momentum-list names get name /
+sector / industry and the next earnings date even when they are not CAN SLIM candidates. Everything
+goes into the same scan_results.csv (the GitHub workflow commits only that file).
+
 Runtime: ~3-5 min for S&P 500 (dominated by fundamental fetch step)
 """
 
@@ -31,6 +37,7 @@ from .calculations import (
     PatternDetector,
 )
 from .data.universe import UniverseManager
+from . import momentum
 
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
@@ -101,6 +108,7 @@ def run_scan(
 
     tech_pass    = []
     all_tech_rows = []
+    mom_by       = {}
 
     for ticker in tickers:
         df = price_data.get(ticker)
@@ -109,6 +117,7 @@ def run_scan(
 
         tech = tech_calc.compute(df)
         rs   = rs_calc.compute(df, spy_df)
+        mom_by[ticker] = momentum.momentum_fields(df, spy_df)
 
         row = {
             'ticker':            ticker,
@@ -170,6 +179,24 @@ def run_scan(
             log(f'  ... {i+1}/{len(tech_pass)} fundamentals fetched')
         time.sleep(RATE_DELAY)
 
+    # ── Step 4b: Momentum list — name / sector / industry and next earnings date ─
+    mom_names = [t for t, m in mom_by.items() if m.get('mom_list')]
+    log(f'\n[4b] Momentum & trend list: {len(mom_names)} names (held RS >= +1, above SMA200, SMA50 > SMA200)')
+    meta = {}
+    for i, ticker in enumerate(sorted(set(mom_names) | set(tech_pass))):
+        m = {'next_earnings': momentum.next_earnings(ticker)}
+        if ticker not in fund_results:
+            try:
+                info = yf.Ticker(ticker).info or {}
+                m.update({'name': info.get('longName') or info.get('shortName', ticker),
+                          'sector': info.get('sector', ''), 'industry': info.get('industry', '')})
+            except Exception:
+                m.update({'name': ticker, 'sector': '', 'industry': ''})
+        meta[ticker] = m
+        time.sleep(RATE_DELAY)
+        if verbose and (i + 1) % 25 == 0:
+            log(f'  ... {i+1} names done')
+
     # ── Step 5: Patterns (actionability) ─────────────────────────────────────
     log('\n[5/5] Computing actionability (ATR compression + pivot)...')
     pattern_calc = PatternDetector()
@@ -180,7 +207,9 @@ def run_scan(
         fund   = fund_results.get(ticker, {})
         pat    = {}
 
-        if row['passes_technical'] and row['passes_rs']:
+        mom = mom_by.get(ticker, {})
+        mt  = meta.get(ticker, {})
+        if (row['passes_technical'] and row['passes_rs']) or mom.get('mom_list'):
             df = price_data.get(ticker)
             if df is not None:
                 pat = pattern_calc.compute(df)
@@ -198,9 +227,9 @@ def run_scan(
         all_rows.append({
             # Identity
             'ticker':             ticker,
-            'name':               fund.get('name', ticker),
-            'sector':             fund.get('sector', ''),
-            'industry':           fund.get('industry', ''),
+            'name':               fund.get('name') or mt.get('name', ticker),
+            'sector':             fund.get('sector') or mt.get('sector', ''),
+            'industry':           fund.get('industry') or mt.get('industry', ''),
             # Price
             'close':              row['price'],
             'sma50':              row['sma50'],
@@ -242,6 +271,9 @@ def run_scan(
             'passes_relaxed':     passes_relaxed,
             'pass_mode':          pass_mode,
             'tech_fail_reason':   row['tech_fail_reason'],
+            # Momentum & trend (momentum.py)
+            **{k: mom.get(k) for k in momentum.FIELDS},
+            'next_earnings':      mt.get('next_earnings', ''),
             # MRS context
             'mrs_score':          mrs_score,
             'mrs_state':          mrs_state,

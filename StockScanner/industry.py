@@ -30,6 +30,7 @@ import numpy as np
 import pandas as pd
 
 from .calculations import RelativeStrengthCalculator, PatternDetector
+from . import momentum
 
 # rs_labels.py lives in the app root (shared with app.py's sector table)
 import sys as _sys
@@ -255,11 +256,14 @@ def build_industry_tables(price_data: Dict[str, pd.DataFrame],
                     'atr_compressed': bool(pat.get('atr_compressed', False)),
                     'bb_kc_squeeze': bool(pat.get('bb_kc_squeeze', False)),
                 })
+                mf = momentum.momentum_fields(df, spy_df)
+                row.update({'ext_atr': mf['ext_atr'], 'ext_zone': mf['ext_zone'], 'mom_zone': mf['mom_zone']})
             else:
                 row.update({'close': np.nan, 'daily_chg': np.nan, 'pct_from_52w_high': np.nan,
                             'rs_1y': np.nan, 'rs_6m': np.nan, 'rs_3m': np.nan, 'rs_1m': np.nan,
                             'rs_composite': np.nan, 'rs_label': 'NO DATA',
-                            'atr_compressed': False, 'bb_kc_squeeze': False})
+                            'atr_compressed': False, 'bb_kc_squeeze': False,
+                            'ext_atr': np.nan, 'ext_zone': '', 'mom_zone': ''})
             row['as_of'] = as_of
             h_rows.append(row)
     holdings_df = pd.DataFrame(h_rows)
@@ -290,6 +294,18 @@ def run_industry(verbose: bool = True):
 
     log('[3/3] Computing industry RS and holdings metrics...')
     industries, holdings_df = build_industry_tables(price_data, holdings)
+    # next earnings date for the holdings of the industries on the buy-leaders list (short list: network calls)
+    holdings_df['next_earnings'] = ''
+    try:
+        short = rs_labels.leaders_shortlist(industries)
+        if len(short) and len(holdings_df):
+            mask = holdings_df['ETF'].isin(short['ETF'])
+            for i in holdings_df.index[mask]:
+                holdings_df.at[i, 'next_earnings'] = momentum.next_earnings(holdings_df.at[i, 'ticker'])
+                time.sleep(HOLDINGS_DELAY)
+            log(f'  earnings dates for {int(mask.sum())} holdings of {len(short)} leader industries')
+    except Exception as e:
+        log(f'  earnings dates skipped: {e}')
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     industries.to_csv(INDUSTRY_CSV, index=False)
     holdings_df.to_csv(HOLDINGS_CSV, index=False)
