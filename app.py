@@ -31,6 +31,7 @@ import rotation_view
 import rs_labels
 import market_state
 import scan_view
+import chart_view
 
 # ── Sector RS — constants & helpers ───────────────────────────────────────────
 # yfinance sector strings → our SECTOR_MAP display names
@@ -653,6 +654,65 @@ st.divider()
 # ══════════════════════════════════════════════════════════════════════════════
 st.markdown('<div class="section-header">Momentum &amp; trend scanner</div>', unsafe_allow_html=True)
 
+# Table (click a row) + daily chart panel on the right. The table is a small two-way component
+# (scan_table/index.html) that returns the clicked ticker; the chart is fetched per ticker and cached.
+_scan_table = components.declare_component('scan_table', path=str(Path(__file__).parent / 'scan_table'))
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _chart_history(ticker):
+    return chart_view.fetch(ticker)
+
+
+def _scan_chart_panel(tickers):
+    t = st.session_state.get('scan_pick')
+    if not t or t not in tickers:
+        t = tickers[0]
+    h = _chart_history(t)
+    if h is None or len(h) < 30:
+        st.info(f'No price history for {t}.')
+        return
+    lv = chart_view.levels(h)
+    dc = lv['chg']
+    dcol = '#85cac5' if dc >= 0 else '#f4a062'
+    def _d(v):   # distance from the close, in %
+        return '—' if np.isnan(v) else f'{(lv["close"] / v - 1) * 100:+.1f}%'
+    st.markdown(
+        f'<div style="display:flex;align-items:baseline;gap:10px;margin:2px 0 4px 0;">'
+        f'<span style="font-size:1.25rem;font-weight:700;color:#f3ece2;">{_html_mod.escape(t)}</span>'
+        f'<span style="font-family:IBM Plex Mono,monospace;color:#f3ece2;">${lv["close"]:,.2f}</span>'
+        f'<span style="font-family:IBM Plex Mono,monospace;color:{dcol};">{dc * 100:+.2f}%</span></div>'
+        f'<div style="font-size:0.72rem;color:#a89f95;line-height:1.6;">'
+        f'vs SMA 50 <b style="color:#e8dccb;">{_d(lv["sma50"])}</b> · vs SMA 200 <b style="color:#b9805a;">{_d(lv["sma200"])}</b>'
+        f' · vs 52W high <b style="color:#e3b48e;">{_d(lv["hi52"])}</b> · vs 20D high <b style="color:#9b958f;">{_d(lv["hi20"])}</b></div>',
+        unsafe_allow_html=True)
+    st.plotly_chart(chart_view.figure(h, t, height=520), use_container_width=True,
+                    config={'displayModeBar': False, 'scrollZoom': True}, key='scan_chart')
+    st.markdown('<div style="font-size:0.66rem;color:#9b958f;">Daily, last 12 months. SMA 50 / 200; 52W high = highest '
+                'high of the last 252 sessions; 20D high = highest high of the 20 sessions before today. Click a row '
+                'in the table to switch.</div>', unsafe_allow_html=True)
+
+
+def _scan_table_and_chart_body(table_html, tickers, height):
+    show = st.toggle('Chart panel (click a row)', value=True, key='ms_chart')
+    if not show:
+        _scan_table(html=table_html, height=height, selected=st.session_state.get('scan_pick'),
+                    key='scan_table_click', default=None)
+        return
+    c_tab, c_chart = st.columns([2.6, 1], gap='medium')
+    with c_tab:
+        picked = _scan_table(html=table_html, height=height, selected=st.session_state.get('scan_pick'),
+                             key='scan_table_click', default=None)
+        if picked and picked != st.session_state.get('scan_pick'):
+            st.session_state['scan_pick'] = picked
+    with c_chart:
+        _scan_chart_panel(tickers)
+
+
+# st.fragment (Streamlit 1.37+): a click reruns only the table and the chart, not the whole page
+_scan_table_and_chart = st.fragment(_scan_table_and_chart_body) if hasattr(st, 'fragment') else _scan_table_and_chart_body
+
+
 if _scan_df is not None and len(_scan_df) > 0:
     _sd = _scan_df.copy()
     _has_mom = 'mom_list' in _sd.columns
@@ -767,8 +827,9 @@ if _scan_df is not None and len(_scan_df) > 0:
         st.info('No stocks match the selected filters.')
     else:
         _shown = _v.head(300)
-        components.html(scan_view.build_html(_shown, _sec_label, _sec_score, _leader_hold, YF_TO_SECTOR),
-                        height=min(760, 64 + 32 * len(_shown)), scrolling=True)
+        _scan_table_and_chart(scan_view.build_html(_shown, _sec_label, _sec_score, _leader_hold, YF_TO_SECTOR,
+                                                   clickable=True),
+                              list(_shown['ticker'].astype(str)), min(760, 64 + 32 * len(_shown)))
         st.markdown(
             '<div style="font-size:0.70rem;color:#9b958f;line-height:1.55;">'
             f'{len(_v)} stocks{" (first 300 shown)" if len(_v) > 300 else ""}. Click a header to sort. '

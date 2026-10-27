@@ -85,13 +85,14 @@ CSS = """
 <style>
 body{margin:0;background:transparent;font-family:Barlow,system-ui,sans-serif;}
 .wrap{overflow-x:auto;}
-table{width:100%;border-collapse:collapse;min-width:1200px;}
-th{background:#2a2724;color:#a89f95;font-size:0.70rem;font-weight:600;padding:7px 8px;text-align:right;white-space:nowrap;cursor:pointer;user-select:none;position:sticky;top:0;}
+table{width:100%;border-collapse:collapse;min-width:1040px;}
+th{background:#2a2724;color:#a89f95;font-size:0.70rem;font-weight:600;padding:7px 6px;text-align:right;white-space:nowrap;cursor:pointer;user-select:none;position:sticky;top:0;}
 th.l,td.l{text-align:left;} th.c,td.c{text-align:center;}
 th:hover{color:#e3b48e;}
-td{background:#121212;color:#f3ece2;font-size:0.78rem;padding:6px 8px;text-align:right;border-bottom:1px solid #1a1918;white-space:nowrap;}
+td{background:#121212;color:#f3ece2;font-size:0.76rem;padding:6px 6px;text-align:right;border-bottom:1px solid #1a1918;white-space:nowrap;}
 td.num{font-family:'IBM Plex Mono',monospace;font-size:0.76rem;}
 tr:hover td{background:#1a1918;}
+tr[data-t]{cursor:pointer;} tr.sel td{background:#2a2420 !important;} tr.sel td:first-child{box-shadow:inset 3px 0 0 #e3b48e;}
 .sub{color:#a89f95;font-size:0.68rem;}
 .sarr{margin-left:3px;font-size:0.62rem;}
 </style>
@@ -112,7 +113,8 @@ return a<b?(_a?-1:1):a>b?(_a?1:-1):0});rs.forEach(function(r){tb.appendChild(r)}
 """
 
 
-def build_html(df: pd.DataFrame, sec_label: dict, sec_score: dict, leader_hold: dict, yf_to_sector: dict) -> str:
+def build_html(df: pd.DataFrame, sec_label: dict, sec_score: dict, leader_hold: dict, yf_to_sector: dict,
+               clickable: bool = False) -> str:
     """df: filtered scan rows. sec_label/sec_score: display sector -> held label / score.
     leader_hold: ticker -> industry ETF on the buy-leaders list whose top 10 holds it."""
     today = pd.Timestamp.today().normalize()
@@ -159,7 +161,7 @@ def build_html(df: pd.DataFrame, sec_label: dict, sec_score: dict, leader_hold: 
         if _nan(p52):
             p52 = r.get('pct_52w')
         p52c = DIM if _nan(p52) else TEAL if float(p52) > -0.05 else COPPER if float(p52) > -0.15 else ORANGE_M
-        h += '<tr>'
+        h += f'<tr data-t="{_e(t)}">' if clickable else '<tr>'
         h += f'<td class="l" data-s="{_e(t)}" title="{_e(_s(r.get("name")))}"><b>{_e(t)}</b></td>'
         h += (f'<td class="l" data-s="{_e(sect)}"><span style="color:{_score_col(ssc)};">{_e(sect)}</span>'
               f'{" <span class=sub>" + _e(sec_label.get(sect, "").title()) + "</span>" if sec_label.get(sect) else ""}</td>')
@@ -181,5 +183,5 @@ def build_html(df: pd.DataFrame, sec_label: dict, sec_score: dict, leader_hold: 
         h += f'<td class="num" data-s="{e_sort}">{e_html}</td>'
         h += f'<td class="l" data-s="{_e(etf)}">{chip(etf, TEAL, True) if etf else "<span style=color:#6e675f>—</span>"}</td>'
         h += '</tr>'
-    h += '</tbody></table></div>' + JS
+    h += '</tbody></table></div>' + ('' if clickable else JS)
     return h

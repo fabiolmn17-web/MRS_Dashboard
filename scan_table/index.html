@@ -1,0 +1,49 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<!-- Scanner table as a two-way Streamlit component: clicking a row sends the ticker back to the app
+     (drives the chart panel). Plain HTML, no build step: speaks the Streamlit component message protocol. -->
+<style>html,body{margin:0;padding:0;background:transparent;} #root{height:100%;overflow:auto;}</style>
+</head><body><div id="root"></div>
+<script>
+function send(type, data) { window.parent.postMessage(Object.assign({isStreamlitMessage: true, type: type}, data || {}), '*'); }
+var lastHtml = null, height = 600, selected = null;
+// header sort (same behaviour as the static table)
+var _c = -1, _a = false;
+function srt(th) {
+  var col = +th.dataset.col; if (_c === col) { _a = !_a } else { _c = col; _a = false }
+  document.querySelectorAll('.sarr').forEach(function (s) { s.textContent = '' });
+  document.getElementById('sa' + col).textContent = _a ? '↑' : '↓';
+  var tb = document.querySelector('#mt tbody'); var rs = Array.from(tb.rows);
+  var num = rs.length && !isNaN(parseFloat(rs[0].cells[col].dataset.s));
+  rs.sort(function (x, y) {
+    var a = x.cells[col].dataset.s, b = y.cells[col].dataset.s;
+    if (num) { a = parseFloat(a); b = parseFloat(b); if (a === -999 && b === -999) return 0; if (a === -999) return 1; if (b === -999) return -1; }
+    return a < b ? (_a ? -1 : 1) : a > b ? (_a ? 1 : -1) : 0
+  });
+  rs.forEach(function (r) { tb.appendChild(r) });
+}
+function mark(t) {
+  document.querySelectorAll('tr.sel').forEach(function (r) { r.classList.remove('sel') });
+  if (!t) return;
+  var r = document.querySelector('tr[data-t="' + t + '"]'); if (r) r.classList.add('sel');
+}
+document.addEventListener('click', function (e) {
+  var tr = e.target.closest('tr[data-t]'); if (!tr) return;
+  selected = tr.dataset.t; mark(selected);
+  send('streamlit:setComponentValue', {value: selected, dataType: 'json'});
+});
+window.addEventListener('message', function (e) {
+  if (!e.data || e.data.type !== 'streamlit:render') return;
+  var args = e.data.args || {};
+  if (args.html !== lastHtml) {               // rebuild only when the table changed (keeps the sort on re-renders)
+    lastHtml = args.html; _c = -1;
+    document.getElementById('root').innerHTML = args.html;
+  }
+  if (args.selected && args.selected !== selected) { selected = args.selected; }
+  mark(selected);
+  height = args.height || height;
+  document.getElementById('root').style.height = height + 'px';
+  send('streamlit:setFrameHeight', {height: height});
+});
+send('streamlit:componentReady', {apiVersion: 1});
+</script></body></html>
