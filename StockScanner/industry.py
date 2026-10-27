@@ -255,6 +255,8 @@ def build_industry_tables(price_data: Dict[str, pd.DataFrame],
                     'rs_composite': rs['rs_composite'], 'rs_label': rs['rs_label'],
                     'atr_compressed': bool(pat.get('atr_compressed', False)),
                     'bb_kc_squeeze': bool(pat.get('bb_kc_squeeze', False)),
+                    'sqz_level': pat.get('sqz_level', ''), 'sqz_bars': pat.get('sqz_bars', 0),
+                    'sqz_fired': bool(pat.get('sqz_fired', False)), 'sqz_mom_color': pat.get('sqz_mom_color', ''),
                 })
                 mf = momentum.momentum_fields(df, spy_df)
                 row.update({'ext_atr': mf['ext_atr'], 'ext_zone': mf['ext_zone'], 'mom_zone': mf['mom_zone']})
@@ -263,6 +265,7 @@ def build_industry_tables(price_data: Dict[str, pd.DataFrame],
                             'rs_1y': np.nan, 'rs_6m': np.nan, 'rs_3m': np.nan, 'rs_1m': np.nan,
                             'rs_composite': np.nan, 'rs_label': 'NO DATA',
                             'atr_compressed': False, 'bb_kc_squeeze': False,
+                            'sqz_level': '', 'sqz_bars': 0, 'sqz_fired': False, 'sqz_mom_color': '',
                             'ext_atr': np.nan, 'ext_zone': '', 'mom_zone': ''})
             row['as_of'] = as_of
             h_rows.append(row)

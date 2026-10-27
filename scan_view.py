@@ -49,9 +49,37 @@ def _s(v):
     return '' if v is None or (isinstance(v, float) and math.isnan(v)) or str(v) == 'nan' else str(v)
 
 
+# Beardy Squeeze Pro: dot colours (orange = High, red = Mid, black = Low, green = none) and momentum colours
+SQZ_COL = {'High': '#f4a062', 'Mid': '#e0605a', 'Low': '#b9b2a9'}
+SQZ_RANK = {'High': 3, 'Mid': 2, 'Low': 1}
+MOM_SQZ_COL = {'aqua': '#4dd0e1', 'blue': '#2962ff', 'red': '#ef5350', 'yellow': '#fdd835'}
+MOM_SQZ_TIP = {'aqua': 'momentum > 0 and rising', 'blue': 'momentum > 0 and falling',
+               'red': 'momentum < 0 and falling', 'yellow': 'momentum < 0 and rising'}
+
+
+def squeeze_cell(r):
+    """(html, sort key) for the Squeeze column. Falls back to the old True/False flag for older CSVs."""
+    lvl = _s(r.get('sqz_level'))
+    if not lvl:
+        on = str(r.get('bb_kc_squeeze')).lower() == 'true'
+        return (f'<span style="color:{COPPER};">⚡</span>' if on else '<span style="color:#6e675f;">—</span>'), int(on)
+    mc = _s(r.get('sqz_mom_color'))
+    dot = (f' <span title="{_e(MOM_SQZ_TIP.get(mc, ""))}" style="display:inline-block;width:7px;height:7px;'
+           f'border-radius:1px;background:{MOM_SQZ_COL.get(mc, "#6e675f")};vertical-align:middle;"></span>') if mc else ''
+    fired = str(r.get('sqz_fired')).lower() == 'true'
+    if fired:
+        up = mc in ('aqua', 'blue')
+        return (chip('Fired ' + ('↑' if up else '↓'), TEAL if up else ORANGE, True) + dot), 0.5
+    if lvl in SQZ_RANK:
+        b = r.get('sqz_bars')
+        bars = '' if _nan(b) else f' <span class="sub">{int(float(b))}d</span>'
+        return chip(lvl, SQZ_COL[lvl], lvl != 'Low') + bars + dot, SQZ_RANK[lvl] + min(float(b or 0), 99) / 1000
+    return '<span style="color:#6e675f;">—</span>' + dot, 0
+
+
 HEAD = [('Ticker', 'l'), ('Sector', 'l'), ('Close', ''), ('% 52W Hi', ''), ('RS label (held)', 'l'),
         ('RS 3M', ''), ('RS 1M', ''), ('Ext vs SMA50', ''), ('Momentum', 'c'), ('5-day', ''), ('CAN SLIM', 'c'),
-        ('EPS QoQ', ''), ('ATR', 'c'), ('Sqz', 'c'), ('Earnings', ''), ('Leader industry', 'l')]
+        ('EPS QoQ', ''), ('ATR', 'c'), ('Squeeze', 'c'), ('Earnings', ''), ('Leader industry', 'l')]
 
 CSS = """
 <style>
@@ -116,7 +144,7 @@ def build_html(df: pd.DataFrame, sec_label: dict, sec_score: dict, leader_hold: 
         cs = chip(mode, TEAL if mode == 'STRICT' else COPPER, True) if mode else '<span style="color:#6e675f;">—</span>'
         eps = r.get('eps_qtr_yoy')
         atr_c = str(r.get('atr_compressed')).lower() == 'true'
-        sq = str(r.get('bb_kc_squeeze')).lower() == 'true'
+        sq_html, sq_sort = squeeze_cell(r)
         ne = pd.to_datetime(_s(r.get('next_earnings')) or None, errors='coerce')
         if pd.isna(ne):
             e_html, e_sort = '<span style="color:#6e675f;">—</span>', 99999
@@ -149,7 +177,7 @@ def build_html(df: pd.DataFrame, sec_label: dict, sec_score: dict, leader_hold: 
         h += f'<td class="c" data-s="{ {"STRICT": 2, "RELAXED": 1}.get(mode, 0) }">{cs}</td>'
         h += f'<td class="num" data-s="{_sv(eps)}" style="color:{_col(eps)};">{_pct(eps, 0)}</td>'
         h += f'<td class="c" data-s="{int(atr_c)}" style="color:{"#e8dccb" if atr_c else "#6e675f"};">{"●" if atr_c else "—"}</td>'
-        h += f'<td class="c" data-s="{int(sq)}" style="color:{COPPER if sq else "#6e675f"};">{"⚡" if sq else "—"}</td>'
+        h += f'<td class="c" data-s="{sq_sort}">{sq_html}</td>'
         h += f'<td class="num" data-s="{e_sort}">{e_html}</td>'
         h += f'<td class="l" data-s="{_e(etf)}">{chip(etf, TEAL, True) if etf else "<span style=color:#6e675f>—</span>"}</td>'
         h += '</tr>'

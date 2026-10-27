@@ -206,7 +206,7 @@ def run_scan(
             log(f'  ... {i+1} names done')
 
     # ── Step 5: Patterns (actionability) ─────────────────────────────────────
-    log('\n[5/5] Computing actionability (ATR compression + pivot)...')
+    log('\n[5/5] Computing actionability (ATR compression + squeeze) for every scanned stock...')
     pattern_calc = PatternDetector()
 
     all_rows = []
@@ -217,10 +217,10 @@ def run_scan(
 
         mom = mom_by.get(ticker, {})
         mt  = meta.get(ticker, {})
-        if (row['passes_technical'] and row['passes_rs']) or mom.get('mom_list'):
-            df = price_data.get(ticker)
-            if df is not None:
-                pat = pattern_calc.compute(df)
+        # every scanned stock (cheap, price data only): the squeeze and ATR filters work on any list
+        df = price_data.get(ticker)
+        if df is not None:
+            pat = pattern_calc.compute(df)
 
         # Determine overall pass mode
         passes_strict  = fund.get('passes_strict',  False)
@@ -271,7 +271,14 @@ def run_scan(
             'atr_pct':            pat.get('atr_pct'),
             'atr_pct_rank':       pat.get('atr_pct_rank'),
             'atr_compressed':     pat.get('atr_compressed', False),
-            'bb_kc_squeeze':      pat.get('bb_kc_squeeze', False),
+            'bb_kc_squeeze':      pat.get('bb_kc_squeeze', False),   # any squeeze (Beardy: not green)
+            'sqz_level':          pat.get('sqz_level', ''),          # High / Mid / Low / Off
+            'sqz_ratio':          pat.get('sqz_ratio'),              # 2 x stdev / SMA(TR); <=1 / 1.5 / 2
+            'sqz_bars':           pat.get('sqz_bars', 0),            # consecutive bars in a squeeze
+            'sqz_started':        pat.get('sqz_started', False),
+            'sqz_fired':          pat.get('sqz_fired', False),
+            'sqz_mom':            pat.get('sqz_mom'),
+            'sqz_mom_color':      pat.get('sqz_mom_color', ''),      # aqua / blue / red / yellow
             # Filters
             'passes_technical':   row['passes_technical'],
             'passes_rs':          row['passes_rs'],

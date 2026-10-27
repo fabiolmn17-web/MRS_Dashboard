@@ -660,6 +660,10 @@ if _scan_df is not None and len(_scan_df) > 0:
     _sd['_mom'] = _bool('mom_list')
     _sd['_atr'] = _bool('atr_compressed')
     _sd['_sq'] = _bool('bb_kc_squeeze')
+    _has_sqz = 'sqz_level' in _sd.columns
+    _sd['_sqz_lvl'] = _sd['sqz_level'].fillna('').astype(str) if _has_sqz else ''
+    _sd['_sqz_fired'] = _bool('sqz_fired')
+    _sd['_sqz_start'] = _bool('sqz_started')
     for _c in ('held_score', 'rs_3m', 'ext_atr', 'rs_composite'):
         if _c in _sd.columns:
             _sd[_c] = pd.to_numeric(_sd[_c], errors='coerce')
@@ -702,7 +706,7 @@ if _scan_df is not None and len(_scan_df) > 0:
     with _f3:
         _mz_sel = st.multiselect('50-day SMA momentum', ['Persistent', 'Building', 'Fading', 'Falling', 'Weak'],
                                  default=[], key='ms_mom', placeholder='Any momentum zone')
-    _g1, _g2, _g3, _g4, _g5, _g6 = st.columns([1.3, 1.1, 1.1, 0.9, 0.8, 1.0])
+    _g1, _g2, _g3, _g4, _g5, _g6 = st.columns([1.3, 1.1, 1.1, 0.9, 1.3, 1.0])
     with _g1:
         _sects = sorted({YF_TO_SECTOR.get(str(s), str(s)) for s in _sd['sector'].dropna() if str(s)})
         _sect_f = st.selectbox('Sector', ['All sectors'] + _sects, index=0, key='ms_sector')
@@ -713,7 +717,11 @@ if _scan_df is not None and len(_scan_df) > 0:
     with _g4:
         _atr_f = st.checkbox('ATR compressed', value=False, key='ms_atr')
     with _g5:
-        _sq_f = st.checkbox('Squeeze', value=False, key='ms_sq')
+        _SQ_OPTS = ['Any', 'In a squeeze (any level)', 'Mid or High compression', 'High compression only',
+                    'Squeeze started today', 'Squeeze fired today'] if _has_sqz else ['Any', 'In a squeeze (any level)']
+        _sq_f = st.selectbox('Squeeze', _SQ_OPTS, index=0, key='ms_sqz',
+                             help='Beardy Squeeze Pro, daily: Bollinger 2.0 inside Keltner 2.0 / 1.5 / 1.0 = Low / Mid / High '
+                                  'compression (black / red / orange dots). Fired = out of the squeeze today after a squeeze yesterday.')
     with _g6:
         _no_earn = st.checkbox('Hide earnings ≤ 7 days', value=False, key='ms_earn')
 
@@ -740,8 +748,16 @@ if _scan_df is not None and len(_scan_df) > 0:
         _v = _v[_v['ticker'].astype(str).isin(_leader_hold.keys())]
     if _atr_f:
         _v = _v[_v['_atr']]
-    if _sq_f:
+    if _sq_f == 'In a squeeze (any level)':
         _v = _v[_v['_sq']]
+    elif _sq_f == 'Mid or High compression':
+        _v = _v[_v['_sqz_lvl'].isin(['Mid', 'High'])]
+    elif _sq_f == 'High compression only':
+        _v = _v[_v['_sqz_lvl'] == 'High']
+    elif _sq_f == 'Squeeze started today':
+        _v = _v[_v['_sqz_start']]
+    elif _sq_f == 'Squeeze fired today':
+        _v = _v[_v['_sqz_fired']]
     if _no_earn and 'next_earnings' in _v.columns:
         _dd = (pd.to_datetime(_v['next_earnings'], errors='coerce') - pd.Timestamp.today().normalize()).dt.days
         _v = _v[~_dd.between(0, 7)]
@@ -763,6 +779,9 @@ if _scan_df is not None and len(_scan_df) > 0:
             'Stretched ≤ +5, Extreme above. Momentum = 50-day SMA slope over 5 sessions: Weak ≤ −0.5%, Falling ≤ 0, '
             'Building ≤ +0.5 (Fading if it came down from above +0.5 in the last 11 sessions), Persistent above. '
             '5-day: dip ≤ −2%, pullback ≤ −3%, sharp ≤ −4%. Earnings in orange = within 7 days. '
+            'Squeeze = Beardy Squeeze Pro on daily bars: Bollinger (20, 2.0) inside Keltner (SMA 20 ± k × average true range 20), '
+            'High k = 1.0, Mid 1.5, Low 2.0; days = consecutive sessions in a squeeze; Fired ↑/↓ = out of the squeeze today, '
+            'by momentum sign; the square is the momentum colour (aqua &gt; 0 rising, blue &gt; 0 falling, red &lt; 0 falling, yellow &lt; 0 rising). '
             + market_state.ev('Descriptive') + ' The momentum rules come from the industry study and the literature; the '
             'zone odds were measured on SPY and QQQ, not on single stocks. Where to start the chart work, not a buy signal.'
             '</div>', unsafe_allow_html=True)

@@ -12,6 +12,7 @@ import html as _html
 import math
 
 import pandas as pd
+from scan_view import squeeze_cell
 
 # ── palette (same as the rest of the dashboard) ───────────────────────────────
 GREEN, LGREEN, RED, LRED, ORANGE, GREY = '#85cac5', '#649995', '#f4a062', '#b9805a', '#b9805a', '#9b958f'
@@ -195,7 +196,6 @@ def _holdings_table(h: pd.DataFrame) -> str:
         rc = r.get('rs_composite')
         rc_txt = '—' if _nan(rc) else f'{float(rc):+.1f}'
         atr = str(r.get('atr_compressed')).lower() == 'true'
-        sq = str(r.get('bb_kc_squeeze')).lower() == 'true'
         s += '<tr>'
         s += f'<td class="c" style="color:#9b958f;">{int(r["rank"])}</td>'
         s += f'<td class="l"><b style="color:#f3ece2;">{_e(r["ticker"])}</b></td>'
@@ -207,7 +207,7 @@ def _holdings_table(h: pd.DataFrame) -> str:
         for k in ['rs_1y', 'rs_6m', 'rs_3m', 'rs_1m']:
             s += f'<td style="color:{_col(r.get(k))};">{_pct(r.get(k))}</td>'
         s += f'<td class="c" style="color:{"#e8dccb" if atr else "#6e675f"};">{"●" if atr else "—"}</td>'
-        s += f'<td class="c" style="color:{"#e3b48e" if sq else "#6e675f"};">{"⚡" if sq else "—"}</td>'
+        s += f'<td class="c">{squeeze_cell(r)[0]}</td>'
         s += '</tr>'
     s += '</tbody></table>'
     return s
@@ -270,7 +270,7 @@ def build_drilldown_html(sec_df: pd.DataFrame, ind_df, hold_df, sort_col: str, s
         note += (f'Industry rows (industry ETFs, same formula) and top 10 holdings: nightly'
                  f'{", as of " + _e(ind_as_of) if ind_as_of else ""}. '
                  'Holdings: weight in the ETF, % 52W Hi = distance from the 52-week closing high, '
-                 'RS Score = same composite, ATR <span style="color:#e8dccb">●</span> = bottom 35th pctile, Squeeze &#9889; = Bollinger inside Keltner. '
+                 'RS Score = same composite, ATR <span style="color:#e8dccb">●</span> = bottom 35th pctile, Squeeze = Beardy Squeeze Pro level (High / Mid / Low compression, Fired ↑/↓ today). '
                  'Some industry ETFs hold non-US listings.')
     h += f'<div class="note">{note}</div></div>'
     return h.replace('\n', ' ')

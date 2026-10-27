@@ -5,6 +5,7 @@ Detects:
 1. ATR Compression  — tight base / low volatility consolidation
 2. Local Swing High — most recent pivot high (N bars each side)
 3. Near Pivot       — price within 5% below (or just above) the swing high
+4. Squeeze          — Beardy Squeeze Pro levels (BB 2.0 inside KC 1.0 / 1.5 / 2.0) and momentum
 
 These are NOT filters — they annotate every passing stock to help the user
 identify which stocks are in a low-risk entry zone.
@@ -54,6 +55,9 @@ class PatternDetector:
         high  = df['High'].dropna()
         low   = df['Low'].dropna()
 
+        # ── Squeeze (Beardy Squeeze Pro): needs only 2 x 20 bars, so before the ATR length check
+        result.update(self.compute_squeeze(df))
+
         if len(close) < self.ATR_PERIOD + self.ATR_LOOKBACK:
             return result
 
@@ -73,13 +77,6 @@ class PatternDetector:
             result['atr_pct']        = atr_pct
             result['atr_pct_rank']   = pct_rank
             result['atr_compressed'] = pct_rank <= self.ATR_COMPRESSED_PCTL
-
-            # ── BB inside KC (Keltner Squeeze) ───────────────────────────────────
-            # Bollinger Bands: 20-period SMA ± 2σ
-            # Keltner Channel: 20-period EMA ± 1 × ATR(14)
-            # Squeeze = BB upper < KC upper  AND  BB lower > KC lower
-            # (BB is entirely inside KC → volatility squeeze, potential breakout)
-            result['bb_kc_squeeze'] = self._compute_bb_kc_squeeze(close, atr_series)
 
         return result
 
@@ -114,43 +111,72 @@ class PatternDetector:
         except Exception:
             return None
 
-    def _compute_bb_kc_squeeze(
-        self,
-        close: pd.Series,
-        atr_series: pd.Series,
-        bb_period: int = 20,
-    ) -> bool:
-        """
-        Detect Keltner Squeeze: Bollinger Bands (±2σ) inside Keltner Channel (±1 ATR).
+    # ── Squeeze (Beardy Squeeze Pro) ─────────────────────────────────────────
+    SQZ_LENGTH = 20
+    SQZ_BB_MULT = 2.0
+    SQZ_KC = (1.0, 1.5, 2.0)          # High / Mid / Low compression (Keltner multipliers)
 
-        When BB is entirely inside KC, volatility is compressed and a directional
-        breakout is likely. Uses ±1 ATR (tighter than standard 1.5 ATR) per user spec.
-
-        Returns True if squeeze is active at the last bar.
+    def compute_squeeze(self, df: pd.DataFrame) -> dict:
+        """Beardy Squeeze Pro (TradingView, Beardy_Fred), same definitions as the Pine script:
+          BB  = SMA(close, 20) +/- 2.0 x stdev(close, 20)          (population stdev, as ta.stdev)
+          KC  = SMA(close, 20) +/- k x SMA(true range, 20)        k = 1.0 / 1.5 / 2.0
+          Both channels share the SMA basis, so "BB inside KC" reduces to 2 x stdev <= k x SMA(TR).
+          Level: High (inside KC 1.0, orange dots), Mid (inside 1.5, red), Low (inside 2.0, black),
+                 Off (outside 2.0, green = no squeeze). ('Off', not 'None': pandas reads 'None' as NaN.)
+          Fired = no squeeze on the last bar after a squeeze on the bar before (Pine alert "Squeeze Fired").
+          Momentum = linreg(close - avg(avg(highest high 20, lowest low 20), SMA close 20), 20, 0);
+          colour as in the script: aqua (>0 rising), blue (>0 falling), red (<0 falling), yellow (<0 rising).
         """
+        out = {'sqz_ratio': np.nan, 'sqz_level': '', 'bb_kc_squeeze': False, 'sqz_started': False,
+               'sqz_fired': False, 'sqz_bars': 0, 'sqz_mom': np.nan, 'sqz_mom_color': ''}
         try:
-            if len(close) < bb_period + 1:
-                return False
+            n = self.SQZ_LENGTH
+            d = df[['High', 'Low', 'Close']].dropna()
+            if len(d) < 2 * n + 2:
+                return out
+            c, h, l = d['Close'], d['High'], d['Low']
+            basis = c.rolling(n).mean()
+            dev = self.SQZ_BB_MULT * c.rolling(n).std(ddof=0)
+            tr = pd.concat([h - l, (h - c.shift(1)).abs(), (l - c.shift(1)).abs()], axis=1).max(axis=1)
+            tr.iloc[0] = np.nan                       # ta.tr is na on the first bar
+            dev_kc = tr.rolling(n).mean()
+            ratio = dev / dev_kc                      # <= 1.0 High, <= 1.5 Mid, <= 2.0 Low
+            hi_k, mid_k, low_k = self.SQZ_KC
 
-            # Align ATR to close index
-            atr_aligned = atr_series.reindex(close.index).ffill()
+            def level(x):
+                if pd.isna(x):
+                    return ''
+                return 'High' if x <= hi_k else 'Mid' if x <= mid_k else 'Low' if x <= low_k else 'Off'
 
-            # Bollinger Bands
-            bb_sma   = close.rolling(bb_period).mean()
-            bb_std   = close.rolling(bb_period).std(ddof=1)
-            bb_upper = bb_sma + 2.0 * bb_std
-            bb_lower = bb_sma - 2.0 * bb_std
+            on = ratio <= low_k                       # any compression = not green
+            r_now, r_prev = ratio.iloc[-1], ratio.iloc[-2]
+            on_now, on_prev = bool(on.iloc[-1]), bool(on.iloc[-2])
+            bars = 0
+            for v in on.iloc[::-1]:
+                if not v:
+                    break
+                bars += 1
+            src = c - ((h.rolling(n).max() + l.rolling(n).min()) / 2 + basis) / 2
+            x = np.arange(n)
 
-            # Keltner Channel (EMA centre, ±1 ATR)
-            kc_ema   = close.ewm(span=bb_period, adjust=False).mean()
-            kc_upper = kc_ema + atr_aligned
-            kc_lower = kc_ema - atr_aligned
+            def _lr(y):                              # ta.linreg(src, n, 0): fitted value at the last bar
+                b, a = np.polyfit(x, y, 1)
+                return a + b * (n - 1)
 
-            # Squeeze at last bar
-            squeeze = (
-                float(bb_upper.iloc[-1]) < float(kc_upper.iloc[-1])
-                and float(bb_lower.iloc[-1]) > float(kc_lower.iloc[-1])
-            )
-            return bool(squeeze)
+            mom = src.rolling(n).apply(_lr, raw=True)
+            m_now, m_prev = mom.iloc[-1], mom.iloc[-2]
+            m_prev = 0.0 if pd.isna(m_prev) else m_prev   # nz(mom[1])
+            if pd.isna(m_now):
+                col = ''
+            elif m_now > 0:
+                col = 'aqua' if m_now > m_prev else 'blue'
+            else:
+                col = 'red' if m_now < m_prev else 'yellow'
+            out.update({'sqz_ratio': float(r_now) if not pd.isna(r_now) else np.nan,
+                        'sqz_level': level(r_now), 'bb_kc_squeeze': on_now,
+                        'sqz_started': on_now and not on_prev, 'sqz_fired': (not on_now) and on_prev,
+                        'sqz_bars': int(bars), 'sqz_mom': float(m_now) if not pd.isna(m_now) else np.nan,
+                        'sqz_mom_color': col})
         except Exception:
-            return False
+            pass
+        return out
