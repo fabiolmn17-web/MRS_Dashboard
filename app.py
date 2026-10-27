@@ -712,6 +712,106 @@ def _scan_table_and_chart_body(table_html, tickers, height):
 # st.fragment (Streamlit 1.37+): a click reruns only the table and the chart, not the whole page
 _scan_table_and_chart = st.fragment(_scan_table_and_chart_body) if hasattr(st, 'fragment') else _scan_table_and_chart_body
 
+# ── Ticker lookup: how a name looks through the scan (any US ticker) ─────────────────────────────
+@st.cache_data(ttl=1800, show_spinner=False)
+def _lookup_live(ticker):
+    """Price-only scan fields for a ticker outside the nightly universe (same functions as the scanner).
+    CAN SLIM fundamentals are not fetched here."""
+    from StockScanner import momentum as _mom
+    from StockScanner.calculations import RelativeStrengthCalculator, PatternDetector
+    h = _chart_history(ticker)
+    spy = _chart_history('SPY')
+    if h is None or spy is None or len(h) < 60:
+        return None
+    row = {'ticker': ticker, 'close': float(h['Close'].iloc[-1])}
+    row.update(_mom.momentum_fields(h, spy))
+    rs = RelativeStrengthCalculator().compute(h, spy)
+    row.update({k: rs.get(k) for k in ('rs_1y', 'rs_6m', 'rs_3m', 'rs_1m')})
+    row.update(PatternDetector().compute(h))
+    c = h['Close']
+    row['sma200'] = float(c.rolling(200).mean().iloc[-1]) if len(c) >= 200 else np.nan
+    row['sma50'] = float(c.rolling(50).mean().iloc[-1])
+    try:
+        info = yf.Ticker(ticker).info or {}
+        row.update({'name': info.get('longName') or info.get('shortName', ticker),
+                    'sector': info.get('sector', ''), 'industry': info.get('industry', '')})
+    except Exception:
+        row.update({'name': ticker, 'sector': '', 'industry': ''})
+    row['next_earnings'] = _mom.next_earnings(ticker)
+    row['pass_mode'] = None
+    return row
+
+
+def _scan_lookup(sd, sec_label, sec_score, leader_hold):
+    c_in, c_note = st.columns([1, 3])
+    with c_in:
+        q = st.text_input('Look up a ticker', value='', key='ms_lookup', placeholder='e.g. CRM, PNTG, XNCR',
+                          help='Shows the stock as the scan sees it. S&P 500 names come from the nightly scan; '
+                               'any other US ticker is computed live from prices (no CAN SLIM fundamentals).')
+    t = (q or '').strip().upper().lstrip('$')
+    if not t:
+        return
+    hit = sd[sd['ticker'].astype(str).str.upper() == t]
+    in_scan = len(hit) > 0
+    if in_scan:
+        r = hit.iloc[0].to_dict()
+        src = f'nightly scan ({_scan_date})'
+    else:
+        with st.spinner(f'Computing {t} from prices...'):
+            r = _lookup_live(t)
+        if r is None:
+            st.warning(f'No price history found for {t}.')
+            return
+        src = 'computed live from prices (not in the nightly universe; CAN SLIM not checked)'
+    with c_note:
+        st.markdown(f'<div style="font-size:0.74rem;color:#a89f95;padding-top:30px;">'
+                    f'<b style="color:#f3ece2;">{_html_mod.escape(str(r.get("name") or t))}</b> · {src}</div>',
+                    unsafe_allow_html=True)
+    components.html(scan_view.build_html(pd.DataFrame([r]), sec_label, sec_score, leader_hold, YF_TO_SECTOR),
+                    height=96, scrolling=True)
+
+    def ok(v):
+        return str(v).lower() == 'true'
+    hs = pd.to_numeric(pd.Series([r.get('held_score')]), errors='coerce').iloc[0]
+    checks = [(not pd.isna(hs) and hs >= 1.0, f'held RS score {hs:+.1f} (needs +1 or higher)' if not pd.isna(hs) else 'held RS score n/a'),
+              (ok(r.get('above_sma200')), 'close above the 200-day SMA'),
+              (ok(r.get('sma50_above_sma200')), '50-day SMA above the 200-day')]
+    mark = lambda b: ('<span style="color:#85cac5;font-weight:700;">✓</span>' if b
+                      else '<span style="color:#f4a062;font-weight:700;">✗</span>')
+    on_list = all(b for b, _ in checks)
+    lines = [f'<b style="color:#f3ece2;">Momentum list:</b> '
+             + ('<span style="color:#85cac5;">on the list</span>' if on_list else '<span style="color:#f4a062;">not on the list</span>')
+             + ' — ' + ' · '.join(f'{mark(b)} {txt}' for b, txt in checks)]
+    if on_list and in_scan:
+        ml = sd[sd['_mom']].sort_values('rs_3m', ascending=False)['ticker'].astype(str).str.upper().tolist()
+        if t in ml:
+            lines.append(f'<b style="color:#f3ece2;">Rank:</b> #{ml.index(t) + 1} of {len(ml)} on the momentum list by RS 3M')
+    if in_scan:
+        pm = r.get('pass_mode')
+        if isinstance(pm, str) and pm:
+            lines.append(f'<b style="color:#f3ece2;">CAN SLIM:</b> {pm}')
+        else:
+            why = r.get('tech_fail_reason')
+            why = '' if why is None or (isinstance(why, float) and np.isnan(why)) else str(why)
+            why = why.replace('_', ' ').replace('sma', 'SMA ').replace('  ', ' ').strip()
+            lines.append('<b style="color:#f3ece2;">CAN SLIM:</b> not passing' + (f' ({_html_mod.escape(why)})' if why else ''))
+    else:
+        lines.append('<b style="color:#f3ece2;">CAN SLIM:</b> not checked (outside the nightly universe)')
+    etf = leader_hold.get(t)
+    lines.append('<b style="color:#f3ece2;">Leader industry:</b> '
+                 + (f'top-10 holding of {etf}' if etf else 'not a top-10 holding of a leader industry ETF'))
+    c_txt, c_ch = st.columns([1.15, 1], gap='medium')
+    with c_txt:
+        st.markdown('<div style="font-size:0.78rem;color:#c9c1b7;line-height:1.9;margin:2px 0 6px 0;">'
+                    + '<br>'.join(lines) + '</div>', unsafe_allow_html=True)
+    h = _chart_history(t)
+    if h is not None and len(h) >= 30:
+        with c_ch:
+            st.plotly_chart(chart_view.figure(h, t, height=360), use_container_width=True,
+                            config={'displayModeBar': False, 'scrollZoom': True}, key='lookup_chart')
+    st.markdown('<div style="height:6px;"></div>', unsafe_allow_html=True)
+
+
 
 if _scan_df is not None and len(_scan_df) > 0:
     _sd = _scan_df.copy()
@@ -750,6 +850,8 @@ if _scan_df is not None and len(_scan_df) > 0:
         + ' · updated nightly 10 PM UTC</div>', unsafe_allow_html=True)
     if not _has_mom:
         st.info('The momentum columns arrive with the next nightly scan. Until then the table shows the CAN SLIM candidates.')
+
+    _scan_lookup(_sd, _sec_label, _sec_score, _leader_hold)
 
     _LIST_OPTS = ['Momentum list', 'Momentum list that also meets CAN SLIM', 'CAN SLIM strict', 'CAN SLIM relaxed',
                   'All scanned stocks']
