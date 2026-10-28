@@ -693,6 +693,27 @@ def _scan_chart_panel(tickers):
                 'in the table to switch.</div>', unsafe_allow_html=True)
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def _extmom_html(ticker):
+    """The TradingView Ext·Mom table for one ticker: its own 10-year history plus the pooled stock panel."""
+    from StockScanner import extmom_table as _xm
+    h = _chart_history(ticker)
+    try:
+        r = _xm.compute(h, _xm.load_pooled())
+    except Exception:
+        r = None
+    return _xm.render_html(r, ticker) if r else ''
+
+
+def _scan_extmom(ticker):
+    if not ticker:
+        return
+    html = _extmom_html(ticker)
+    if html:
+        st.markdown(f'<div style="font-size:0.8rem;color:#f3ece2;font-weight:600;margin:6px 0 2px 0;">Ext·Mom · '
+                    f'{_html_mod.escape(ticker)}</div>' + html, unsafe_allow_html=True)
+
+
 def _scan_table_and_chart_body(table_html, tickers, height):
     show = st.toggle('Chart panel (click a row)', value=True, key='ms_chart')
     if not show:
@@ -707,6 +728,8 @@ def _scan_table_and_chart_body(table_html, tickers, height):
             st.session_state['scan_pick'] = picked
     with c_chart:
         _scan_chart_panel(tickers)
+    _t = st.session_state.get('scan_pick')
+    _scan_extmom(_t if _t in tickers else (tickers[0] if tickers else None))
 
 
 # st.fragment (Streamlit 1.37+): a click reruns only the table and the chart, not the whole page
@@ -809,12 +832,15 @@ def _scan_lookup(sd, sec_label, sec_score, leader_hold):
         with c_ch:
             st.plotly_chart(chart_view.figure(h, t, height=360), use_container_width=True,
                             config={'displayModeBar': False, 'scrollZoom': True}, key='lookup_chart')
+    _scan_extmom(t)
     st.markdown('<div style="height:6px;"></div>', unsafe_allow_html=True)
 
 
 
 if _scan_df is not None and len(_scan_df) > 0:
     _sd = _scan_df.copy()
+    if 'ext_zone' in _sd.columns:   # labels before 28 Oct 2026
+        _sd['ext_zone'] = _sd['ext_zone'].replace({'Stretched': 'Above', 'Extreme': 'Far above'})
     _has_mom = 'mom_list' in _sd.columns
     _bool = lambda c: _sd[c].astype(str).str.lower().eq('true') if c in _sd.columns else pd.Series(False, index=_sd.index)
     _sd['_mom'] = _bool('mom_list')
@@ -857,8 +883,8 @@ if _scan_df is not None and len(_scan_df) > 0:
                   'All scanned stocks']
     _EXT_OPTS = {'Any extension': None,
                  'Close to the 50-day SMA (−1 to +0.5 ATR)': ['Just below', 'Near'],
-                 'Stretched (+0.5 to +5 ATR)': ['Stretched'],
-                 'Extreme (above +5 ATR)': ['Extreme'],
+                 'Above (+0.5 to +5 ATR)': ['Above'],
+                 'Far above (above +5 ATR)': ['Far above'],
                  'Below the 50-day SMA (−1 ATR or lower)': ['Below', 'Deep below']}
     _f1, _f2, _f3 = st.columns([1.3, 1.4, 1.6])
     with _f1:
@@ -939,14 +965,16 @@ if _scan_df is not None and len(_scan_df) > 0:
             '200-day SMA AND 50-day above 200-day. CAN SLIM = STRICT ≥ 25% EPS and revenue growth, RELAXED ≥ 20% / 15% '
             '(fundamentals are fetched only for stocks above their 50-day SMA, within 20% of the 52-week high). '
             'Ext vs SMA50 = (close − SMA50) / ATR(14): Deep below ≤ −3, Below ≤ −1, Just below ≤ 0, Near ≤ +0.5, '
-            'Stretched ≤ +5, Extreme above. Momentum = 50-day SMA slope over 5 sessions: Weak ≤ −0.5%, Falling ≤ 0, '
+            'Above ≤ +5, Far above beyond (Above is a trend state, not a reversal warning: in the 28 Oct study the left tail '
+            'did not grow with extension in stocks). Momentum = 50-day SMA slope over 5 sessions: Weak ≤ −0.5%, Falling ≤ 0, '
             'Building ≤ +0.5 (Fading if it came down from above +0.5 in the last 11 sessions), Persistent above. '
             '5-day: dip ≤ −2%, pullback ≤ −3%, sharp ≤ −4%. Earnings in orange = within 7 days. '
             'Squeeze = Beardy Squeeze Pro on daily bars: Bollinger (20, 2.0) inside Keltner (SMA 20 ± k × average true range 20), '
             'High k = 1.0, Mid 1.5, Low 2.0; days = consecutive sessions in a squeeze; Fired ↑/↓ = out of the squeeze today, '
             'by momentum sign; the square is the momentum colour (aqua &gt; 0 rising, blue &gt; 0 falling, red &lt; 0 falling, yellow &lt; 0 rising). '
             + market_state.ev('Descriptive') + ' The momentum rules come from the industry study and the literature; the '
-            'zone odds were measured on SPY and QQQ, not on single stocks. Where to start the chart work, not a buy signal.'
+            'Ext·Mom table under the chart shows the selected stock\'s own history (up to 10 years) and a pooled stock panel, '
+            'like the TradingView indicator. Where to start the chart work, not a buy signal.'
             '</div>', unsafe_allow_html=True)
 else:
     st.info('No scanner results yet. The scanner runs nightly at 10 PM UTC (Mon–Fri) via GitHub Actions.')

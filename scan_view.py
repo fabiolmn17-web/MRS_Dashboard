@@ -138,6 +138,7 @@ def build_html(df: pd.DataFrame, sec_label: dict, sec_score: dict, leader_hold: 
                    f' <span class="sub">{"" if _nan(days) else str(int(float(days))) + "d"}</span> {tag_html}{pend_html}')
         ext = r.get('ext_atr')
         ez = _s(r.get('ext_zone'))
+        ez = {'Stretched': 'Above', 'Extreme': 'Far above'}.get(ez, ez)   # labels before 28 Oct 2026
         mz = _s(r.get('mom_zone'))
         r5 = r.get('ret_5d')
         pb = _s(r.get('pullback'))

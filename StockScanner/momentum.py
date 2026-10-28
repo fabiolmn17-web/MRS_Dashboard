@@ -8,7 +8,9 @@ Used by scanner.py. Same definitions as the dashboard and the Epistruct studies:
 
   Ext-Mom zones (Epistruct_ExtMom v4.2, ATR units, SMA 50):
     extension = (close - SMA50) / ATR(14, Wilder)
-      Deep below <= -3 | Below <= -1 | Just below <= 0 | Near <= +0.5 | Stretched <= +5 | Extreme > +5
+      Deep below <= -3 | Below <= -1 | Just below <= 0 | Near <= +0.5 | Above <= +5 | Far above > +5
+      ("Above" was "Stretched" and "Far above" was "Extreme" until 28 Oct 2026: in the stretched-label study the
+       left tail did not grow with extension in stocks, so the zone is a trend state, not a reversal warning)
     momentum  = % change of SMA50 over 5 bars
       Weak <= -0.5 | Falling <= 0 | Building <= +0.5 (Fading if it was above +0.5 in the last 11 bars) | Persistent > +0.5
     5-day return: Dip <= -2% | Pullback <= -3% | Sharp pullback <= -4%
@@ -31,7 +33,8 @@ import rs_labels  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
-EXT_ZONES = ['Deep below', 'Below', 'Just below', 'Near', 'Stretched', 'Extreme']
+EXT_ZONES = ['Deep below', 'Below', 'Just below', 'Near', 'Above', 'Far above']
+ZONE_ALIAS = {'Stretched': 'Above', 'Extreme': 'Far above'}   # old labels in older CSVs
 MOM_ZONES = ['Weak', 'Falling', 'Building', 'Persistent', 'Fading']
 PB_BINS = ['None', 'Dip', 'Pullback', 'Sharp pullback']
 
@@ -60,7 +63,7 @@ def _atr_wilder(df: pd.DataFrame, n: int = 14) -> pd.Series:
 def ext_zone(x: float) -> str:
     if x is None or np.isnan(x):
         return ''
-    return 'Deep below' if x <= -3 else 'Below' if x <= -1 else 'Just below' if x <= 0 else 'Near' if x <= 0.5 else 'Stretched' if x <= 5 else 'Extreme'
+    return 'Deep below' if x <= -3 else 'Below' if x <= -1 else 'Just below' if x <= 0 else 'Near' if x <= 0.5 else 'Above' if x <= 5 else 'Far above'
 
 
 def mom_zone(slope: float, slope_peak: float) -> str:

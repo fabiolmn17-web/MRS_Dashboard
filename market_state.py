@@ -256,7 +256,8 @@ def leaders_html(short: pd.DataFrame, light: dict, hold_df: pd.DataFrame = None,
 
 
 # ── chips for the scanner ────────────────────────────────────────────────────────
-EXT_COL = {'Deep below': ORANGE, 'Below': ORANGE_M, 'Just below': TEAL_M, 'Near': TEAL, 'Stretched': COPPER, 'Extreme': COPPER_L}
+EXT_COL = {'Deep below': ORANGE, 'Below': ORANGE_M, 'Just below': TEAL_M, 'Near': TEAL, 'Above': COPPER, 'Far above': COPPER_L,
+           'Stretched': COPPER, 'Extreme': COPPER_L}   # old labels kept for older CSVs
 MOM_COL = {'Persistent': TEAL, 'Building': TEAL_M, 'Fading': COPPER, 'Falling': ORANGE_M, 'Weak': ORANGE}
 
 

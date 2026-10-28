@@ -19,10 +19,11 @@ BARS = 252
 
 
 def fetch(ticker: str):
-    """2 years of daily OHLC for one ticker, or None. Wrap in st.cache_data in the app."""
+    """10 years of daily OHLC for one ticker, or None (the chart shows the last 12 months; the Ext·Mom table uses
+    the whole history for its odds). Wrap in st.cache_data in the app."""
     import yfinance as yf
     try:
-        h = yf.Ticker(ticker).history(period='2y', auto_adjust=False)
+        h = yf.Ticker(ticker).history(period='10y', auto_adjust=False)
         if h is None or h.empty or 'Close' not in h.columns:
             return None
         h = h[['Open', 'High', 'Low', 'Close']].dropna()
