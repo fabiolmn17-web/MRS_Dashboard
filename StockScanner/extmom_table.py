@@ -199,10 +199,6 @@ def render_html(r: dict, ticker: str) -> str:
     read = (f"{EXT_READ[ez]} · trend {MOM_ZONES[mz].lower()}, {'accelerating' if r['steeper'] else 'decelerating'}"
             + ((' · but a ' + PB_BINS[pb].lower() + ' in 5 bars: expect repair, wider swings') if pb > 0 and mz in (2, 3, 4)
                else (' · plus a ' + PB_BINS[pb].lower() + ' in 5 bars') if pb > 0 else ''))
-    stop_pct = (r['sma'] / r['close'] - 1) * 100
-    stop_txt = (f"Stop under the SMA50 = {_s(stop_pct)}% from the close ({abs(r['ext']):.1f} ATR): "
-                + ('size the position for that distance.' if r['ext'] > 0.5 else 'close to the average.')
-                if r['ext'] > 0 else f"Price is {abs(r['ext']):.1f} ATR below the SMA50 ({_s(-stop_pct)}% to reclaim it).")
     zc = lambda txt, col: f'<span style="color:{col};font-weight:600;">{txt}</span>'
     pb_col = '#e5c07b' if pb > 0 else TXT
     rows = [
@@ -222,8 +218,7 @@ def render_html(r: dict, ticker: str) -> str:
          f'<th>{ticker} history, next 21 bars</th><th style="color:{DIM};">Stock panel</th></tr>']
     for name, val, zone, rest in rows:
         h.append(f'<tr><td>{name}</td><td class="v">{val}</td><td class="z">{zone}</td>{rest}</tr>')
-    h.append(f'<tr><td style="color:{HEAD};font-weight:600;">Read</td><td colspan="4">{read}</td></tr>')
-    h.append(f'<tr><td style="color:{HEAD};font-weight:600;">Stop</td><td colspan="4">{stop_txt}</td></tr></table>')
+    h.append(f'<tr><td style="color:{HEAD};font-weight:600;">Read</td><td colspan="4">{read}</td></tr></table>')
     ref_src = 'stock panel = 9 large caps 2005–2026 (study 28 Oct; to be rebuilt on the 501-stock universe)'
     h.append(f'<div style="font-size:0.64rem;color:{DIM};line-height:1.5;margin-top:3px;">'
              f'{ticker} history {yrs} (daily, up to 10 years). {ref_src}. Overlapping days, descriptive; '
