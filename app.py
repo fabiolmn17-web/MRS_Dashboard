@@ -705,6 +705,18 @@ def _extmom_html(ticker):
     return _xm.render_html(r, ticker) if r else ''
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def _extmom_lines(ticker):
+    """Ext·Mom as compact lines for the ticker lookup (same content as the table)."""
+    from StockScanner import extmom_table as _xm
+    h = _chart_history(ticker)
+    try:
+        r = _xm.compute(h, _xm.load_pooled())
+    except Exception:
+        r = None
+    return _xm.render_lines_html(r, ticker) if r else ''
+
+
 def _scan_extmom(ticker):
     if not ticker:
         return
@@ -826,13 +838,12 @@ def _scan_lookup(sd, sec_label, sec_score, leader_hold):
     c_txt, c_ch = st.columns([1.15, 1], gap='medium')
     with c_txt:
         st.markdown('<div style="font-size:0.78rem;color:#c9c1b7;line-height:1.9;margin:2px 0 6px 0;">'
-                    + '<br>'.join(lines) + '</div>', unsafe_allow_html=True)
+                    + '<br>'.join(lines) + _extmom_lines(t) + '</div>', unsafe_allow_html=True)
     h = _chart_history(t)
     if h is not None and len(h) >= 30:
         with c_ch:
             st.plotly_chart(chart_view.figure(h, t, height=360), use_container_width=True,
                             config={'displayModeBar': False, 'scrollZoom': True}, key='lookup_chart')
-    _scan_extmom(t)
     st.markdown('<div style="height:6px;"></div>', unsafe_allow_html=True)
 
 

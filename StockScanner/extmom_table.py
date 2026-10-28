@@ -225,3 +225,44 @@ def render_html(r: dict, ticker: str) -> str:
              f'cells under {MIN_N} days flagged. Zones as the TradingView Ext·Mom v4.3: Above = +0.5 to +5 ATR (a trend state, '
              'not a reversal warning: in the study the left tail did not grow with extension).</div>')
     return ''.join(h)
+
+
+def render_lines_html(r: dict, ticker: str) -> str:
+    """The same content as render_html as compact lines (ticker lookup: sits under the momentum-list checks).
+    Own history first; the pooled stock panel in grey brackets."""
+    if r is None:
+        return ''
+    o, f = r['own'], r['ref'] or {}
+    ez, mz, pb = r['ez'], r['mz'], r['pb']
+    yrs = (f"{o['first'].year}–{o['last'].year}" if o.get('first') is not None else '')
+    B = lambda t: f'<b style="color:{HEAD};">{t}</b>'
+    zc = lambda txt, col: f'<b style="color:{col};">{txt}</b>'
+    ref = lambda t: f' <span style="color:{DIM};">(panel {t})</span>' if f else ''
+    word = 'back above SMA' if r['ext'] < 0 else 'at/below SMA'
+    lines = [
+        f"{B('Extension:')} {r['ext']:+.2f} ATR ({r['ext_sd']:+.2f} σ) · {zc(EXT_ZONES[ez], EXT_COLORS[ez])} — "
+        f"{word} {_p(o['e_x21'])} in 21 · {_p(o['e_x63'])} in 63{_few(o['e_n'])}"
+        + ref(f"{_p(f.get('e_x21'))} · {_p(f.get('e_x63'))}"),
+        f"{B('Momentum:')} {r['slope']:+.2f}% / 5 {'↑' if r['steeper'] else '↓'} · {zc(MOM_ZONES[mz], MOM_COLORS[mz])} — "
+        f"slope still rising {_p(o['m_pos'])}" + ('' if pb > 0 else f" · new 50-bar high {_p(o['m_nh'])}") + _few(o['m_n'])
+        + ref(f"{_p(f.get('m_pos'))}" + ('' if pb > 0 else f" · {_p(f.get('m_nh'))}")),
+        f"{B('Short-term:')} {r['r5']:+.1f}% / 5 · {zc(PB_BINS[pb], '#e5c07b' if pb > 0 else TXT)} — "
+        f"new 50-bar high {_p(o['st_nh'])} · further drawdown {_s(o['st_dd'])}% (n={o['st_n']}){_few(o['st_n'])}"
+        + ref(f"{_p(f.get('st_nh'))} · {_s(f.get('st_dd'))}%" if f else ''),
+    ]
+    if pb > 0:
+        lines.append(f"{B('Swings, 21 sessions:')} bad case {_s(o['st_p10'])}% · good case {_s(o['st_p90'])}% (trend + pullback)"
+                     + _few(o['st_n']) + ref(f"{_s(f.get('st_p10'))}% · {_s(f.get('st_p90'))}%" if f else ''))
+    else:
+        lines.append(f"{B('Swings, 21 sessions:')} bad case {_s(o['e_p10'])}% · good case {_s(o['e_p90'])}% · typical drawdown "
+                     f"{_s(o['m_mae'])}%" + ref(f"{_s(f.get('e_p10'))}% · {_s(f.get('e_p90'))}% · {_s(f.get('m_mae'))}%" if f else ''))
+    read = (f"{EXT_READ[ez]} · trend {MOM_ZONES[mz].lower()}, {'accelerating' if r['steeper'] else 'decelerating'}"
+            + ((' · but a ' + PB_BINS[pb].lower() + ' in 5 bars: expect repair, wider swings') if pb > 0 and mz in (2, 3, 4)
+               else (' · plus a ' + PB_BINS[pb].lower() + ' in 5 bars') if pb > 0 else ''))
+    lines.append(f"{B('Read:')} {read}")
+    head = (f'<div style="margin-top:10px;"><b style="color:{HEAD};">Ext·Mom (SMA50)</b> '
+            f'<span style="color:{DIM};font-size:0.70rem;">{ticker} history {yrs}, next 21 sessions · '
+            f'panel = 9 large caps 2005–2026</span></div>')
+    foot = (f'<div style="font-size:0.66rem;color:{DIM};line-height:1.5;margin-top:2px;">Overlapping days, descriptive; '
+            f'cells under {MIN_N} days flagged. Above = +0.5 to +5 ATR: a trend state, not a reversal warning.</div>')
+    return head + '<br>'.join(lines) + foot
