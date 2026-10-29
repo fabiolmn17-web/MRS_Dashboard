@@ -106,6 +106,13 @@ def main():
     last_bday = pd.bdate_range(end=today - pd.Timedelta(days=1), periods=1)[0]
     print(f'  Last completed session: {last_bday.date()}')
 
+    # Values already stored for the last completed session (daily run or an earlier form entry). When that
+    # session is re-processed, inputs NOT sent by the form keep these values instead of the previous day's
+    # (29 Oct 2026: B20% can now be left to the daily run's S&P 500 calculation).
+    _ex = hist[hist['date'] == last_bday]
+    existing = {c: (float(_ex.iloc[-1][c]) if len(_ex) and c in _ex.columns and pd.notna(_ex.iloc[-1][c]) else np.nan)
+                for c in ('adl_level', 'b20_pct', 'zero_gamma', 'b20_auto')}
+
     if env_override and len(hist) > 0:
         if last_valid >= last_bday:
             # Re-drop the last session so it gets rescored with the new manual inputs
@@ -139,6 +146,7 @@ def main():
         'zero_gamma': last_val('zero_gamma'),
         'pc_ratio':   last_val('pc_ratio'),
     }
+    session_base = {k: v for k, v in existing.items() if k != 'b20_auto' and not np.isnan(v)}
     print(f'  Base carry-forward   : {base_manual}')
 
     # ── CBOE PC ratio ─────────────────────────────────────────────────────────
@@ -178,8 +186,8 @@ def main():
         skew_val = float(skew_s.loc[dt]) if dt in skew_s.index else np.nan
         vol_val  = float(vol_s.loc[dt])  if dt in vol_s.index  else np.nan
 
-        # Merge: base → env override (env wins)
-        manual = {**base_manual, **env_override}
+        # Merge: base → the session's own stored values (re-processed session only) → env override (env wins)
+        manual = {**base_manual, **(session_base if dt == last_bday else {}), **env_override}
 
         # PC priority: value entered in the dashboard (USI:PC close) > CBOE feed > blank.
         # A blank PC scores neutral; the last value is NOT carried forward (stale
@@ -209,6 +217,7 @@ def main():
             'volume':       vol_val,
             'adl_level':    manual['adl_level'],
             'b20_pct':      manual['b20_pct'],
+            'b20_auto':     existing['b20_auto'] if dt == last_bday else np.nan,
             'zero_gamma':   manual['zero_gamma'],
             'pc_ratio':     pc_val,
         })

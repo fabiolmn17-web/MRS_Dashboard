@@ -188,7 +188,7 @@ def _trigger_backfill(gh_token: str, b20: float, adl: float,
     payload = {
         'ref': 'main',
         'inputs': {
-            'b20_pct':    str(b20),
+            'b20_pct':    '' if b20 is None else str(b20),   # '' = keep the daily run's S&P 500 B20%
             'adl_tv':     str(adl),
             'zero_gamma': str(zg),
             'pc_ratio':   str(pc) if pc > 0 else '',
@@ -249,6 +249,39 @@ def load_data() -> pd.DataFrame:
 
 hist = load_data()
 
+# ── Zero gamma shadow: Gamma Live SPY 40-day flip, sent after each close by the Gamma Live PC ──────────────────
+GAMMA_SHADOW_PATH = Path(__file__).parent / 'gamma_shadow.csv'
+GAMMA_SHADOW_URL = 'https://raw.githubusercontent.com/fabiolmn17-web/MRS_Dashboard/main/gamma_shadow.csv'
+
+@st.cache_data(ttl=60)
+def load_gamma_shadow() -> pd.DataFrame:
+    """date, spy_close, zg40_next (40-day flip without the expiring contracts = the next session's map), zg40_close
+    (as Gamma Live showed it at the close), zg3_next, net40_next_bn. Shadow only: not used in the MRS score."""
+    for src in ([] if os.environ.get('MRS_LOCAL_DATA') == '1' else [GAMMA_SHADOW_URL]) + [GAMMA_SHADOW_PATH]:
+        try:
+            g = pd.read_csv(src, parse_dates=['date'])
+            if len(g):
+                return g.sort_values('date').drop_duplicates('date', keep='last').reset_index(drop=True)
+        except Exception:
+            continue
+    return pd.DataFrame()
+
+def gamma_shadow_table(h: pd.DataFrame, g: pd.DataFrame) -> pd.DataFrame:
+    """Per session: InsiderFinance SPX zero gamma (the one scored) vs Gamma Live 40d in SPX points (× SPX/SPY
+    of that session), with the gamma state each would give."""
+    if g is None or g.empty:
+        return pd.DataFrame()
+    m = g.merge(h[['date', 'spx', 'spy', 'zero_gamma']], on='date', how='left')
+    ratio = (m['spx'] / m['spy']).where(m['spy'] > 0)
+    m['gl_spx'] = m['zg40_next'] * ratio
+    _st = lambda a, b: (str(pipeline.score_gamma(a, b)[1]).replace(' Gamma', '')
+                        if pd.notna(a) and pd.notna(b) else '—')
+    m['if_state'] = [_st(a, b) for a, b in zip(m['spx'], m['zero_gamma'])]
+    m['gl_state'] = [_st(a, b) for a, b in zip(m['spx'], m['gl_spx'])]
+    return m
+
+gshadow = load_gamma_shadow()
+
 def _last_val(col, default=np.nan):
     """Return most recent non-NaN value from hist for a column."""
     if col not in hist.columns:
@@ -279,8 +312,14 @@ with st.sidebar:
     _def_adl = float(_qp['adl']) if 'adl' in _qp else _last_val('adl_level',  1_827_000.0) / 1000.0
     _def_zg  = float(_qp['zg'])  if 'zg'  in _qp else _last_val('zero_gamma', 7_400.0)
 
+    _b20_auto_last = _last_val('b20_auto')
     with st.form('daily_inputs_form'):
-        inp_b20 = st.number_input('B20% (S5TW)',            min_value=0.0,  max_value=100.0,
+        inp_b20_auto = st.checkbox('B20%: automatic (full S&P 500, daily run)', value=True,
+                                   help='The daily run computes B20% from all S&P 500 stocks (the scanner universe), the '
+                                        'same definition as S5TW. Untick to enter the TradingView S5TW value instead. '
+                                        + (f'Last automatic value: {_b20_auto_last:.2f}%.' if _b20_auto_last == _b20_auto_last
+                                           else 'No automatic value stored yet (first run after this update).'))
+        inp_b20 = st.number_input('B20% (S5TW) — only if unticked', min_value=0.0,  max_value=100.0,
                                    value=round(_def_b20, 2), step=0.01)
         inp_adl = st.number_input('ADL (TradingView x1000)', value=round(_def_adl, 2), step=0.01)
         inp_zg  = st.number_input('Zero Gamma (SPX level)',  value=round(_def_zg, 2),  step=1.0)
@@ -299,9 +338,9 @@ with st.sidebar:
     if submitted:
         # ── Input validation ───────────────────────────────────────────────────
         _errors = []
-        if inp_b20 <= 0:
+        if not inp_b20_auto and inp_b20 <= 0:
             _errors.append('B20% must be > 0.')
-        if inp_b20 > 100:
+        if not inp_b20_auto and inp_b20 > 100:
             _errors.append('B20% must be <= 100.')
         if inp_adl < 100 or inp_adl > 10_000:
             _errors.append(f'ADL {inp_adl:.0f} looks wrong (expected 500–5000 range).')
@@ -312,7 +351,11 @@ with st.sidebar:
         # Guard against re-submitting the pre-filled (previous) values: on 23 Oct 2026 a second submit with the
         # form defaults overwrote the B20% / ADL / zero gamma entered a minute earlier for 22 Oct.
         _prev_b20, _prev_adl = _last_val('b20_pct'), _last_val('adl_level')
-        if (not inp_same_ok and _prev_b20 == _prev_b20 and _prev_adl == _prev_adl
+        if inp_b20_auto:                        # B20% is not typed: guard on ADL alone
+            if not inp_same_ok and _prev_adl == _prev_adl and abs(inp_adl * 1000 - _prev_adl) < 1e-3:
+                _errors.append(f'ADL {inp_adl:.2f} is the same as the last stored session. Enter today\'s value, '
+                               'or tick "Same B20% and ADL ..." if this is intended.')
+        elif (not inp_same_ok and _prev_b20 == _prev_b20 and _prev_adl == _prev_adl
                 and abs(inp_b20 - _prev_b20) < 1e-6 and abs(inp_adl * 1000 - _prev_adl) < 1e-3):
             _errors.append(f'B20% {inp_b20:.2f} and ADL {inp_adl:.2f} are the same as the last stored session. '
                            'Enter today\'s values, or tick "Same B20% and ADL ..." if this is intended.')
@@ -326,17 +369,18 @@ with st.sidebar:
                 st.sidebar.error('GITHUB_TOKEN not in Streamlit secrets.')
             else:
                 # Persist in URL params (survives reload) + session_state (live preview)
-                st.query_params['b20'] = str(inp_b20)
+                if not inp_b20_auto:
+                    st.query_params['b20'] = str(inp_b20)
                 st.query_params['adl'] = str(inp_adl)
                 st.query_params['zg']  = str(inp_zg)
                 if inp_pc > 0:
                     st.query_params['pc'] = str(inp_pc)
-                st.session_state['pending_b20']  = inp_b20
+                st.session_state['pending_b20']  = None if inp_b20_auto else inp_b20
                 st.session_state['pending_adl']  = inp_adl * 1000  # ×1000 → CSV scale
                 st.session_state['pending_zg']   = inp_zg
                 st.session_state['pending_pc']   = inp_pc
                 st.session_state['pending_date'] = _today.strftime('%Y-%m-%d')
-                ok = _trigger_backfill(gh_token, inp_b20, inp_adl, inp_zg, inp_pc)
+                ok = _trigger_backfill(gh_token, None if inp_b20_auto else inp_b20, inp_adl, inp_zg, inp_pc)
                 if ok:
                     st.sidebar.success(
                         f'Update triggered for {_today.strftime("%b %d")}.\n'
@@ -354,6 +398,21 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
     st.sidebar.caption('Clears cache and reloads CSV from disk.')
+
+    # ── Zero gamma: InsiderFinance (scored) vs Gamma Live 40d (shadow) ────────────────────────────────────────
+    _gst = gamma_shadow_table(hist, gshadow)
+    if len(_gst):
+        with st.sidebar.expander('Zero gamma: InsiderFinance vs Gamma Live (shadow)'):
+            _v = _gst.dropna(subset=['gl_spx']).tail(12)
+            _agree = (_v['if_state'] == _v['gl_state']).sum()
+            st.caption(f'Gamma Live = SPY 40-day flip without the expiring contracts, × SPX/SPY of the session. '
+                       f'Not used in the score. Same gamma state on {_agree} of {len(_v)} sessions shown.')
+            st.dataframe(pd.DataFrame({
+                'Date': _v['date'].dt.strftime('%d %b'),
+                'IF': _v['zero_gamma'].map(lambda x: f'{x:,.0f}' if pd.notna(x) else '—'),
+                'GL': _v['gl_spx'].map(lambda x: f'{x:,.0f}'),
+                'IF state': _v['if_state'], 'GL state': _v['gl_state'],
+            }).iloc[::-1], hide_index=True, use_container_width=True)
 complete = hist.dropna(subset=['vix', 'mrs_score'])
 last     = complete.iloc[-1].to_dict() if len(complete) else hist.iloc[-1].to_dict()
 last_dt  = pd.Timestamp(last['date'])
@@ -389,7 +448,8 @@ if pd.isna(last.get('skew', np.nan)) and 'skew' in hist.columns:
 # ── Live preview: overlay today's submitted inputs ────────────────────────────
 _preview_active = False
 if st.session_state.get('pending_date') == date.today().strftime('%Y-%m-%d'):
-    last['b20_pct']    = st.session_state['pending_b20']
+    if st.session_state.get('pending_b20') is not None:
+        last['b20_pct'] = st.session_state['pending_b20']
     last['adl_level']  = st.session_state['pending_adl']
     last['zero_gamma'] = st.session_state['pending_zg']
     _pc_sub = st.session_state['pending_pc']
@@ -610,10 +670,22 @@ elif _deep == 'DEEP RISK-ON':
     _deep_line = (f'DEEP RISK-ON (score ≥ P90 = {ctx["p90"]:+.2f}). Historically a calm path with shallow drawdowns, '
                   'but no reliable edge in returns. Exploratory, v3.0 scoring.')
 
+def _gl_header() -> dict:
+    """Shadow zero gamma (Gamma Live 40d, SPX points) for the header, only when it is for the session shown."""
+    try:
+        _t = gamma_shadow_table(hist, gshadow)
+        _r = _t[_t['date'] == last_dt]
+        if len(_r) and pd.notna(_r['gl_spx'].iloc[0]):
+            return {'Zero γ GL': f"{_r['gl_spx'].iloc[0]:,.0f} (shadow)"}
+    except Exception:
+        pass
+    return {}
+
 st.markdown(market_state.decision_strip_html(
     mrs, reg, rcol, dur, f"{_ordinal(int(round(ctx['percentile'])))} percentile since {ctx['start'].year}",
     sq_lbl, sq_col, sq_desc, _mom_light, _bp, _leaders,
-    {'VIX': _f('vix', '{:.2f}'), 'SPX': _f('spx', '{:,.0f}'), 'Zero γ': _f('zero_gamma', '{:,.0f}')},
+    {'VIX': _f('vix', '{:.2f}'), 'SPX': _f('spx', '{:,.0f}'), 'Zero γ': _f('zero_gamma', '{:,.0f}'),
+     **_gl_header()},
     _changes, _deep_line, 'Data as of: ' + ' · '.join(_fresh)), unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════

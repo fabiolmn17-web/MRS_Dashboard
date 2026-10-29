@@ -1,5 +1,6 @@
 """
 auto_fetch.py — Automatic data fetching for the three previously-manual inputs
+(29 Oct 2026: B20% now from the full S&P 500, the scanner universe; see fetch_b20)
 """
 import re
 import warnings
@@ -123,6 +124,37 @@ _SP500_SAMPLE = [
 ]
 
 def fetch_b20() -> float:
+    """B20% = share of the S&P 500 closing above its 20-day SMA (the S5TW definition), on the latest session.
+    Uses the scanner's own universe (StockScanner: GitHub datasets list, Wikipedia, static fallback) and the
+    scanner's batch download. Falls back to the old 100-stock sample if that fails or covers < 400 stocks."""
+    try:
+        from StockScanner.data.universe import get_universe
+        from StockScanner.scanner import _batch_download
+        tickers = get_universe()._fetch_sp500()
+        print(f'  B20: computing from the S&P 500 universe ({len(tickers)} tickers)...')
+        data = _batch_download(tickers, 45, 100, print)
+        last = pd.Series({t: df.index.max() for t, df in data.items() if len(df)})
+        if last.empty:
+            raise RuntimeError('no price data')
+        session = last.mode().iloc[0]                      # the session most stocks have as their last bar
+        above = valid = 0
+        for t, df in data.items():
+            c = df['Close'].dropna()
+            if len(c) < 21 or c.index.max() != session:
+                continue
+            valid += 1
+            above += int(c.iloc[-1] > c.rolling(20).mean().iloc[-1])
+        if valid < 400:
+            raise RuntimeError(f'only {valid} stocks with a bar on {session.date()}')
+        pct = round(above / valid * 100, 2)
+        print(f'  B20: {pct:.2f}% ({above}/{valid} S&P 500 stocks above their 20-day SMA on {session.date()})')
+        return pct
+    except Exception as e:
+        print(f'  [WARN] B20 from the S&P 500 universe failed ({e}) - using the 100-stock sample.')
+        return _fetch_b20_sample()
+
+
+def _fetch_b20_sample() -> float:
     try:
         print(f'  B20: computing from {len(_SP500_SAMPLE)}-stock S&P 500 sample...')
         above = 0
@@ -232,6 +264,7 @@ def build_inp_map(hist: pd.DataFrame) -> dict:
         today_ts: {
             'adl_level':  adl_today,
             'b20_pct':    b20_today,
+            'b20_auto':   b20_today,
             'zero_gamma': zg,
             'pc_ratio':   pc_today,
             'skew':       skew_today,

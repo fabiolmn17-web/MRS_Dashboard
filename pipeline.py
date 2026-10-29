@@ -90,7 +90,8 @@ HIST_COLS = [
     'vix_state', 'ext_state', 'mom_state',
     'adl_state', 'b20_state', 'pc_state', 'skew_state', 'gamma_state',
     'vol_state',
-    'mrs_score'
+    'mrs_score',
+    'b20_auto',          # B20% computed by the daily run from the full S&P 500 (kept even when B20% is entered by hand)
 ]
 
 
@@ -801,6 +802,7 @@ def update_history(hist: pd.DataFrame, inp_map: dict) -> pd.DataFrame:
 
         row['adl_level']    = m['adl_level']
         row['b20_pct']      = m['b20_pct']
+        row['b20_auto']     = m.get('b20_auto', np.nan)
         row['zero_gamma']   = m['zero_gamma']
         row['spike_flag']   = 0
         row['compressed']   = 0
