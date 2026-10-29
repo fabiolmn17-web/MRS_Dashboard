@@ -1,0 +1,48 @@
+name: Gamma Live zero gamma (shadow)
+
+# Triggered after each close by Gamma Live on the trading PC (gamma_live/mrs_push.py).
+# Stores the SPY 40-day zero gamma in gamma_shadow.csv. Shadow only: the MRS score still uses zero_gamma.
+
+on:
+  workflow_dispatch:
+    inputs:
+      date:        {description: 'Session date YYYY-MM-DD', required: true}
+      spy_close:   {description: 'SPY close', required: false, default: ''}
+      zg40_next:   {description: 'SPY 40d zero gamma without the expiring contracts', required: false, default: ''}
+      zg40_close:  {description: 'SPY 40d zero gamma as shown at the close', required: false, default: ''}
+      zg3_next:    {description: 'SPY zero gamma, next 3 expiries', required: false, default: ''}
+      net40_bn:    {description: 'SPY 40d net GEX, $bn per 1%', required: false, default: ''}
+
+concurrency:
+  group: mrs-history-commits
+  cancel-in-progress: false
+
+jobs:
+  store:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Install pandas
+        run: pip install pandas
+      - name: Store the values
+        env:
+          GL_DATE:       ${{ inputs.date }}
+          GL_SPY_CLOSE:  ${{ inputs.spy_close }}
+          GL_ZG40_NEXT:  ${{ inputs.zg40_next }}
+          GL_ZG40_CLOSE: ${{ inputs.zg40_close }}
+          GL_ZG3_NEXT:   ${{ inputs.zg3_next }}
+          GL_NET40_BN:   ${{ inputs.net40_bn }}
+        run: python gamma_shadow.py
+      - name: Commit gamma_shadow.csv
+        run: |
+          git config user.name  "MRS Bot"
+          git config user.email "mrs-bot@epistruct.com"
+          git add gamma_shadow.csv
+          git diff --staged --quiet && exit 0
+          git commit -m "gamma shadow ${{ inputs.date }}"
+          for i in 1 2 3; do git pull --rebase && git push && exit 0; sleep 10; done
+          exit 1
