@@ -736,6 +736,12 @@ def _chart_history(ticker):
     return chart_view.fetch(ticker)
 
 
+# zoom like Gamma Live: box-drag and mouse wheel zoom, double-click = full view; the time window carries over when you
+# switch tickers (chart_view.show)
+_CHART_CFG = {'displayModeBar': True, 'displaylogo': False, 'scrollZoom': True,
+              'modeBarButtonsToRemove': ['lasso2d', 'select2d', 'autoScale2d', 'toImage']}
+
+
 def _scan_chart_panel(tickers):
     t = st.session_state.get('scan_pick')
     if not t or t not in tickers:
@@ -758,11 +764,11 @@ def _scan_chart_panel(tickers):
         f'vs SMA 50 <b style="color:#e8dccb;">{_d(lv["sma50"])}</b> · vs SMA 200 <b style="color:#b9805a;">{_d(lv["sma200"])}</b>'
         f' · vs 52W high <b style="color:#e3b48e;">{_d(lv["hi52"])}</b> · vs 20D high <b style="color:#9b958f;">{_d(lv["hi20"])}</b></div>',
         unsafe_allow_html=True)
-    st.plotly_chart(chart_view.figure(h, t, height=520), use_container_width=True,
-                    config={'displayModeBar': False, 'scrollZoom': True}, key='scan_chart')
+    chart_view.show(st, components, chart_view.figure(h, t, height=520), 'scan_chart', _CHART_CFG)
     st.markdown('<div style="font-size:0.66rem;color:#9b958f;">Daily, last 12 months. SMA 50 / 200; 52W high = highest '
                 'high of the last 252 sessions; 20D high = highest high of the 20 sessions before today. Click a row '
-                'in the table to switch.</div>', unsafe_allow_html=True)
+                'in the table (or use the ↑ / ↓ keys) to switch; drag a box or use the mouse wheel to zoom, double-click '
+                'for the full 12 months. The zoom is kept when you switch tickers.</div>', unsafe_allow_html=True)
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -914,8 +920,7 @@ def _scan_lookup(sd, sec_label, sec_score, leader_hold):
     h = _chart_history(t)
     if h is not None and len(h) >= 30:
         with c_ch:
-            st.plotly_chart(chart_view.figure(h, t, height=360), use_container_width=True,
-                            config={'displayModeBar': False, 'scrollZoom': True}, key='lookup_chart')
+            chart_view.show(st, components, chart_view.figure(h, t, height=360), 'lookup_chart', _CHART_CFG)
     st.markdown('<div style="height:6px;"></div>', unsafe_allow_html=True)
 
 

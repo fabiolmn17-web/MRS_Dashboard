@@ -2,7 +2,9 @@
 <html><head><meta charset="utf-8">
 <!-- Scanner table as a two-way Streamlit component: clicking a row sends the ticker back to the app
      (drives the chart panel). Plain HTML, no build step: speaks the Streamlit component message protocol. -->
-<style>html,body{margin:0;padding:0;background:transparent;} #root{height:100%;overflow:auto;}</style>
+<style>html,body{margin:0;padding:0;background:transparent;} #root{height:100%;overflow:hidden;}
+/* the table scrolls inside .wrap, so the header row (sticky th) stays frozen at the top */
+#root .wrap{height:100%;overflow:auto;} #root th{z-index:3;} #root th:first-child,#root td:first-child{position:sticky;left:0;z-index:2;} #root th:first-child{z-index:4;}</style>
 </head><body><div id="root"></div>
 <script>
 function send(type, data) { window.parent.postMessage(Object.assign({isStreamlitMessage: true, type: type}, data || {}), '*'); }
@@ -27,11 +29,49 @@ function mark(t) {
   if (!t) return;
   var r = document.querySelector('tr[data-t="' + t + '"]'); if (r) r.classList.add('sel');
 }
+var armed = false, timer = null, lastPick = 0;
+function pick(t, now) {                       // highlight at once; tell the app after a short pause (one rerun per burst)
+  selected = t; mark(selected); lastPick = Date.now();
+  clearTimeout(timer);
+  timer = setTimeout(function () { send('streamlit:setComponentValue', {value: selected, dataType: 'json'}); }, now ? 0 : 220);
+}
 document.addEventListener('click', function (e) {
   var tr = e.target.closest('tr[data-t]'); if (!tr) return;
-  selected = tr.dataset.t; mark(selected);
-  send('streamlit:setComponentValue', {value: selected, dataType: 'json'});
+  armed = true; pick(tr.dataset.t, true);
 });
+// ↑ / ↓ move the selection (and the chart) one row, in the table's current sort order. Active once you have clicked a
+// row or while the mouse is over the table; a click elsewhere on the page or Esc switches it off.
+function onKey(e) {
+  if (e.key === 'Escape') { armed = false; return; }
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+  if (!armed) return;
+  var tg = e.target || {}, tag = (tg.tagName || '').toUpperCase();
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tg.isContentEditable) return;
+  var rows = Array.from(document.querySelectorAll('#mt tbody tr[data-t]'));
+  if (!rows.length) return;
+  var i = rows.findIndex(function (r) { return r.dataset.t === selected; });
+  var j = i < 0 ? 0 : Math.max(0, Math.min(rows.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)));
+  e.preventDefault();
+  if (j === i) return;
+  var w = document.querySelector('#root .wrap'), r = rows[j], th = document.querySelector('#mt thead');
+  if (w) {                                     // keep the row in view inside the table only (never scroll the page)
+    var top = r.offsetTop - (th ? th.offsetHeight : 0), bot = r.offsetTop + r.offsetHeight;
+    if (top < w.scrollTop) w.scrollTop = top; else if (bot > w.scrollTop + w.clientHeight) w.scrollTop = bot - w.clientHeight;
+  }
+  pick(rows[j].dataset.t, false);
+}
+document.addEventListener('keydown', onKey);
+document.addEventListener('mouseenter', function () { armed = true; });
+document.getElementById('root').addEventListener('mouseenter', function () { armed = true; });
+try {                                          // also when the keyboard focus is on the main page
+  var PD = window.parent.document;
+  if (window.parent.__mrsScanKey) { PD.removeEventListener('keydown', window.parent.__mrsScanKey, true); }
+  if (window.parent.__mrsScanDown) { PD.removeEventListener('mousedown', window.parent.__mrsScanDown, true); }
+  window.parent.__mrsScanKey = function (e) { try { onKey(e); } catch (x) {} };
+  window.parent.__mrsScanDown = function (e) { if (!(e.target && e.target.closest && e.target.closest('.js-plotly-plot'))) armed = false; };
+  PD.addEventListener('keydown', window.parent.__mrsScanKey, true);
+  PD.addEventListener('mousedown', window.parent.__mrsScanDown, true);
+} catch (x) {}
 window.addEventListener('message', function (e) {
   if (!e.data || e.data.type !== 'streamlit:render') return;
   var args = e.data.args || {};
@@ -39,7 +79,8 @@ window.addEventListener('message', function (e) {
     lastHtml = args.html; _c = -1;
     document.getElementById('root').innerHTML = args.html;
   }
-  if (args.selected && args.selected !== selected) { selected = args.selected; }
+  // the app echoes the selection back; ignore an older echo while a click / key press is still on its way
+  if (args.selected && args.selected !== selected && Date.now() - lastPick > 2500) { selected = args.selected; }
   mark(selected);
   height = args.height || height;
   document.getElementById('root').style.height = height + 'px';
