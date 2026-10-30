@@ -236,8 +236,23 @@ def fetch_skew() -> float:
         return np.nan
 
 # ── Build inp_map for a single "today" row ─────────────────────────────────────
+def _session_date() -> pd.Timestamp:
+    """The US session this run belongs to. The scheduled 21:30 UTC run often starts hours late (after 00:00 UTC), when
+    the runner's UTC date is already the next day, so the inputs were stamped with a date that has no row yet and the
+    new session got none of them. Use New York time instead: before 16:00 ET = the previous weekday."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    now = datetime.now(ZoneInfo('America/New_York'))
+    d = now.date()
+    if now.hour < 16:
+        d -= timedelta(days=1)
+    while d.weekday() >= 5:
+        d -= timedelta(days=1)
+    return pd.Timestamp(d)
+
+
 def build_inp_map(hist: pd.DataFrame) -> dict:
-    today_ts = pd.Timestamp(date.today())
+    today_ts = _session_date()
     print('\n=== Auto-fetching manual inputs ===')
 
     zg = fetch_zero_gamma()
