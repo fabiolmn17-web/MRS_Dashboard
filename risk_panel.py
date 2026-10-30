@@ -3,7 +3,8 @@ risk_panel.py — "Risk today" panel (MRS v5, 30 Oct 2026)
 ==========================================================
 Desk lines built on studies/mrs_risk_control (steps 1-4) and studies/model_portfolio. Nothing here changes the score.
 
-  Pedal           PRESS: SPY > 1 ATR below its 50-day SMA (upside beyond the VIX level: Tested)
+  Pedal           REBOUND WINDOW (key 'PRESS'): SPY > 1 ATR below its 50-day SMA (upside beyond the VIX level: Tested;
+                  step 5: mechanical support signals did not improve the path and gave up upside; no high-beta excess)
                   EASE OFF: RISK-OFF and SPY below its close of a year ago (fast drops 1 in 3; Tested vs other days)
                   NORMAL: everything else
   Today's cell    20-session distribution of SPY since May 2008 for today's state
@@ -142,8 +143,27 @@ def vol_guide(close: pd.Series, target: float = 0.10, cap: float = 0.60):
     return float(rv), float(min(cap, target / rv)) if rv > 0 else cap
 
 
+def sell_off_episode(ext_atr: pd.Series):
+    """Sell-off episode as in step 5: starts on a day > 1 ATR below the 50-day with none in the previous 20 sessions,
+    runs until 20 sessions after its last such day. -> (day number of today in the episode or None, start date)."""
+    x = (ext_atr.dropna() < -1).values
+    idx = ext_atr.dropna().index
+    n = len(x)
+    recent = [j for j in range(max(0, n - 21), n) if x[j]]
+    if not recent:
+        return None, None
+    j = recent[-1]
+    while True:   # walk back to the episode start
+        prev = [k for k in range(max(0, j - 20), j) if x[k]]
+        if not prev:
+            break
+        j = prev[0]
+    return n - j, idx[j]
+
+
 def snapshot(d: pd.DataFrame, rho: float, neff: float, vix: float, vix3m: float, cost_hist: pd.Series) -> dict:
     """Everything the panel and the forward log need, for the last session in d."""
+    ep_day, ep_start = sell_off_episode(d['ext_atr'])
     last = d.dropna(subset=['bandg', 'ext']).iloc[-1]
     bg, tr, ex = last['bandg'], last['trend'], last['ext']
     cs = cell_stats(d, bg, tr, ex)
@@ -152,7 +172,7 @@ def snapshot(d: pd.DataFrame, rho: float, neff: float, vix: float, vix3m: float,
     rv, inv = vol_guide(d['close'])
     return dict(date=d.index[-1], band=last['band'], bandg=bg, trend=tr, ext=ex, ext_atr=float(last['ext_atr']),
                 r12=float(last['r12']) if _fin(last.get('r12')) else np.nan,
-                pedal=pedal(bg, tr, ex), cell=cs, rho=rho, neff=neff, inverted=bool(_fin(vix) and _fin(vix3m) and vix > vix3m),
+                pedal=pedal(bg, tr, ex), ep_day=ep_day, ep_start=ep_start, cell=cs, rho=rho, neff=neff, inverted=bool(_fin(vix) and _fin(vix3m) and vix > vix3m),
                 vix=vix, vix3m=vix3m, cost=cost, cost_pct=pct, rv=rv, invested=inv)
 
 
@@ -273,7 +293,7 @@ GRAD = f'{TEAL} 0%,#5b5148 50%,{ORANGE} 100%'
 
 
 def _atr_gauge(ext_atr: float, lo=-3.0, hi=3.0) -> str:
-    """SPY vs its 50-day in ATR; the PRESS zone (below -1 ATR) shaded."""
+    """SPY vs its 50-day in ATR; the rebound-window zone (below -1 ATR) shaded."""
     z = _x(-1, lo, hi)
     g = (f'<div style="position:relative;height:14px;border-radius:4px;background:#1c1a18;margin-top:8px;">'
          f'<div style="position:absolute;left:0;width:{z:.1f}%;top:0;bottom:0;background:rgba(133,202,197,0.30);border-radius:4px 0 0 4px;"></div>'
@@ -284,22 +304,26 @@ def _atr_gauge(ext_atr: float, lo=-3.0, hi=3.0) -> str:
               f'border-left:7px solid transparent;border-right:7px solid transparent;border-top:9px solid {INK};"></div>'
               f'<div style="position:absolute;left:{xv:.1f}%;top:-2px;bottom:-2px;width:3px;margin-left:-1px;background:{INK};"></div>')
     g += '</div><div style="position:relative;height:14px;font-size:0.66rem;color:#8a8279;">'
-    g += (f'<span style="position:absolute;left:{z / 2:.1f}%;transform:translateX(-50%);top:2px;color:{TEAL};">PRESS zone</span>'
+    g += (f'<span style="position:absolute;left:{z / 2:.1f}%;transform:translateX(-50%);top:2px;color:{TEAL};">rebound window</span>'
           f'<span style="position:absolute;left:{_x(0, lo, hi):.1f}%;transform:translateX(-50%);top:2px;">50-day</span>'
           f'<span style="position:absolute;right:0;top:2px;">+3 ATR</span>')
     return g + '</div>'
 
 
+PEDAL_NAME = {'PRESS': 'REBOUND WINDOW', 'NORMAL': 'NORMAL', 'EASE OFF': 'EASE OFF'}   # 'PRESS' kept as the log key
 PEDAL_TXT = {
-    'PRESS': ('More upside than the VIX implies.',
-              'After sell-offs like this, SPY gained 5% or more within 20 sessions 38–41% of the time, vs about 20% '
-              'expected from the VIX level. <b>Take your A-setups at full planned risk.</b> Fast drops of 7% or more still '
-              'came in 28% of cases: <b>every stop stands.</b>', 'Tested'),
+    'PRESS': ('Wide upside, not more exposure.',
+              '<b>Take long A-setups at a level that holds, at your normal planned risk. No extra exposure without a setup; '
+              'every stop stands.</b><div class="sub" style="margin-top:5px;">From day 1 of a sell-off like this: SPY +5% or '
+              'more within 20 sessions in 27% of episodes (all days 12%), more than the VIX implies. Further drop of 3% in 40%, '
+              '7% in 17%. Waiting for a mechanical support signal (back above −1 ATR, a higher low, VIX falling) did not cut '
+              'the further drop and gave up about half of that upside. High-beta industries did not rebound harder.</div>',
+              'Tested'),
     'EASE OFF': ('Worst balance of upside vs downside.',
                  'Fast drops of 7% or more in 1 of 3 cases; industries move together (5 positions ≈ 1.5 bets). '
                  '<b>Fewer positions, partials sooner.</b> Protection has roughly paid for itself here.', 'Tested'),
     'NORMAL': ('No edge from the state in either direction.',
-               'Normal process: <b>A-setups, 1% risk, your rules.</b>', None),
+               'Normal process: <b>A-setups, normal planned risk, your rules.</b>', None),
 }
 PEDAL_COL = {'PRESS': TEAL, 'NORMAL': '#cfc6bb', 'EASE OFF': ORANGE}
 
@@ -322,19 +346,22 @@ def panel_html(snap: dict) -> str:
     p = snap['pedal']; col = PEDAL_COL[p]
     head, body, evk = PEDAL_TXT[p]
     segs = ''.join(f'<div style="background:{PEDAL_COL[k] if k == p else "#24211e"};"></div>' for k in ('EASE OFF', 'NORMAL', 'PRESS'))
-    seg_lbl = ''.join(f'<span style="flex:1;text-align:center;color:{PEDAL_COL[k] if k == p else DIM};font-weight:{700 if k == p else 400};">{k}</span>'
+    seg_lbl = ''.join(f'<span style="flex:1;text-align:center;color:{PEDAL_COL[k] if k == p else DIM};font-weight:{700 if k == p else 400};">{PEDAL_NAME[k]}</span>'
                       for k in ('EASE OFF', 'NORMAL', 'PRESS'))
+    ep = snap.get('ep_day')
+    ep_txt = (f' Sell-off episode: <b style="color:{INK};">day {ep}</b> (started {pd.Timestamp(snap["ep_start"]):%d %b}).'
+              if ep else '')
     h = CSS + '<div class="rp"><div class="k">Risk today · how much risk the book can carry</div><div class="grid">'
     # 1. Pedal
     r12 = snap.get('r12')
     ease_txt = (f'EASE OFF needs RISK-OFF <b>and</b> SPY below its level of a year ago '
                 f'(now {_pct(r12)} over 12 months).' if _fin(r12) else 'EASE OFF needs RISK-OFF and SPY below its level of a year ago.')
     h += (f'<div class="tile"><div class="lab">Pedal {_ev(evk) if evk else ""}</div>'
-          f'<div class="big" style="color:{col};">{p}</div>'
+          f'<div class="big" style="color:{col};">{PEDAL_NAME[p]}</div>'
           f'<div class="seg">{segs}</div><div style="display:flex;font-size:0.66rem;letter-spacing:0.05em;margin-top:-4px;">{seg_lbl}</div>'
           f'<div class="act"><b>{head}</b> {body}</div>'
           f'<div class="sub" style="margin-top:2px;">SPY vs its 50-day: <b class="num" style="color:{INK};">{snap["ext_atr"]:+.2f} ATR</b>. '
-          f'PRESS below −1 ATR.</div>{_atr_gauge(snap["ext_atr"])}'
+          f'Rebound window below −1 ATR.{ep_txt}</div>{_atr_gauge(snap["ext_atr"])}'
           f'<div class="sub">{ease_txt}</div></div>')
     # 2. Today's state
     cs = snap['cell']; c, a = cs['cell'], cs['all']
