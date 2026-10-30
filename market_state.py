@@ -30,12 +30,15 @@ EVIDENCE = {
 }
 
 BAND_ACTION = {
-    'RISK-ON':       'Smallest swings both ways: normal size, but do not expect big runs.',
-    'MILD RISK-ON':  'Fairly calm: normal size.',
-    'NEUTRAL':       'Middle of the range: normal size.',
-    'MILD RISK-OFF': 'Swings widening: trim initial size a little.',
-    'RISK-OFF':      'Widest swings both ways: small initial risk, cut fast if wrong, give winners room.',
+    'RISK-ON':       '<b>Small swings both ways.</b> Normal size. Big runs are rare: take profits at your targets.',
+    'MILD RISK-ON':  '<b>Fairly calm.</b> Normal size.',
+    'NEUTRAL':       '<b>Average swings.</b> Normal size.',
+    'MILD RISK-OFF': '<b>Swings widening both ways.</b> Your stop stays where the setup is wrong; if it is hit, you are out.',
+    'RISK-OFF':      ('<b>Widest swings, up and down.</b> No extra room for the stop: it sits where the setup is wrong, '
+                      'and if it is hit you are out. Time the entry well and the upside is large: let winners run. '
+                      '<b>Not a sell signal.</b>'),
 }
+REGIME_SUB = 'The MRS tells you how wide the next weeks can be, not which way.'
 
 COMMODITY = 'SLX, COPX, XME, GDX, LIT, URA'
 
@@ -193,8 +196,12 @@ def leaders_html(short: pd.DataFrame, light: dict, hold_df: pd.DataFrame = None,
                  dropped: pd.DataFrame = None) -> str:
     h = CSS + '<div class="ld"><div class="hdr"><span class="ttl">Leaders to buy — industries first</span>'
     h += light_html(light)
+    lead_note = ('<div class="note" style="font-size:0.78rem;color:#e8dccb;margin:-2px 0 6px 0;">Where to look first for longs, '
+                 'not a basket to hold. Industry leaders keep a small edge vs SPY, but holding them as a group did not beat '
+                 'SPY in our 2008–2026 replay.</div>')
     h += (f'<span class="sub" style="color:#a89f95;font-size:0.76rem;">'
           f'{"Normal size on leaders." if light["on"] else "Smaller size and faster exits on leaders."}</span></div>')
+    h += lead_note
     if short is None or len(short) == 0:
         h += ('<div class="note" style="font-size:0.78rem;">No industry ETF passes the filter today '
               '(structural leader with RS 1M not negative, or outperforming and improving).</div></div>')
@@ -292,7 +299,8 @@ def decision_strip_html(mrs: float, band: str, band_col: str, sessions: int, pct
     h += '<div class="top">'
     h += f'<div><div class="lab">MRS score</div><div class="big" style="color:{band_col};">{mrs:+.2f}</div><div class="sm">{_e(pct_txt)}</div></div>'
     h += (f'<div><div class="lab">Regime</div><div class="reg" style="color:{band_col};">{_e(band)}</div>'
-          f'<div class="sm">{sessions} consecutive session{"s" if sessions != 1 else ""}</div></div>')
+          f'<div class="sm">{sessions} consecutive session{"s" if sessions != 1 else ""}</div>'
+          f'<div class="sm" style="color:#e8dccb;font-style:italic;margin-top:3px;max-width:230px;">{REGIME_SUB}</div></div>')
     h += (f'<div><div class="lab">Signal quality</div>{chip(sq_lbl, sq_col, True, sq_desc)}'
           f'<div class="sm" style="margin-top:4px;" title="{_e(sq_desc)}">{_e(sq_desc[:150])}{"…" if len(sq_desc) > 150 else ""}</div></div>')
     h += ('<div class="lv">' + '<br>'.join(f'<span style="color:#a89f95;">{_e(k)}</span> {_e(v)}' for k, v in levels.items()) + '</div>')
@@ -315,5 +323,73 @@ def decision_strip_html(mrs: float, band: str, band_col: str, sessions: int, pct
     h += '</div></div>'
     if fresh:
         h += f'<div class="fresh">{fresh}</div>'
+    h += '</div>'
+    return h.replace('\n', ' ')
+
+
+# ── v5: Avoid list (laggards) ───────────────────────────────────────────────────
+def _weak_holdings(hold_df: pd.DataFrame, etf: str, n: int = 3) -> str:
+    """Up to n top-10 holdings with RS score <= -1, weakest RS 3M first."""
+    if hold_df is None or len(hold_df) == 0 or 'ETF' not in hold_df.columns:
+        return '—'
+    g = hold_df[hold_df['ETF'] == etf].copy()
+    if g.empty:
+        return '—'
+    for c in ('rs_composite', 'rs_3m'):
+        g[c] = pd.to_numeric(g[c], errors='coerce')
+    g = g[g['rs_composite'] <= -1.0].sort_values('rs_3m', ascending=True)
+    if g.empty:
+        return '<span style="color:#6e675f;">none ≤ −1</span>'
+    return ', '.join(f'<b style="color:#f4a062;">{_e(t)}</b>' for t in g['ticker'].head(n))
+
+
+def _rs_bar(v, lim: float = 0.20) -> str:
+    """Diverging bar around zero: orange left (lagging SPY), teal right (leading)."""
+    if _nan(v):
+        return '—'
+    v = float(v)
+    w = min(abs(v) / lim, 1.0) * 50
+    col = ORANGE if v < 0 else TEAL
+    left = 50 - w if v < 0 else 50
+    return (f'<span style="display:inline-flex;align-items:center;gap:6px;">'
+            f'<span style="position:relative;display:inline-block;width:90px;height:8px;background:#1a1918;border-radius:2px;">'
+            f'<span style="position:absolute;left:50%;top:-2px;width:1px;height:12px;background:#6e675f;"></span>'
+            f'<span style="position:absolute;left:{left:.1f}%;width:{w:.1f}%;height:8px;background:{col};border-radius:2px;"></span>'
+            f'</span><span class="num" style="color:{col};min-width:46px;text-align:right;">{_pct(v)}</span></span>')
+
+
+def avoid_html(lag: pd.DataFrame, hold_df: pd.DataFrame = None) -> str:
+    h = CSS + ('<div class="ld" style="margin-top:14px;"><div class="hdr"><span class="ttl" style="color:#f4a062;">'
+               'Avoid: laggards — don\'t buy them for a catch-up</span></div>')
+    if lag is None or len(lag) == 0:
+        h += '<div class="note" style="font-size:0.78rem;">No industry passes the laggard filter today.</div></div>'
+        return h.replace('\n', ' ')
+    h += '<table><thead><tr>'
+    for lbl, cls in [('Industry', 'l'), ('ETF', 'l'), ('Sector', 'l'), ('Label (held)', 'l'), ('RS 3M vs SPY', 'l'),
+                     ('RS 1M', ''), ('Why on the list', 'l'), ('Weakest holdings', 'l')]:
+        h += f'<th class="{cls}">{lbl}</th>'
+    h += '</tr></thead><tbody>'
+    for _, r in lag.iterrows():
+        sc = float(r['Score'])
+        lc = ORANGE if sc <= -1.0 else ORANGE_M
+        v1 = r.get('RS 1M')
+        c1 = DIM if _nan(v1) else (TEAL if float(v1) > 0 else ORANGE if float(v1) < 0 else DIM)
+        h += '<tr>'
+        h += f'<td class="l"><b>{_e(r["Industry"])}</b></td>'
+        h += f'<td class="l" style="color:#a89f95;">{_e(r["ETF"])}</td>'
+        h += f'<td class="l" style="color:#a89f95;">{_e(r["Sector"])}</td>'
+        h += f'<td class="l" style="color:{lc};font-weight:700;">{sc:+.1f} {_e(r["Label"])}</td>'
+        h += f'<td class="l">{_rs_bar(r.get("RS 3M"))}</td>'
+        h += f'<td class="num" style="color:{c1};">{_pct(v1)}</td>'
+        h += f'<td class="l" style="color:#e8dccb;">{_e(r["Why"])}</td>'
+        h += f'<td class="l">{_weak_holdings(hold_df, r["ETF"])}</td>'
+        h += '</tr>'
+    h += '</tbody></table>'
+    h += ('<div class="note">Filter (industry ETFs, held labels): structural laggard (−1.5) whose RS 1M is not positive, or '
+          'underperforming (−0.5) and FADING. Sorted weakest RS 3M first. Weakest holdings = top-10 holdings with RS score '
+          f'≤ −1, by RS 3M. {ev("Tested")} Laggards keep lagging SPY slightly, but shorting them has had no edge: no better '
+          'than shorting any industry. Outright shorts lost money on average, most in RISK-OFF (−2.3% a month; a ≥5% '
+          'squeeze in 55% of months). <b style="color:#f3ece2;">Use: don\'t buy these for a rebound. Short only with your '
+          'own setup at a level, with a tight stop.</b></div>')
     h += '</div>'
     return h.replace('\n', ' ')

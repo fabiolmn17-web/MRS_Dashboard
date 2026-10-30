@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pipeline
 import auto_fetch
+import risk_panel
 
 HIST_PATH = Path(__file__).parent / 'mrs_history.csv'
 
@@ -72,6 +73,28 @@ def main():
 
     # 3. Update history (append + rescore)
     hist = pipeline.update_history(hist, inp_map)
+
+    # 3b. v5 forward log (risk panel lines for the last session). Never blocks the update.
+    try:
+        ind_p = Path(__file__).parent / 'StockScanner' / 'output' / 'industry_rs.csv'
+        etfs = pd.read_csv(ind_p)['ETF'].dropna().unique().tolist() if ind_p.exists() else []
+        spy, v3, closes = risk_panel.fetch_inputs(etfs)
+        snap = risk_panel.build_snapshot(hist, spy, v3, closes, pipeline.regime_label)
+        row = risk_panel.log_row(snap)
+        mask = pd.to_datetime(hist['date']).dt.normalize() == pd.Timestamp(snap['date']).normalize()
+        if mask.any():
+            for k, v in row.items():
+                if k not in hist.columns:
+                    hist[k] = np.nan
+                if isinstance(v, str):
+                    hist[k] = hist[k].astype(object)
+                hist.loc[mask, k] = v
+            print(f"  Forward log {pd.Timestamp(snap['date']).date()}: pedal {row['pedal']} | cell {row['cell']} | "
+                  f"corr {row['ind_corr63']} | n_eff {row['n_eff5']} | put cost {row['put3m_cost']} | invested {row['vt_invested']}")
+        else:
+            print(f"  Forward log skipped: SPY session {pd.Timestamp(snap['date']).date()} not in history")
+    except Exception as e:
+        print(f'  Forward log skipped: {e}')
 
     # 4. Save
     pipeline.save_history(hist, HIST_PATH)

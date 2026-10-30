@@ -30,6 +30,7 @@ import sector_view
 import rotation_view
 import rs_labels
 import market_state
+import risk_panel
 import scan_view
 import chart_view
 
@@ -94,6 +95,16 @@ def load_industry_data():
     except Exception as e:
         print(f'[industry] load error: {e}')
         return None, None
+
+
+@st.cache_data(ttl=3 * 3600, show_spinner=False)
+def load_risk_inputs(etfs: tuple):
+    """Risk today panel inputs: SPY OHLC (max), ^VIX3M (max), ~6 months of industry-ETF closes. Cached 3 hours."""
+    try:
+        return risk_panel.fetch_inputs(list(etfs))
+    except Exception as e:
+        print(f'[risk panel] fetch error: {e}')
+        return None, None, None
 
 
 @st.cache_data(ttl=3600)
@@ -398,6 +409,8 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
     st.sidebar.caption('Clears cache and reloads CSV from disk.')
+    show_risk_panel = st.sidebar.toggle('Risk today panel', value=True, key='show_risk_panel',
+                                        help='Pedal, today\'s state, effective bets, insurance cost, book volatility guide (v5).')
 
     # ── Zero gamma: InsiderFinance (scored) vs Gamma Live 40d (shadow) ────────────────────────────────────────
     _gst = gamma_shadow_table(hist, gshadow)
@@ -691,11 +704,31 @@ st.markdown(market_state.decision_strip_html(
 # ══════════════════════════════════════════════════════════════════════════════
 # WHERE TO LOOK: leaders to buy (industries first), rotation, scanner
 # ══════════════════════════════════════════════════════════════════════════════
+# ── Risk today panel (v5): pedal, today's state, effective bets, insurance cost, vol guide ──────────
+if st.session_state.get('show_risk_panel', True):
+    try:
+        _rp_etfs = tuple(sorted(_ind_df['ETF'].dropna().unique())) if _ind_df is not None and 'ETF' in _ind_df.columns else tuple()
+        with st.spinner('Loading the risk panel…'):
+            _rp_spy, _rp_v3, _rp_cl = load_risk_inputs(_rp_etfs)
+        if _rp_spy is not None and len(_rp_spy):
+            _rp_snap = risk_panel.build_snapshot(hist, _rp_spy, _rp_v3, _rp_cl, pipeline.regime_label)
+            st.markdown(risk_panel.panel_html(_rp_snap), unsafe_allow_html=True)
+        else:
+            st.caption('Risk today panel: SPY history not available right now.')
+    except Exception as _rp_err:
+        print(f'[risk panel] {_rp_err}')
+        st.caption('Risk today panel could not be built this time.')
+
 try:
     _ld_asof = str(_ind_df['as_of'].iloc[0]) if _ind_df is not None and 'as_of' in _ind_df.columns else None
     st.markdown(market_state.leaders_html(_leaders, _mom_light, _hold_df, _ld_asof, _dropped), unsafe_allow_html=True)
 except Exception as _ld_err:
     print(f'[leaders] {_ld_err}')
+
+try:
+    st.markdown(market_state.avoid_html(rs_labels.laggards_shortlist(_ind_df), _hold_df), unsafe_allow_html=True)
+except Exception as _av_err:
+    print(f'[avoid] {_av_err}')
 
 
 # ── Sector rotation at a glance (rotation_view.py) ─────────────────────────────

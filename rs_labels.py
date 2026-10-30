@@ -207,3 +207,24 @@ def leaders_shortlist(ind: pd.DataFrame) -> pd.DataFrame:
     added, _ = shortlist_changes(ind)
     out['New'] = out['ETF'].isin(added['ETF']) if len(added) else False
     return out.sort_values('RS 3M', ascending=False).reset_index(drop=True)
+
+
+def laggards_shortlist(ind: pd.DataFrame) -> pd.DataFrame:
+    """Industry ETFs not to buy for a catch-up (mirror of the leaders filter, v5).
+
+    A  structural laggard (held score -1.5) whose RS 1M is not positive
+    B  Underperforming (held -0.5) and FADING
+    Tested: laggards keep lagging SPY slightly; shorting them had no edge over shorting any industry.
+    Sorted weakest RS 3M first.
+    """
+    if ind is None or len(ind) == 0 or 'Score' not in ind.columns:
+        return pd.DataFrame()
+    d = ind.copy()
+    d['Score'] = pd.to_numeric(d['Score'], errors='coerce')
+    r1 = pd.to_numeric(d.get('RS 1M'), errors='coerce')
+    a = (d['Score'] <= -1.5) & (r1 <= 0)
+    b = (d['Score'] == -0.5) & (d['Trend'] == 'FADING')
+    out = d[a | b].copy()
+    out['Why'] = np.where(a[a | b], 'Structural laggard, 1M not turning up', 'Underperforming + fading')
+    out['RS 3M'] = pd.to_numeric(out['RS 3M'], errors='coerce')
+    return out.sort_values('RS 3M', ascending=True).reset_index(drop=True)

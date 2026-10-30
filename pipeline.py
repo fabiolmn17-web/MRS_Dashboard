@@ -92,6 +92,8 @@ HIST_COLS = [
     'vol_state',
     'mrs_score',
     'b20_auto',          # B20% computed by the daily run from the full S&P 500 (kept even when B20% is entered by hand)
+    # v5 forward log (risk_panel.py; filled by update_data.py from 30 Oct 2026, not used in the score)
+    'pedal', 'cell', 'ind_corr63', 'n_eff5', 'put3m_cost', 'put3m_cost_pct', 'vt_invested',
 ]
 
 

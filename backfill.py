@@ -112,6 +112,9 @@ def main():
     _ex = hist[hist['date'] == last_bday]
     existing = {c: (float(_ex.iloc[-1][c]) if len(_ex) and c in _ex.columns and pd.notna(_ex.iloc[-1][c]) else np.nan)
                 for c in ('adl_level', 'b20_pct', 'zero_gamma', 'b20_auto')}
+    # v5 forward log (risk panel) written by the daily run: keep it when the session is re-processed
+    _FWD = ('pedal', 'cell', 'ind_corr63', 'n_eff5', 'put3m_cost', 'put3m_cost_pct', 'vt_invested')
+    existing_fwd = {c: _ex.iloc[-1][c] for c in _FWD if len(_ex) and c in _ex.columns and pd.notna(_ex.iloc[-1][c])}
 
     if env_override and len(hist) > 0:
         if last_valid >= last_bday:
@@ -221,6 +224,8 @@ def main():
             'zero_gamma':   manual['zero_gamma'],
             'pc_ratio':     pc_val,
         })
+        if dt == last_bday:
+            new_row.update(existing_fwd)
         hist = pd.concat([hist, pd.DataFrame([new_row])], ignore_index=True)
         hist = hist.sort_values('date').reset_index(drop=True)
         appended += 1
