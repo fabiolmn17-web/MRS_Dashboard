@@ -33,6 +33,26 @@ import market_state
 import risk_panel
 import scan_view
 import chart_view
+import watchlist
+
+# ── Reload local modules that changed on disk (a push updates the files, but the server keeps the old
+#    modules in memory until a reboot; app.py itself is re-read on every run) ───────────────────────
+import importlib as _importlib
+try:
+    _PROC_START = os.stat('/proc/self').st_ctime
+except Exception:
+    _PROC_START = None
+for _m in (pipeline, rs_labels, risk_dial, sector_view, rotation_view, market_state, risk_panel, scan_view,
+           chart_view, watchlist):
+    try:
+        _mt = os.path.getmtime(_m.__file__)
+        _seen = getattr(_m, '_mrs_mtime', None)
+        if (_seen is None and _PROC_START is not None and _mt > _PROC_START) or (_seen is not None and _mt != _seen):
+            _importlib.reload(_m)
+            print(f'[reload] {_m.__name__}')
+        _m._mrs_mtime = _mt
+    except Exception as _re:
+        print(f'[reload] {getattr(_m, "__name__", _m)}: {_re}')
 
 # ── Sector RS — constants & helpers ───────────────────────────────────────────
 # yfinance sector strings → our SECTOR_MAP display names
@@ -647,23 +667,33 @@ _h2 = hist.dropna(subset=['mrs_score']).sort_values('date')
 if len(_h2) >= 2:
     _prev_s = float(_h2['mrs_score'].iloc[-2])
     _prev_r = pipeline.regime_label(_prev_s)
-    _changes.append(f'MRS <b>{_prev_s:+.2f} → {mrs:+.2f}</b>'
-                    + (f' (<b>{_prev_r} → {reg}</b>)' if _prev_r != reg else f' ({reg}, session {dur})'))
-if len(_added):
-    _changes.append('New on the leaders list: <b>' + ', '.join(_esc(x) for x in _added['Industry']) + '</b>')
-if len(_dropped):
-    _changes.append('Dropped from the list: <b>' + ', '.join(_esc(x) for x in _dropped['Industry']) + '</b>')
+    _dcol = '#85cac5' if mrs > _prev_s else ('#f4a062' if mrs < _prev_s else '#a89f95')
+    _changes.append(f'MRS {_prev_s:+.2f} → <b style="color:{_dcol};">{mrs:+.2f}</b>'
+                    + (f' · <b>{_prev_r} → {reg}</b>' if _prev_r != reg else ''))
+_ld_moves = [f'<b style="color:#85cac5;">+ {_esc(x)}</b>' for x in _added['Industry']] if len(_added) else []
+_ld_moves += [f'<b style="color:#f4a062;">− {_esc(x)}</b>' for x in _dropped['Industry']] if len(_dropped) else []
+if _ld_moves:
+    _changes.append('Leaders list: ' + ', '.join(_ld_moves))
 if _sec_df is not None and len(_sec_df) and 'PrevScore' in _sec_df.columns:
     for _, _r in _sec_df.iterrows():
         if pd.notna(_r['PrevScore']) and float(_r['PrevScore']) != float(_r['Score']):
-            _changes.append(f'{_esc(_r["Sector"])}: {rs_labels.composite_label(float(_r["PrevScore"])).title()} → '
-                            f'<b>{_esc(str(_r["Label"]).title())}</b>')
-_n_pend = 0
+            _up = float(_r['Score']) > float(_r['PrevScore'])
+            _changes.append(f'Sector {_esc(_r["Sector"])}: {rs_labels.composite_label(float(_r["PrevScore"])).title()} → '
+                            f'<b style="color:{"#85cac5" if _up else "#f4a062"};">{_esc(str(_r["Label"]).title())}</b>')
+# labels about to change: a label switches only after 3 sessions in a row at the new value
+_pend = []
 for _d in (_sec_df, _ind_df):
     if _d is not None and 'PendingLabel' in _d.columns:
-        _n_pend += int(_d['PendingLabel'].fillna('').astype(str).str.len().gt(0).sum())
-if _n_pend:
-    _changes.append(f'{_n_pend} label{"s" if _n_pend != 1 else ""} with a change in progress (see "→ x/3" in the tables)')
+        _nm = 'Sector' if _d is _sec_df else 'Industry'
+        for _, _r in _d[_d['PendingLabel'].fillna('').astype(str).str.len().gt(0)].iterrows():
+            _pend.append((int(float(_r.get('PendingDays') or 0)), str(_r[_nm]), str(_r['PendingLabel']).title()))
+if _pend:
+    _pend.sort(key=lambda x: -x[0])
+    _all = '; '.join(f'{n} → {l} ({k}/3)' for k, n, l in _pend)
+    _shown = ', '.join(f'{_esc(n)} → {_esc(l)} <span style="color:#a89f95;">{k}/3</span>' for k, n, l in _pend[:3])
+    _more = len(_pend) - 3
+    _changes.append(f'<span title="{_esc(_all)}">Labels confirming (3 sessions needed): {_shown}'
+                    + (f' <span style="color:#a89f95;">+{_more} more ⓘ</span>' if _more > 0 else '') + '</span>')
 
 # ── Freshness of each data block ─────────────────────────────────────────────────
 _fresh = [f'MRS {last_dt:%b %d}']
@@ -699,7 +729,8 @@ st.markdown(market_state.decision_strip_html(
     sq_lbl, sq_col, sq_desc, _mom_light, _bp, _leaders,
     {'VIX': _f('vix', '{:.2f}'), 'SPX': _f('spx', '{:,.0f}'), 'Zero γ': _f('zero_gamma', '{:,.0f}'),
      **_gl_header()},
-    _changes, _deep_line, 'Data as of: ' + ' · '.join(_fresh)), unsafe_allow_html=True)
+    _changes, _deep_line, 'Data as of: ' + ' · '.join(_fresh),
+    show_stats=not st.session_state.get('show_risk_panel', True)), unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # WHERE TO LOOK: leaders to buy (industries first), rotation, scanner
@@ -757,8 +788,6 @@ st.divider()
 # ══════════════════════════════════════════════════════════════════════════════
 # MOMENTUM & TREND SCANNER (scan_view.py; nightly StockScanner job)
 # ══════════════════════════════════════════════════════════════════════════════
-st.markdown('<div class="section-header">Momentum &amp; trend scanner</div>', unsafe_allow_html=True)
-
 # Table (click a row) + daily chart panel on the right. The table is a small two-way component
 # (scan_table/index.html) that returns the clicked ticker; the chart is fetched per ticker and cached.
 _scan_table = components.declare_component('scan_table', path=str(Path(__file__).parent / 'scan_table'))
@@ -767,6 +796,124 @@ _scan_table = components.declare_component('scan_table', path=str(Path(__file__)
 @st.cache_data(ttl=1800, show_spinner=False)
 def _chart_history(ticker):
     return chart_view.fetch(ticker)
+
+
+# ── Watchlist (watchlist.py: CSV on the repo's "watchlist" branch, written with GITHUB_TOKEN) ─────────
+def _wl_token():
+    try:
+        return st.secrets.get('GITHUB_TOKEN', '')
+    except Exception:
+        return ''
+
+
+def _wl_df():
+    if 'wl_df' not in st.session_state:
+        _d, _sha, _err = watchlist.load(_wl_token())
+        st.session_state.update(wl_df=_d, wl_sha=_sha, wl_err=_err)
+    return st.session_state['wl_df']
+
+
+def _wl_commit(df, msg):
+    tok = _wl_token()
+    if tok:
+        sha, err = watchlist.save(tok, df, st.session_state.get('wl_sha'), msg)
+        if err:
+            st.session_state['wl_err'] = err
+            return False
+        st.session_state['wl_sha'] = sha
+        st.session_state['wl_err'] = None
+    st.session_state['wl_df'] = watchlist._clean(df)
+    return True
+
+
+def _wl_star(t, key):
+    """One-click add / remove for ticker t (chart panel and ticker lookup)."""
+    on = t in set(_wl_df()['ticker'])
+    if st.button('★ On watchlist · remove' if on else '☆ Add to watchlist', key=f'{key}_{t}',
+                 type='secondary' if on else 'primary'):
+        d = watchlist.remove(_wl_df(), t) if on else watchlist.add(_wl_df(), t, date.today().isoformat())
+        if _wl_commit(d, f'watchlist: {"remove" if on else "add"} {t}'):
+            st.session_state['wl_pick'] = None if on else t
+        st.rerun()
+
+
+def _wl_section_body():
+    d = _wl_df()
+    err = st.session_state.get('wl_err')
+    st.markdown('<div class="section-header">Watchlist</div>', unsafe_allow_html=True)
+    if err:
+        st.caption(f'⚠ {err}')
+    if d.empty:
+        st.markdown('<div style="font-size:0.80rem;color:#a89f95;margin:-4px 0 8px 0;">Empty. Click '
+                    '<b style="color:#e3b48e;">☆ Add to watchlist</b> above a chart in the scanner or the ticker '
+                    'lookup below.</div>', unsafe_allow_html=True)
+        return
+    rows = []
+    for _, r in d.iterrows():
+        h = _chart_history(r['ticker'])
+        close = float(h['Close'].iloc[-1]) if h is not None and len(h) else np.nan
+        to_trg, risk = watchlist.metrics(r, close)
+        rows.append({'Ticker': r['ticker'], 'Added': r['added'], 'Last': close, 'To trigger': to_trg * 100,
+                     'Trigger': r['trigger'], 'Stop': r['stop'], 'Risk': risk * 100, 'Note': r['note'],
+                     'Remove': False})
+    view = pd.DataFrame(rows)
+    c_tab, c_ch = st.columns([1.55, 1], gap='medium')
+    with c_tab:
+        ed = st.data_editor(
+            view, key=f'wl_editor_{st.session_state.get("wl_sha") or "local"}', hide_index=True,
+            use_container_width=True, num_rows='fixed',
+            column_order=['Ticker', 'Last', 'Trigger', 'To trigger', 'Stop', 'Risk', 'Note', 'Remove', 'Added'],
+            disabled=['Ticker', 'Added', 'Last', 'To trigger', 'Risk'],
+            column_config={
+                'Ticker': st.column_config.TextColumn(width='small'),
+                'Last': st.column_config.NumberColumn(format='%.2f', width='small'),
+                'Trigger': st.column_config.NumberColumn(format='%.2f', width='small', help='Price where the setup triggers'),
+                'To trigger': st.column_config.NumberColumn(format='%+.1f%%', width='small',
+                                                            help='Distance from the last close to the trigger'),
+                'Stop': st.column_config.NumberColumn(format='%.2f', width='small', help='Where the setup is wrong'),
+                'Risk': st.column_config.NumberColumn(format='%.1f%%', width='small',
+                                                      help='Trigger to stop, in % of the trigger'),
+                'Note': st.column_config.TextColumn(width='medium', help='Setup, level, what you wait for'),
+                'Added': st.column_config.TextColumn(width='small'),
+                'Remove': st.column_config.CheckboxColumn(width='small'),
+            })
+        new = d.copy()
+        new['note'] = ed['Note'].fillna('').astype(str).values
+        new['trigger'] = pd.to_numeric(ed['Trigger'], errors='coerce').values
+        new['stop'] = pd.to_numeric(ed['Stop'], errors='coerce').values
+        new = new[~ed['Remove'].fillna(False).astype(bool).values]
+        changed = not watchlist._clean(new).equals(watchlist._clean(d))
+        b1, b2 = st.columns([1, 3])
+        with b1:
+            if st.button('Save changes', type='primary', disabled=not changed, key='wl_save', use_container_width=True):
+                if _wl_commit(new, 'watchlist: edit'):
+                    st.rerun()
+        with b2:
+            st.markdown('<div style="font-size:0.70rem;color:#9b958f;padding-top:8px;">Edit Trigger, Stop and Note in '
+                        'the table, tick Remove to drop a name, then Save. Saved to GitHub (branch "watchlist"), so '
+                        'it is the same on every device.' + (' <b style="color:#e3b48e;">Unsaved changes.</b>' if changed else '')
+                        + '</div>', unsafe_allow_html=True)
+    with c_ch:
+        tick = list(d['ticker'])
+        cur = st.session_state.get('wl_pick')
+        pick = st.radio('Chart', tick, index=tick.index(cur) if cur in tick else 0, horizontal=True,
+                        key='wl_radio', label_visibility='collapsed')
+        st.session_state['wl_pick'] = pick
+        h = _chart_history(pick)
+        if h is None or len(h) < 30:
+            st.info(f'No price history for {pick}.')
+            return
+        fig = chart_view.figure(h, pick, height=340)
+        r = d[d['ticker'] == pick].iloc[0]
+        for val, col, lbl in ((r['trigger'], '#85cac5', 'trigger'), (r['stop'], '#f4a062', 'stop')):
+            if pd.notna(val):
+                fig.add_hline(y=float(val), line=dict(color=col, width=1.4, dash='dash'),
+                              annotation_text=f'{lbl} {float(val):,.2f}', annotation_position='top left',
+                              annotation_font=dict(color=col, size=11))
+        chart_view.show(st, components, fig, 'wl_chart', _CHART_CFG)
+
+
+_wl_section = st.fragment(_wl_section_body) if hasattr(st, 'fragment') else _wl_section_body
 
 
 # zoom like Gamma Live: box-drag and mouse wheel zoom, double-click = full view; the time window carries over when you
@@ -797,6 +944,7 @@ def _scan_chart_panel(tickers):
         f'vs SMA 50 <b style="color:#e8dccb;">{_d(lv["sma50"])}</b> · vs SMA 200 <b style="color:#b9805a;">{_d(lv["sma200"])}</b>'
         f' · vs 52W high <b style="color:#e3b48e;">{_d(lv["hi52"])}</b> · vs 20D high <b style="color:#9b958f;">{_d(lv["hi20"])}</b></div>',
         unsafe_allow_html=True)
+    _wl_star(t, 'wl_star_scan')
     chart_view.show(st, components, chart_view.figure(h, t, height=520), 'scan_chart', _CHART_CFG)
     st.markdown('<div style="font-size:0.66rem;color:#9b958f;">Daily, last 12 months. SMA 50 / 200; 52W high = highest '
                 'high of the last 252 sessions; 20D high = highest high of the 20 sessions before today. Click a row '
@@ -953,10 +1101,19 @@ def _scan_lookup(sd, sec_label, sec_score, leader_hold):
     h = _chart_history(t)
     if h is not None and len(h) >= 30:
         with c_ch:
+            _wl_star(t, 'wl_star_lookup')
             chart_view.show(st, components, chart_view.figure(h, t, height=360), 'lookup_chart', _CHART_CFG)
     st.markdown('<div style="height:6px;"></div>', unsafe_allow_html=True)
 
 
+
+try:
+    _wl_section()
+except Exception as _wl_e:
+    print(f'[watchlist] {_wl_e}')
+    st.caption('Watchlist could not be loaded this time.')
+
+st.markdown('<div class="section-header">Momentum &amp; trend scanner</div>', unsafe_allow_html=True)
 
 if _scan_df is not None and len(_scan_df) > 0:
     _sd = _scan_df.copy()

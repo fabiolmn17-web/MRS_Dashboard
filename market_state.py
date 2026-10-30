@@ -40,6 +40,25 @@ BAND_ACTION = {
 }
 REGIME_SUB = 'The MRS tells you how wide the next weeks can be, not which way.'
 
+
+def sq_plain(desc: str) -> str:
+    """One plain line from the signal-quality description (the full text stays in the tooltip)."""
+    import re as _re
+    out = []
+    m = _re.search(r'driven by (.*?)\.\s', desc or '')
+    if m:
+        names = [x.strip() for x in _re.sub(r'\([^)]*\)', '', m.group(1)).split(',') if x.strip()]
+        out.append('Driven by ' + ', '.join(names))
+    b = _re.search(r'B20 Phi=([0-9.]+)', desc or '')
+    if 'Breadth is not scoring' in (desc or '') and b:
+        out.append(f'breadth does not confirm (B20 percentile {float(b.group(1)) * 100:.0f})')
+    elif 'Breadth' in (desc or '') and 'confirm' in (desc or '').lower() and b:
+        out.append(f'breadth percentile {float(b.group(1)) * 100:.0f}')
+    if not out:
+        first = (desc or '').split('. ')[0]
+        return first[:140] + ('…' if len(first) > 140 else '')
+    return '; '.join(out) + '.'
+
 COMMODITY = 'SLX, COPX, XME, GDX, LIT, URA'
 
 CSS = (
@@ -192,24 +211,27 @@ def _earn_soon(hold_df: pd.DataFrame, etf: str, days: int = 10) -> str:
     return ', '.join(parts[:3]) + (f' <span style="color:#a89f95;">+{len(parts) - 3}</span>' if len(parts) > 3 else '')
 
 
+def _how(summary: str, body: str) -> str:
+    return (f'<details class="note" style="margin-top:6px;"><summary style="cursor:pointer;color:#a89f95;">{summary}</summary>'
+            f'<div style="margin-top:4px;">{body}</div></details>')
+
+
 def leaders_html(short: pd.DataFrame, light: dict, hold_df: pd.DataFrame = None, as_of: str = None,
                  dropped: pd.DataFrame = None) -> str:
     h = CSS + '<div class="ld"><div class="hdr"><span class="ttl">Leaders to buy — industries first</span>'
-    h += light_html(light)
-    lead_note = ('<div class="note" style="font-size:0.78rem;color:#e8dccb;margin:-2px 0 6px 0;">Where to look first for longs, '
-                 'not a basket to hold. Industry leaders keep a small edge vs SPY, but holding them as a group did not beat '
-                 'SPY in our 2008–2026 replay.</div>')
-    h += (f'<span class="sub" style="color:#a89f95;font-size:0.76rem;">'
-          f'{"Normal size on leaders." if light["on"] else "Smaller size and faster exits on leaders."}</span></div>')
-    h += lead_note
+    h += light_html(light) + ev('Tested') + '</div>'
+    h += (f'<div class="note" style="font-size:0.80rem;color:#e8dccb;margin:-2px 0 4px 0;">{_e(light_detail(light))}</div>'
+          '<div class="note" style="font-size:0.80rem;color:#e8dccb;margin:0 0 8px 0;">Where to look first for longs, '
+          'not a basket to hold. Industry leaders keep a small edge vs SPY, but holding them as a group did not beat '
+          'SPY in our 2008–2026 replay.</div>')
     if short is None or len(short) == 0:
         h += ('<div class="note" style="font-size:0.78rem;">No industry ETF passes the filter today '
               '(structural leader with RS 1M not negative, or outperforming and improving).</div></div>')
         return h.replace('\n', ' ')
     h += '<table><thead><tr>'
-    for lbl, cls in [('Industry', 'l'), ('ETF', 'l'), ('Sector', 'l'), ('Label (held)', 'l'), ('In label', ''),
-                     ('RS 3M', ''), ('RS 1M', ''), ('RS 6M', ''), ('RS 1Y', ''), ('Why on the list', 'l'),
-                     ('Evidence', 'l'), ('Strong holdings', 'l'), ('Earnings, next 10 days', 'l')]:
+    for lbl, cls in [('Industry', 'l'), ('ETF', 'l'), ('Sector', 'l'), ('Label', 'l'), ('Days in label', ''),
+                     ('RS 1M', ''), ('RS 3M vs SPY (sort)', 'l'), ('RS 6M', ''), ('RS 1Y', ''), ('Why on the list', 'l'),
+                     ('Strong holdings', 'l'), ('Earnings, next 10 days', 'l')]:
         h += f'<th class="{cls}">{lbl}</th>'
     h += '</tr></thead><tbody>'
     for _, r in short.iterrows():
@@ -218,46 +240,46 @@ def leaders_html(short: pd.DataFrame, light: dict, hold_df: pd.DataFrame = None,
         d = r.get('DaysInLabel')
         capped = str(r.get('DaysCapped')).lower() == 'true'
         d_txt = '—' if _nan(d) else f'{"≥" if capped else ""}{int(float(d))}d'
-        pend = str(r.get('PendingLabel') or '') if not _nan(r.get('PendingLabel')) or isinstance(r.get('PendingLabel'), str) else ''
+        pend = r.get('PendingLabel')
+        pend = '' if _nan(pend) and not isinstance(pend, str) else str(pend)
         pend = '' if pend == 'nan' else pend
-        pend_txt = (f' <span style="color:#e3b48e;font-size:0.70rem;">→ {_e(pend.title())} '
-                    f'{int(float(r.get("PendingDays") or 0))}/3</span>') if pend else ''
+        pend_txt = (f'<br><span style="color:#e3b48e;font-size:0.68rem;font-weight:600;" title="Labels change only after '
+                    f'3 sessions in a row at the new value">changing to {_e(pend.title())}: day '
+                    f'{int(float(r.get("PendingDays") or 0))} of 3</span>') if pend else ''
         tag = str(r.get('Tag1M') or '')
         tag = '' if tag == 'nan' else tag
         why = _e(r['Why'])
-        evid = ev('Tested')
         if tag == '1M ↑':
-            why += ' · 1M ↑'
-            evid += ' ' + ev('Watch')
-        h += '<tr>'
+            why += ' · 1M ↑ ' + ev('Watch')
         new = ' <span class="ev" style="color:#85cac5;border-color:#85cac5;background:rgba(133,202,197,0.18);">NEW</span>' if bool(r.get('New', False)) else ''
+        h += '<tr>'
         h += f'<td class="l"><b>{_e(r["Industry"])}</b>{new}</td>'
         h += f'<td class="l" style="color:#a89f95;">{_e(r["ETF"])}</td>'
         h += f'<td class="l" style="color:#a89f95;">{_e(r["Sector"])}</td>'
         h += f'<td class="l" style="color:{lc};font-weight:700;">{"+" if sc > 0 else ""}{sc:.1f} {_e(r["Label"])}{pend_txt}</td>'
         h += f'<td class="num" style="color:#a89f95;">{d_txt}</td>'
-        for k in ('RS 3M', 'RS 1M', 'RS 6M', 'RS 1Y'):
+        for k in ('RS 1M', 'RS 3M', 'RS 6M', 'RS 1Y'):
             v = r.get(k)
+            if k == 'RS 3M':
+                h += f'<td class="l">{_rs_bar(v)}</td>'
+                continue
             c = DIM if _nan(v) else (TEAL if float(v) > 0 else ORANGE if float(v) < 0 else DIM)
             h += f'<td class="num" style="color:{c};">{_pct(v)}</td>'
         h += f'<td class="l" style="color:#e8dccb;">{why}</td>'
-        h += f'<td class="l">{evid}</td>'
         h += f'<td class="l">{_strong_holdings(hold_df, r["ETF"])}</td>'
         h += f'<td class="l">{_earn_soon(hold_df, r["ETF"])}</td>'
         h += '</tr>'
     h += '</tbody></table>'
-    if dropped is not None and len(dropped):
-        h += ('<div class="note" style="color:#b9805a;">Dropped since the last session: '
-              + ', '.join(f'{_e(r["Industry"])} ({_e(r["ETF"])})' for _, r in dropped.iterrows()) + '.</div>')
-    h += ('<div class="note">Filter (industry ETFs, held labels): structural leader (+1.5) whose RS 1M is not negative, or '
-          'outperforming (+0.5) and IMPROVING (1Y+, 6M−, 3M+). Sorted by RS 3M. Laggards are never listed; sector rows '
-          'are context only (sectors showed no momentum since 2008). '
-          f'{ev("Tested")} industry leaders kept a small edge vs SPY (+0.4 / +0.8 / +1.5 pp at 1 / 3 / 6 months) and, '
-          'within outperforming, IMPROVING beat SPY 55% vs 48% of months for FADING. The leader edge came from Momentum ON periods (+0.8 pp vs −1.9 pp at 1 month when SPY was below its 12-month level, mostly 2008–09). '
-          f'{ev("Watch")} the RS 1M filter itself is not tested. '
-          f'{ev("Descriptive")} Strong holdings = top-10 holdings with RS score ≥ +1 within 10% of the 52-week closing '
-          'high, by RS 3M: where to start the chart work, not a buy list.'
-          f'{" Industry data as of " + _e(as_of) + "." if as_of else ""}</div>')
+    h += _how('How this list is built and what is tested',
+              'Industry ETFs, held labels (a label changes only after 3 sessions in a row at the new value). On the list: '
+              'structural leader (+1.5) whose RS 1M is not negative, or outperforming (+0.5) and IMPROVING (1Y+, 6M−, 3M+). '
+              'Sorted by RS 3M. Sector rows are context only (sectors showed no momentum since 2008). '
+              f'{ev("Tested")} industry leaders kept a small edge vs SPY (+0.4 / +0.8 / +1.5 pp at 1 / 3 / 6 months); '
+              'within outperforming, IMPROVING beat SPY 55% vs 48% of months for FADING. The edge came from Momentum ON '
+              'periods (+0.8 pp vs −1.9 pp at 1 month when SPY was below its 12-month level, mostly 2008–09). '
+              f'{ev("Watch")} the RS 1M filter itself is not tested. {ev("Descriptive")} Strong holdings = top-10 '
+              'holdings with RS score ≥ +1 within 10% of the 52-week closing high, by RS 3M: where to start the chart '
+              'work, not a buy list.' + (f' Industry data as of {_e(as_of)}.' if as_of else ''))
     h += '</div>'
     return h.replace('\n', ' ')
 
@@ -277,50 +299,56 @@ def chip(txt: str, col: str, filled: bool = False, title: str = '') -> str:
             f'padding:0 5px;font-size:0.68rem;font-weight:700;white-space:nowrap;">{_e(txt)}</span>')
 
 
-# ── decision strip: replaces the four header cards and the market-state banner ───
+# ── decision strip: score, regime, what changed, what to do ───────────────────────
 def decision_strip_html(mrs: float, band: str, band_col: str, sessions: int, pct_txt: str, sq_lbl: str, sq_col: str,
                         sq_desc: str, light: dict, bp: pd.DataFrame, short: pd.DataFrame, levels: dict,
-                        changes: list, deep_line: str = '', fresh: str = '') -> str:
+                        changes: list, deep_line: str = '', fresh: str = '', show_stats: bool = True) -> str:
+    """show_stats=False when the Risk today panel is on: it shows the same odds for today's exact state."""
     h = CSS + (
         '<style>'
         '.ds{background:#121212;border:1px solid #2a2724;border-left:3px solid #e3b48e;border-radius:6px;padding:12px 16px 8px 16px;margin:2px 0 12px 0;}'
-        '.ds .top{display:grid;grid-template-columns:auto auto 1fr auto;gap:22px;align-items:end;padding-bottom:10px;border-bottom:1px solid #2a2724;}'
-        '.ds .lab{font-size:0.64rem;letter-spacing:0.14em;text-transform:uppercase;color:#a89f95;margin-bottom:2px;}'
+        '.ds .top{display:grid;grid-template-columns:auto auto 1fr auto;gap:26px;align-items:start;padding-bottom:10px;border-bottom:1px solid #2a2724;}'
+        '.ds .lab{font-size:0.64rem;letter-spacing:0.14em;text-transform:uppercase;color:#a89f95;margin-bottom:3px;}'
         '.ds .big{font-family:"IBM Plex Mono",monospace;font-size:2.1rem;font-weight:600;line-height:1;}'
         '.ds .reg{font-size:1.45rem;font-weight:800;line-height:1.05;}'
         '.ds .sm{font-size:0.74rem;color:#a89f95;}'
         '.ds .lv{font-family:"IBM Plex Mono",monospace;font-size:0.78rem;color:#f3ece2;line-height:1.55;text-align:right;}'
-        '.ds .chg{padding:8px 0 4px 0;font-size:0.84rem;color:#f3ece2;}'
-        '.ds .chg b{color:#e3b48e;}'
+        '.ds .chg{display:flex;flex-wrap:wrap;gap:6px 18px;padding:9px 0 5px 0;font-size:0.82rem;color:#f3ece2;align-items:baseline;}'
+        '.ds .chg .it{white-space:nowrap;}'
         '.ds .fresh{font-size:0.68rem;color:#6e675f;margin-top:4px;}'
         '@media (max-width:760px){.ds .top{grid-template-columns:1fr 1fr;}.ds .lv{text-align:left;}}'
         '</style>')
     h += '<div class="ds"><div class="k" style="font-size:0.68rem;letter-spacing:0.12em;text-transform:uppercase;color:#e3b48e;font-weight:700;margin-bottom:8px;">Today · what to do with it</div>'
     h += '<div class="top">'
     h += f'<div><div class="lab">MRS score</div><div class="big" style="color:{band_col};">{mrs:+.2f}</div><div class="sm">{_e(pct_txt)}</div></div>'
-    h += (f'<div><div class="lab">Regime</div><div class="reg" style="color:{band_col};">{_e(band)}</div>'
-          f'<div class="sm">{sessions} consecutive session{"s" if sessions != 1 else ""}</div>'
-          f'<div class="sm" style="color:#e8dccb;font-style:italic;margin-top:3px;max-width:230px;">{REGIME_SUB}</div></div>')
+    h += (f'<div><div class="lab">Regime · session {sessions}</div><div class="reg" style="color:{band_col};">{_e(band)}</div>'
+          f'<div class="sm" style="color:#e8dccb;margin-top:4px;max-width:250px;">{REGIME_SUB}</div></div>')
     h += (f'<div><div class="lab">Signal quality</div>{chip(sq_lbl, sq_col, True, sq_desc)}'
-          f'<div class="sm" style="margin-top:4px;" title="{_e(sq_desc)}">{_e(sq_desc[:150])}{"…" if len(sq_desc) > 150 else ""}</div></div>')
+          f'<div class="sm" style="margin-top:5px;" title="{_e(sq_desc)}">{_e(sq_plain(sq_desc))} '
+          f'<span style="color:#6e675f;cursor:help;">ⓘ</span></div></div>')
     h += ('<div class="lv">' + '<br>'.join(f'<span style="color:#a89f95;">{_e(k)}</span> {_e(v)}' for k, v in levels.items()) + '</div>')
     h += '</div>'
-    ch = ' · '.join(changes) if changes else 'No label or band changes since the last session.'
-    h += f'<div class="chg"><span class="lab" style="display:inline;margin-right:8px;">What changed</span>{ch}</div>'
-    h += '<div style="margin-top:2px;">'
-    h += (f'<div class="ms" style="background:transparent;border:none;padding:0;margin:0;">'
-          f'<div class="ln"><div class="h">Momentum</div><div class="t">{light_html(light)} '
-          f'<span class="sub">&nbsp;{_e(light_detail(light))}</span></div>{ev("Tested")}</div>')
-    h += (f'<div class="ln"><div class="h">Swing size</div><div class="t"><b style="color:{band_col};">{_e(band)}</b> · '
-          f'{swing_line(band, bp)}</div>{ev("Tested")}</div>')
-    h += (f'<div class="ln"><div class="h">Rotation</div><div class="t">{rotation_line(band)}</div>{ev("Descriptive")}</div>')
-    if short is not None and len(short):
-        names = ', '.join(f'<b>{_e(r["Industry"])}</b> <span class="sub">({_e(r["ETF"])})</span>' for _, r in short.head(5).iterrows())
-        more = f' <span class="sub">+{len(short) - 5} more</span>' if len(short) > 5 else ''
-        h += (f'<div class="ln"><div class="h">Leaders</div><div class="t">{len(short)} on the list: {names}{more}</div>{ev("Tested")}</div>')
+    if changes:
+        h += ('<div class="chg"><span class="lab" style="margin:0;">Since the last session</span>'
+              + ''.join(f'<span class="it">{c}</span>' for c in changes) + '</div>')
+    h += '<div class="ms" style="background:transparent;border:none;padding:0;margin:0;">'
+    stats = ''
+    if show_stats:
+        try:
+            b = bp[(bp['band'] == band) & (bp['horizon'] == 20)].iloc[0]
+            a = bp[(bp['band'] == 'ALL') & (bp['horizon'] == 20)].iloc[0]
+            x = int(round(b['thresh'] * 100))
+            stats = (f' <span class="sub">Next 20 sessions: ≥{x}% against a new long {b["p_adverse"] * 100:.0f}% of days '
+                     f'(all days {a["p_adverse"] * 100:.0f}%), ≥{x}% in favour {b["p_favorable"] * 100:.0f}% '
+                     f'(all {a["p_favorable"] * 100:.0f}%).</span>')
+        except Exception:
+            stats = ''
+    h += (f'<div class="ln"><div class="h">What to do</div><div class="t" style="font-size:0.90rem;">'
+          f'{BAND_ACTION.get(band, "")}{stats}</div>{ev("Tested")}</div>')
+    h += f'<div class="ln"><div class="h">Rotation</div><div class="t">{rotation_line(band)}</div>{ev("Descriptive")}</div>'
     if deep_line:
         h += f'<div class="ln"><div class="h">Deep state</div><div class="t">{deep_line}</div>{ev("Descriptive")}</div>'
-    h += '</div></div>'
+    h += '</div>'
     if fresh:
         h += f'<div class="fresh">{fresh}</div>'
     h += '</div>'
@@ -360,13 +388,13 @@ def _rs_bar(v, lim: float = 0.20) -> str:
 
 def avoid_html(lag: pd.DataFrame, hold_df: pd.DataFrame = None) -> str:
     h = CSS + ('<div class="ld" style="margin-top:14px;"><div class="hdr"><span class="ttl" style="color:#f4a062;">'
-               'Avoid: laggards — don\'t buy them for a catch-up</span></div>')
+               'Avoid: laggards — don\'t buy them for a catch-up</span>' + ev('Tested') + '</div>')
     if lag is None or len(lag) == 0:
         h += '<div class="note" style="font-size:0.78rem;">No industry passes the laggard filter today.</div></div>'
         return h.replace('\n', ' ')
     h += '<table><thead><tr>'
-    for lbl, cls in [('Industry', 'l'), ('ETF', 'l'), ('Sector', 'l'), ('Label (held)', 'l'), ('RS 3M vs SPY', 'l'),
-                     ('RS 1M', ''), ('Why on the list', 'l'), ('Weakest holdings', 'l')]:
+    for lbl, cls in [('Industry', 'l'), ('ETF', 'l'), ('Sector', 'l'), ('Label', 'l'), ('RS 1M', ''),
+                     ('RS 3M vs SPY (sort)', 'l'), ('Why on the list', 'l'), ('Weakest holdings', 'l')]:
         h += f'<th class="{cls}">{lbl}</th>'
     h += '</tr></thead><tbody>'
     for _, r in lag.iterrows():
@@ -379,17 +407,19 @@ def avoid_html(lag: pd.DataFrame, hold_df: pd.DataFrame = None) -> str:
         h += f'<td class="l" style="color:#a89f95;">{_e(r["ETF"])}</td>'
         h += f'<td class="l" style="color:#a89f95;">{_e(r["Sector"])}</td>'
         h += f'<td class="l" style="color:{lc};font-weight:700;">{sc:+.1f} {_e(r["Label"])}</td>'
-        h += f'<td class="l">{_rs_bar(r.get("RS 3M"))}</td>'
         h += f'<td class="num" style="color:{c1};">{_pct(v1)}</td>'
+        h += f'<td class="l">{_rs_bar(r.get("RS 3M"))}</td>'
         h += f'<td class="l" style="color:#e8dccb;">{_e(r["Why"])}</td>'
         h += f'<td class="l">{_weak_holdings(hold_df, r["ETF"])}</td>'
         h += '</tr>'
     h += '</tbody></table>'
-    h += ('<div class="note">Filter (industry ETFs, held labels): structural laggard (−1.5) whose RS 1M is not positive, or '
-          'underperforming (−0.5) and FADING. Sorted weakest RS 3M first. Weakest holdings = top-10 holdings with RS score '
-          f'≤ −1, by RS 3M. {ev("Tested")} Laggards keep lagging SPY slightly, but shorting them has had no edge: no better '
-          'than shorting any industry. Outright shorts lost money on average, most in RISK-OFF (−2.3% a month; a ≥5% '
-          'squeeze in 55% of months). <b style="color:#f3ece2;">Use: don\'t buy these for a rebound. Short only with your '
-          'own setup at a level, with a tight stop.</b></div>')
+    h += ('<div class="note" style="font-size:0.80rem;color:#f3ece2;margin-top:6px;"><b>Use: don\'t buy these for a '
+          'rebound. Short only with your own setup at a level, with a tight stop.</b></div>')
+    h += _how('How this list is built and what is tested',
+              'Industry ETFs, held labels. On the list: structural laggard (−1.5) whose RS 1M is not positive, or '
+              'underperforming (−0.5) and FADING. Sorted weakest RS 3M first. Weakest holdings = top-10 holdings with RS '
+              f'score ≤ −1, by RS 3M. {ev("Tested")} Laggards keep lagging SPY slightly, but shorting them has had no '
+              'edge: no better than shorting any industry. Outright shorts lost money on average, most in RISK-OFF '
+              '(−2.3% a month; a ≥5% squeeze in 55% of months).')
     h += '</div>'
     return h.replace('\n', ' ')

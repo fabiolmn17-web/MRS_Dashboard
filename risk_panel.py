@@ -25,7 +25,7 @@ import pandas as pd
 TEAL, TEAL_M, ORANGE, ORANGE_M = '#85cac5', '#649995', '#f4a062', '#b9805a'
 COPPER, INK, MUTED, DIM, LINE = '#e3b48e', '#f3ece2', '#a89f95', '#6e675f', '#2a2724'
 BANDG = {'RISK-ON': 'Calm', 'MILD RISK-ON': 'Calm', 'NEUTRAL': 'Middle', 'MILD RISK-OFF': 'Middle', 'RISK-OFF': 'RISK-OFF'}
-EXT_TXT = {'below': 'more than 1 ATR below the 50-day', 'near': 'near the 50-day (within 1 ATR)', 'above': 'more than 1 ATR above the 50-day'}
+EXT_TXT = {'below': 'more than 1 ATR below the 50-day', 'near': 'near the 50-day', 'above': 'more than 1 ATR above the 50-day'}
 CORR_TERCILES = (0.458, 0.578)                      # trailing-63 tercile edges (2008-2026)
 CORR_STRESS_P90 = {'low': 0.59, 'mid': 0.67, 'high': 0.80}   # forward-20 P90 of correlation by trailing tercile
 # trailing-63 correlation, 5% steps of its 2008-2026 distribution (for a percentile read-out)
@@ -62,7 +62,8 @@ def spy_states(spy: pd.DataFrame, mrs: pd.Series, label_fn) -> pd.DataFrame:
     d['close'], d['score'] = c, sc
     d['band'] = sc.map(lambda v: label_fn(v) if _fin(v) else np.nan)
     d['bandg'] = d['band'].map(BANDG)
-    d['trend'] = np.where(c / c.shift(251) - 1 >= 0, 'up', 'down')
+    d['r12'] = c / c.shift(251) - 1
+    d['trend'] = np.where(d['r12'] >= 0, 'up', 'down')
     d['ext_atr'] = (c - sma) / atr
     d['ext'] = np.select([d['ext_atr'] < -1, d['ext_atr'] > 1], ['below', 'above'], 'near')
     d.loc[d['ext_atr'].isna(), 'ext'] = np.nan
@@ -150,6 +151,7 @@ def snapshot(d: pd.DataFrame, rho: float, neff: float, vix: float, vix3m: float,
     pct = float((cost_hist <= cost).mean()) if _fin(cost) and cost_hist is not None and len(cost_hist) else np.nan
     rv, inv = vol_guide(d['close'])
     return dict(date=d.index[-1], band=last['band'], bandg=bg, trend=tr, ext=ex, ext_atr=float(last['ext_atr']),
+                r12=float(last['r12']) if _fin(last.get('r12')) else np.nan,
                 pedal=pedal(bg, tr, ex), cell=cs, rho=rho, neff=neff, inverted=bool(_fin(vix) and _fin(vix3m) and vix > vix3m),
                 vix=vix, vix3m=vix3m, cost=cost, cost_pct=pct, rv=rv, invested=inv)
 
@@ -167,19 +169,21 @@ def log_row(snap: dict) -> dict:
 # ── visuals (inline SVG / HTML, same look as the decision strip) ─────────────────
 CSS = (
     '<style>'
-    '.rp{background:#121212;border:1px solid #2a2724;border-left:3px solid #e3b48e;border-radius:6px;padding:12px 16px 10px 16px;margin:2px 0 12px 0;}'
-    '.rp .k{font-size:0.68rem;letter-spacing:0.12em;text-transform:uppercase;color:#e3b48e;font-weight:700;margin-bottom:8px;}'
-    '.rp .grid{display:grid;grid-template-columns:1.05fr 1.35fr 1fr 1fr;gap:12px;}'
-    '.rp .tile{background:#0d0d0d;border:1px solid #1f1d1b;border-radius:5px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;}'
-    '.rp .lab{font-size:0.64rem;letter-spacing:0.14em;text-transform:uppercase;color:#a89f95;display:flex;justify-content:space-between;align-items:center;gap:6px;}'
-    '.rp .big{font-size:1.5rem;font-weight:800;line-height:1.05;}'
-    '.rp .act{font-size:0.80rem;color:#f3ece2;line-height:1.45;}'
-    '.rp .sub{font-size:0.72rem;color:#a89f95;line-height:1.45;}'
+    '.rp{background:#121212;border:1px solid #2a2724;border-left:3px solid #e3b48e;border-radius:6px;padding:12px 16px 10px 16px;margin:2px 0 14px 0;}'
+    '.rp .k{font-size:0.70rem;letter-spacing:0.12em;text-transform:uppercase;color:#e3b48e;font-weight:700;margin-bottom:10px;}'
+    '.rp .grid{display:grid;grid-template-columns:1fr 1.4fr 1fr 1fr;gap:12px;}'
+    '.rp .tile{background:#0d0d0d;border:1px solid #24211e;border-radius:6px;padding:12px 14px;display:flex;flex-direction:column;gap:9px;}'
+    '.rp .lab{font-size:0.68rem;letter-spacing:0.13em;text-transform:uppercase;color:#a89f95;display:flex;justify-content:space-between;align-items:center;gap:6px;}'
+    '.rp .big{font-size:1.9rem;font-weight:800;line-height:1.0;}'
+    '.rp .act{font-size:0.86rem;color:#f3ece2;line-height:1.5;}'
+    '.rp .sub{font-size:0.76rem;color:#a89f95;line-height:1.5;}'
     '.rp .num{font-family:"IBM Plex Mono",monospace;}'
     '.rp .ev{display:inline-block;border:1px solid;border-radius:3px;padding:0 5px;font-size:0.60rem;font-weight:700;letter-spacing:0.04em;white-space:nowrap;line-height:1.5;}'
-    '.rp .seg{display:flex;gap:3px;margin:2px 0 2px 0;}'
-    '.rp .seg div{flex:1;height:7px;border-radius:2px;background:#1f1d1b;}'
-    '.rp .vg{margin-top:8px;padding-top:8px;border-top:1px solid #1f1d1b;}'
+    '.rp .seg{display:flex;gap:4px;}'
+    '.rp .seg div{flex:1;height:14px;border-radius:3px;background:#24211e;}'
+    '.rp .trk{position:relative;height:16px;background:#1c1a18;border-radius:3px;flex:1;}'
+    '.rp .row{display:flex;align-items:center;gap:8px;font-size:0.78rem;color:#c9c1b7;}'
+    '.rp .vg{margin-top:10px;padding-top:8px;border-top:1px solid #1f1d1b;}'
     '@media (max-width:1100px){.rp .grid{grid-template-columns:1fr 1fr;}}'
     '@media (max-width:640px){.rp .grid{grid-template-columns:1fr;}}'
     '</style>')
@@ -202,39 +206,39 @@ def _pct(v, dec=1, sign=True):
     return f'{"+" if sign and v > 0 else ""}{v:.{dec}f}%'
 
 
-def _range_svg(cell: dict, allx: dict, lo=-0.12, hi=0.12, w=300) -> str:
-    """Two horizontal P10-P90 bars on a -12%..+12% axis: all days (grey) and today's cell (colour), median ticks."""
-    def x(v):
-        return 8 + (min(max(v, lo), hi) - lo) / (hi - lo) * (w - 16)
-    def bar(st, y, col, op):
-        return (f'<rect x="{x(st["p10"]):.1f}" y="{y}" width="{max(x(st["p90"]) - x(st["p10"]), 2):.1f}" height="9" rx="2" fill="{col}" opacity="{op}"/>'
-                f'<rect x="{x(st["p50"]) - 1:.1f}" y="{y - 2}" width="2" height="13" fill="{INK}"/>')
-    g = ''
-    for t in (-0.10, -0.05, 0.0, 0.05, 0.10):
-        g += (f'<line x1="{x(t):.1f}" y1="6" x2="{x(t):.1f}" y2="44" stroke="{LINE if t else "#4a4540"}" stroke-width="1"/>'
-              f'<text x="{x(t):.1f}" y="56" fill="{DIM}" font-size="9" text-anchor="middle">{int(t * 100):+d}%</text>')
-    g += bar(allx, 10, '#5b5148', 0.9) + bar(cell, 28, COPPER, 0.85)
-    g += (f'<text x="{x(cell["p10"]) - 3:.1f}" y="36" fill="{ORANGE}" font-size="9.5" text-anchor="end">{_pct(cell["p10"])}</text>'
-          f'<text x="{x(cell["p90"]) + 3:.1f}" y="36" fill="{TEAL}" font-size="9.5">{_pct(cell["p90"])}</text>')
-    return (f'<div class="act">Bad case <b class="num" style="color:{ORANGE};">{_pct(cell["p10"])}</b>, good case '
-            f'<b class="num" style="color:{TEAL};">{_pct(cell["p90"])}</b> <span class="sub">(all days {_pct(allx["p10"])} / '
-            f'{_pct(allx["p90"])})</span></div>'
-            f'<svg viewBox="0 0 {w} 60" width="100%" style="display:block;max-height:80px;">{g}</svg>'
-            f'<div class="sub"><span style="color:#8a7f73;">■</span> all days &nbsp; <span style="color:{COPPER};">■</span> today\'s state'
-            f' &nbsp;·&nbsp; bars = bad case (P10) to good case (P90), tick = median</div>')
+def _x(v, lo, hi):
+    return (min(max(float(v), lo), hi) - lo) / (hi - lo) * 100
+
+
+def _range_svg(cell: dict, allx: dict, lo=-0.12, hi=0.12) -> str:
+    """Bad case (P10) to good case (P90) over the next 20 sessions: all days vs today's state, median tick."""
+    def row(lbl, st, col, txtcol):
+        a, b, m, z = _x(st['p10'], lo, hi), _x(st['p90'], lo, hi), _x(st['p50'], lo, hi), _x(0, lo, hi)
+        return (f'<div class="row"><span style="width:70px;color:{txtcol};">{lbl}</span><div class="trk">'
+                f'<div style="position:absolute;left:{z:.1f}%;top:-3px;bottom:-3px;width:1px;background:#5b544d;"></div>'
+                f'<div style="position:absolute;left:{a:.1f}%;width:{max(b - a, 1):.1f}%;top:0;bottom:0;background:{col};border-radius:3px;"></div>'
+                f'<div title="median" style="position:absolute;left:{m:.1f}%;top:-4px;bottom:-4px;width:3px;margin-left:-1px;background:{INK};border-radius:1px;"></div>'
+                f'</div><span class="num" style="width:104px;text-align:right;"><span style="color:{ORANGE};">{_pct(st["p10"])}</span>'
+                f' / <span style="color:{TEAL};">{_pct(st["p90"])}</span></span></div>')
+    ticks = ''.join(f'<span style="position:absolute;left:{_x(t, lo, hi):.1f}%;transform:translateX(-50%);">{int(t * 100):+d}%</span>'
+                    for t in (-0.10, -0.05, 0.0, 0.05, 0.10))
+    return (row("Today's state", cell, COPPER, INK) + row('All days', allx, '#5b5148', MUTED)
+            + f'<div class="row"><span style="width:70px;"></span><div style="position:relative;flex:1;height:14px;font-size:0.66rem;color:{DIM};">{ticks}</div>'
+            f'<span style="width:104px;"></span></div>'
+            f'<div class="sub">Bar = bad case (P10) to good case (P90), white tick = median.</div>')
 
 
 def _split_bar(up: float, dn: float, up_all: float, dn_all: float) -> str:
-    """Odds of a ≥5% move up vs down within 20 sessions, as two bars scaled to 40%."""
+    """Odds of a ≥5% move up vs down within 20 sessions (bars scaled to 40%), white marker = all days."""
     def row(lbl, v, va, col):
         wv = min(v / 0.4, 1) * 100; wa = min(va / 0.4, 1) * 100
-        return (f'<div style="display:flex;align-items:center;gap:6px;font-size:0.72rem;color:{MUTED};">'
-                f'<span style="width:62px;">{lbl}</span>'
-                f'<div style="flex:1;position:relative;height:9px;background:#1a1918;border-radius:2px;">'
-                f'<div style="position:absolute;left:0;top:0;bottom:0;width:{wv:.0f}%;background:{col};border-radius:2px;"></div>'
-                f'<div title="all days" style="position:absolute;left:{wa:.0f}%;top:-2px;bottom:-2px;width:2px;background:{INK};opacity:.7;"></div></div>'
-                f'<span class="num" style="width:34px;text-align:right;color:{col};">{v * 100:.0f}%</span></div>')
-    return row('≥5% up', up, up_all, TEAL) + row('≥5% down', dn, dn_all, ORANGE)
+        return (f'<div class="row"><span style="width:70px;">{lbl}</span><div class="trk">'
+                f'<div style="position:absolute;left:0;top:0;bottom:0;width:{wv:.0f}%;background:{col};border-radius:3px;"></div>'
+                f'<div title="all days {va * 100:.0f}%" style="position:absolute;left:{wa:.0f}%;top:-4px;bottom:-4px;width:3px;margin-left:-1px;background:{INK};"></div></div>'
+                f'<span class="num" style="width:104px;text-align:right;color:{col};font-weight:700;">{v * 100:.0f}%'
+                f' <span style="color:{DIM};font-weight:400;">vs {va * 100:.0f}%</span></span></div>')
+    return (row('≥5% up', up, up_all, TEAL) + row('≥5% down', dn, dn_all, ORANGE)
+            + '<div class="sub">Chance of a 5% move within 20 sessions; white marker = all days.</div>')
 
 
 def _dots(neff: float, total: int = 5) -> str:
@@ -242,26 +246,48 @@ def _dots(neff: float, total: int = 5) -> str:
     out = ''
     for i in range(total):
         f = min(max(neff - i, 0), 1)
-        out += (f'<svg width="20" height="20" viewBox="0 0 20 20" style="margin-right:3px;">'
-                f'<circle cx="10" cy="10" r="8" fill="none" stroke="{TEAL_M}" stroke-width="1.5"/>'
-                f'<clipPath id="c{i}"><rect x="0" y="0" width="{20 * f:.1f}" height="20"/></clipPath>'
-                f'<circle cx="10" cy="10" r="8" fill="{TEAL}" clip-path="url(#c{i})"/></svg>')
+        out += (f'<svg width="30" height="30" viewBox="0 0 30 30" style="margin-right:4px;">'
+                f'<circle cx="15" cy="15" r="12" fill="none" stroke="{TEAL_M}" stroke-width="2"/>'
+                f'<clipPath id="rpc{i}"><rect x="0" y="0" width="{30 * f:.1f}" height="30"/></clipPath>'
+                f'<circle cx="15" cy="15" r="12" fill="{TEAL}" clip-path="url(#rpc{i})"/></svg>')
     return f'<div style="display:flex;align-items:center;">{out}</div>'
 
 
-def _meter(v: float, lo: float, hi: float, marks: dict, grad: str, w=200) -> str:
-    """Horizontal gradient meter with a marker at v and labelled ticks."""
-    def x(z):
-        return 4 + (min(max(z, lo), hi) - lo) / (hi - lo) * (w - 8)
-    g = f'<rect x="4" y="8" width="{w - 8}" height="8" rx="3" fill="url(#gr{id(marks)})"/>'
-    g += f'<defs><linearGradient id="gr{id(marks)}" x1="0" x2="1" y1="0" y2="0">{grad}</linearGradient></defs>'
+def _meter(v: float, lo: float, hi: float, marks: dict, grad: str, w=None) -> str:
+    """Gradient meter (HTML) with a marker at v and labelled ticks."""
+    g = (f'<div style="position:relative;height:14px;border-radius:4px;background:linear-gradient(90deg,{grad});margin-top:8px;">')
     for lbl, z in marks.items():
-        g += (f'<line x1="{x(z):.1f}" y1="5" x2="{x(z):.1f}" y2="19" stroke="{MUTED}" stroke-width="1" stroke-dasharray="2,2"/>'
-              f'<text x="{x(z):.1f}" y="30" fill="{DIM}" font-size="8.5" text-anchor="middle">{_e(lbl)}</text>')
+        g += f'<div style="position:absolute;left:{_x(z, lo, hi):.1f}%;top:-2px;bottom:-2px;width:1px;background:rgba(243,236,226,0.45);"></div>'
     if _fin(v):
-        g += (f'<path d="M{x(v) - 5:.1f},1 L{x(v) + 5:.1f},1 L{x(v):.1f},8 Z" fill="{INK}"/>'
-              f'<rect x="{x(v) - 1:.1f}" y="7" width="2" height="11" fill="{INK}"/>')
-    return f'<svg viewBox="0 0 {w} 34" width="100%" height="34" style="display:block;">{g}</svg>'
+        xv = _x(v, lo, hi)
+        g += (f'<div style="position:absolute;left:{xv:.1f}%;top:-9px;transform:translateX(-50%);width:0;height:0;'
+              f'border-left:7px solid transparent;border-right:7px solid transparent;border-top:9px solid {INK};"></div>'
+              f'<div style="position:absolute;left:{xv:.1f}%;top:-2px;bottom:-2px;width:3px;margin-left:-1px;background:{INK};"></div>')
+    g += '</div><div style="position:relative;height:14px;font-size:0.66rem;color:#8a8279;">'
+    g += ''.join(f'<span style="position:absolute;left:{_x(z, lo, hi):.1f}%;transform:translateX(-50%);top:2px;">{_e(l)}</span>'
+                 for l, z in marks.items())
+    return g + '</div>'
+
+
+GRAD = f'{TEAL} 0%,#5b5148 50%,{ORANGE} 100%'
+
+
+def _atr_gauge(ext_atr: float, lo=-3.0, hi=3.0) -> str:
+    """SPY vs its 50-day in ATR; the PRESS zone (below -1 ATR) shaded."""
+    z = _x(-1, lo, hi)
+    g = (f'<div style="position:relative;height:14px;border-radius:4px;background:#1c1a18;margin-top:8px;">'
+         f'<div style="position:absolute;left:0;width:{z:.1f}%;top:0;bottom:0;background:rgba(133,202,197,0.30);border-radius:4px 0 0 4px;"></div>'
+         f'<div style="position:absolute;left:{_x(0, lo, hi):.1f}%;top:-2px;bottom:-2px;width:1px;background:#6e675f;"></div>')
+    if _fin(ext_atr):
+        xv = _x(ext_atr, lo, hi)
+        g += (f'<div style="position:absolute;left:{xv:.1f}%;top:-9px;transform:translateX(-50%);width:0;height:0;'
+              f'border-left:7px solid transparent;border-right:7px solid transparent;border-top:9px solid {INK};"></div>'
+              f'<div style="position:absolute;left:{xv:.1f}%;top:-2px;bottom:-2px;width:3px;margin-left:-1px;background:{INK};"></div>')
+    g += '</div><div style="position:relative;height:14px;font-size:0.66rem;color:#8a8279;">'
+    g += (f'<span style="position:absolute;left:{z / 2:.1f}%;transform:translateX(-50%);top:2px;color:{TEAL};">PRESS zone</span>'
+          f'<span style="position:absolute;left:{_x(0, lo, hi):.1f}%;transform:translateX(-50%);top:2px;">50-day</span>'
+          f'<span style="position:absolute;right:0;top:2px;">+3 ATR</span>')
+    return g + '</div>'
 
 
 PEDAL_TXT = {
@@ -295,41 +321,45 @@ def insurance_sentence(bandg: str, trend: str, inverted: bool) -> str:
 def panel_html(snap: dict) -> str:
     p = snap['pedal']; col = PEDAL_COL[p]
     head, body, evk = PEDAL_TXT[p]
-    segs = ''.join(f'<div style="background:{PEDAL_COL[k] if k == p else "#1f1d1b"};"></div>' for k in ('EASE OFF', 'NORMAL', 'PRESS'))
-    seg_lbl = ''.join(f'<span style="flex:1;text-align:center;color:{PEDAL_COL[k] if k == p else DIM};">{k}</span>'
+    segs = ''.join(f'<div style="background:{PEDAL_COL[k] if k == p else "#24211e"};"></div>' for k in ('EASE OFF', 'NORMAL', 'PRESS'))
+    seg_lbl = ''.join(f'<span style="flex:1;text-align:center;color:{PEDAL_COL[k] if k == p else DIM};font-weight:{700 if k == p else 400};">{k}</span>'
                       for k in ('EASE OFF', 'NORMAL', 'PRESS'))
     h = CSS + '<div class="rp"><div class="k">Risk today · how much risk the book can carry</div><div class="grid">'
     # 1. Pedal
+    r12 = snap.get('r12')
+    ease_txt = (f'EASE OFF needs RISK-OFF <b>and</b> SPY below its level of a year ago '
+                f'(now {_pct(r12)} over 12 months).' if _fin(r12) else 'EASE OFF needs RISK-OFF and SPY below its level of a year ago.')
     h += (f'<div class="tile"><div class="lab">Pedal {_ev(evk) if evk else ""}</div>'
           f'<div class="big" style="color:{col};">{p}</div>'
-          f'<div class="seg">{segs}</div><div style="display:flex;font-size:0.58rem;letter-spacing:0.06em;">{seg_lbl}</div>'
-          f'<div class="act"><b>{head}</b> {body}</div></div>')
-    # 2. Today's cell
+          f'<div class="seg">{segs}</div><div style="display:flex;font-size:0.66rem;letter-spacing:0.05em;margin-top:-4px;">{seg_lbl}</div>'
+          f'<div class="act"><b>{head}</b> {body}</div>'
+          f'<div class="sub" style="margin-top:2px;">SPY vs its 50-day: <b class="num" style="color:{INK};">{snap["ext_atr"]:+.2f} ATR</b>. '
+          f'PRESS below −1 ATR.</div>{_atr_gauge(snap["ext_atr"])}'
+          f'<div class="sub">{ease_txt}</div></div>')
+    # 2. Today's state
     cs = snap['cell']; c, a = cs['cell'], cs['all']
-    state_txt = (f'{_e(snap["band"])} · SPY 12-month {snap["trend"]} · {EXT_TXT[snap["ext"]]} '
-                 f'({snap["ext_atr"]:+.2f} ATR)')
-    scope = '' if cs['scope'] == 'cell' else ' <span style="color:#f8d6b4;">(band only: too few days in the exact cell)</span>'
+    state_txt = (f'<b>{_e(snap["band"])}</b> · SPY 12-month {snap["trend"]} · {EXT_TXT[snap["ext"]]}')
+    scope = '' if cs['scope'] == 'cell' else ' <span style="color:#f8d6b4;">(band only: too few days in the exact state)</span>'
     fast_c = ORANGE if c['fast'] > a['fast'] * 1.3 else (TEAL if c['fast'] < a['fast'] * 0.7 else INK)
-    h += (f'<div class="tile"><div class="lab">Today\'s state · next 20 sessions since 2008 {_ev("Descriptive")}</div>'
+    h += (f'<div class="tile"><div class="lab">Today\'s state · next 20 sessions, since 2008 {_ev("Descriptive")}</div>'
           f'<div class="act">{state_txt}{scope}</div>'
           f'{_range_svg(c, a)}{_split_bar(c["up5"], c["dn5"], a["up5"], a["dn5"])}'
-          f'<div class="sub">Fast drop of 7% or more: <b class="num" style="color:{fast_c};">{c["fast"] * 100:.0f}%</b> of cases '
-          f'(all days {a["fast"] * 100:.0f}%) · {c["n"]:,} days</div></div>')
+          f'<div class="act">Fast drop of 7% or more: <b class="num" style="color:{fast_c};">{c["fast"] * 100:.0f}%</b> '
+          f'<span class="sub">of cases (all days {a["fast"] * 100:.0f}%) · {c["n"]:,} days</span></div></div>')
     # 3. Effective bets
     if _fin(snap['rho']):
         terc = corr_tercile(snap['rho']); stress = CORR_STRESS_P90[terc]; neff_s = 5 / (1 + 4 * stress)
         flag = snap['trend'] == 'down' or snap['inverted']
         nc = TEAL if snap['neff'] >= 2.3 else (ORANGE if snap['neff'] < 1.6 else INK)
         cp = corr_pctile(snap['rho'])
-        grad = f'<stop offset="0" stop-color="{TEAL}"/><stop offset="0.5" stop-color="#5b5148"/><stop offset="1" stop-color="{ORANGE}"/>'
         h += (f'<div class="tile"><div class="lab">Effective bets {_ev("Descriptive")}</div>'
               f'<div style="display:flex;align-items:baseline;gap:8px;"><span class="big num" style="color:{nc};">{snap["neff"]:.1f}</span>'
               f'<span class="sub">independent bets in 5 positions</span></div>{_dots(snap["neff"])}'
-              f'{_meter(snap["rho"], 0.1, 0.9, {"P10": CORR_Q[2], "median": CORR_Q[10], "P90": CORR_Q[18]}, grad)}'
-              f'<div class="sub">Industries move together at <b class="num" style="color:{INK};">{snap["rho"]:.2f}</b> '
-              f'(63-day average correlation, {_ord(int(round(cp * 100)))} percentile since 2008). '
-              f'In a stress month this has dropped to about <b>{neff_s:.1f} bets</b>.</div>'
-              f'<div class="act"><b>Count names that move together as one position, and keep no more than half of your open '
+              f'<div class="sub">How much industries move together (63-day): <b class="num" style="color:{INK};">{snap["rho"]:.2f}</b>, '
+              f'{_ord(int(round(cp * 100)))} percentile since 2008.</div>'
+              f'{_meter(snap["rho"], 0.1, 0.9, {"P10": CORR_Q[2], "median": CORR_Q[10], "P90": CORR_Q[18]}, GRAD)}'
+              f'<div class="sub">In a stress month this has dropped to about <b style="color:{INK};">{neff_s:.1f} bets</b>.</div>'
+              f'<div class="act"><b>Count names that move together as one position; no more than half of your open '
               f'risk in one sector.</b>'
               + (' <span style="color:#f4a062;"><b>Correlation runs highest in this state: treat the book as about 1.5 bets.</b></span>' if flag else '')
               + '</div></div>')
@@ -337,13 +367,13 @@ def panel_html(snap: dict) -> str:
         h += f'<div class="tile"><div class="lab">Effective bets</div><div class="sub">Industry prices not available.</div></div>'
     # 4. Insurance cost
     if _fin(snap['cost']):
-        grad = f'<stop offset="0" stop-color="{TEAL}"/><stop offset="0.5" stop-color="#5b5148"/><stop offset="1" stop-color="{ORANGE}"/>'
         pc = snap['cost_pct']
         h += (f'<div class="tile"><div class="lab">Insurance cost {_ev("Descriptive")}</div>'
               f'<div style="display:flex;align-items:baseline;gap:8px;"><span class="big num" style="color:{INK};">{snap["cost"] * 100:.2f}%</span>'
-              f'<span class="sub">of SPY per month · 3-month put, 10% OTM</span></div>'
-              f'{_meter(pc, 0, 1, {"cheap": 0.2, "median": 0.5, "dear": 0.8}, grad)}'
-              f'<div class="sub">{"—" if not _fin(pc) else _ord(int(round(pc * 100))) + " percentile since 2008"} · VIX3M {snap["vix3m"]:.1f}</div>'
+              f'<span class="sub">of SPY per month</span></div>'
+              f'<div class="sub">3-month SPY put, 10% out of the money · VIX3M {snap["vix3m"]:.1f} · '
+              f'{"—" if not _fin(pc) else _ord(int(round(pc * 100))) + " percentile since 2008"}</div>'
+              f'{_meter(pc, 0, 1, {"cheap": 0.2, "median": 0.5, "dear": 0.8}, GRAD)}'
               f'<div class="act">{insurance_sentence(snap["bandg"], snap["trend"], snap["inverted"])}</div></div>')
     else:
         h += '<div class="tile"><div class="lab">Insurance cost</div><div class="sub">VIX3M not available.</div></div>'
@@ -353,12 +383,12 @@ def panel_html(snap: dict) -> str:
     if _fin(inv) and _fin(snap['rv']):
         h += (f'<details class="vg"><summary class="lab" style="display:list-item;cursor:pointer;">Book volatility guide '
               f'· {inv * 100:.0f}% invested {_ev("Descriptive")}</summary>'
-              f'<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px;">'
-              f'<div style="flex:0 0 220px;height:9px;background:#1a1918;border-radius:2px;position:relative;">'
-              f'<div style="position:absolute;left:0;top:0;bottom:0;width:{inv * 100:.0f}%;background:{TEAL_M};border-radius:2px;"></div>'
-              f'<div title="cap 60%" style="position:absolute;left:60%;top:-3px;bottom:-3px;width:2px;background:{COPPER};"></div></div>'
+              f'<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:8px;">'
+              f'<div class="trk" style="flex:0 0 260px;">'
+              f'<div style="position:absolute;left:0;top:0;bottom:0;width:{inv * 100:.0f}%;background:{TEAL_M};border-radius:3px;"></div>'
+              f'<div title="cap 60%" style="position:absolute;left:60%;top:-4px;bottom:-4px;width:3px;background:{COPPER};"></div></div>'
               f'<span class="sub">SPY realized volatility (21 days) <b class="num" style="color:{INK};">{snap["rv"] * 100:.1f}%</b>. '
-              f'A 10% volatility target would hold <b class="num" style="color:{INK};">{inv * 100:.0f}% invested</b> (cap 60%). '
+              f'A 10% volatility target would hold <b class="num" style="color:{INK};">{inv * 100:.0f}% invested</b> (cap 60%, copper line). '
               f'Reviewed weekly. In the 2008–2026 replay, weekly volatility scaling had a 10–13 pp smaller max drawdown at a '
               f'similar or better Sharpe than holding the same average exposure.</span></div></details>')
     h += '</div>'
