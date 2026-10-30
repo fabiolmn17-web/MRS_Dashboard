@@ -826,19 +826,59 @@ def _wl_commit(df, msg):
     return True
 
 
+def _wl_draft():
+    """Working copy of the watchlist that the editor changes; reset whenever the saved list changes."""
+    if st.session_state.get('wl_draft_sha', '∅') != st.session_state.get('wl_sha') or 'wl_draft' not in st.session_state:
+        d = _wl_df().copy()
+        d['remove'] = False
+        st.session_state['wl_draft'] = d
+        st.session_state['wl_draft_sha'] = st.session_state.get('wl_sha')
+    return st.session_state['wl_draft']
+
+
 def _wl_star(t, key):
-    """One-click add / remove for ticker t (chart panel and ticker lookup)."""
+    """One-click add / remove for ticker t (chart panel and ticker lookup). Unsaved edits of other rows are kept."""
     on = t in set(_wl_df()['ticker'])
     if st.button('★ On watchlist · remove' if on else '☆ Add to watchlist', key=f'{key}_{t}',
                  type='secondary' if on else 'primary'):
+        keep = _wl_draft().copy()
         d = watchlist.remove(_wl_df(), t) if on else watchlist.add(_wl_df(), t, date.today().isoformat())
         if _wl_commit(d, f'watchlist: {"remove" if on else "add"} {t}'):
             st.session_state['wl_pick'] = None if on else t
+            keep = keep[keep['ticker'] != t] if on else pd.concat(
+                [keep, watchlist.add(watchlist.empty(), t, date.today().isoformat()).assign(remove=False)], ignore_index=True)
+            st.session_state['wl_draft'] = keep.reset_index(drop=True)
+            st.session_state['wl_draft_sha'] = st.session_state.get('wl_sha')
+            st.session_state['wl_ver'] = st.session_state.get('wl_ver', 0) + 1
         st.rerun()
 
 
+_WL_MAP = {'Trigger': 'trigger', 'Stop': 'stop', 'Note': 'note', 'Remove': 'remove'}
+
+
+def _wl_apply_edits(key):
+    """Editor on_change: copy the cell edits into the draft, then start a fresh editor so the computed columns update."""
+    ch = st.session_state.get(key) or {}
+    d = st.session_state['wl_draft'].copy()
+    for idx, cols in (ch.get('edited_rows') or {}).items():
+        i = int(idx)
+        if i >= len(d):
+            continue
+        for col, val in cols.items():
+            c = _WL_MAP.get(col)
+            if c in ('trigger', 'stop'):
+                d.at[i, c] = pd.to_numeric(val, errors='coerce')
+            elif c == 'note':
+                d.at[i, c] = '' if val is None else str(val)
+            elif c == 'remove':
+                d.at[i, c] = bool(val)
+    st.session_state['wl_draft'] = d
+    st.session_state['wl_ver'] = st.session_state.get('wl_ver', 0) + 1
+
+
 def _wl_section_body():
-    d = _wl_df()
+    saved = _wl_df()
+    d = _wl_draft()
     err = st.session_state.get('wl_err')
     st.markdown('<div class="section-header">Watchlist</div>', unsafe_allow_html=True)
     if err:
@@ -852,64 +892,80 @@ def _wl_section_body():
     for _, r in d.iterrows():
         h = _chart_history(r['ticker'])
         close = float(h['Close'].iloc[-1]) if h is not None and len(h) else np.nan
-        to_trg, risk = watchlist.metrics(r, close)
-        rows.append({'Ticker': r['ticker'], 'Added': r['added'], 'Last': close, 'To trigger': to_trg * 100,
-                     'Trigger': r['trigger'], 'Stop': r['stop'], 'Risk': risk * 100, 'Note': r['note'],
-                     'Remove': False})
+        atr = watchlist.atr14(h)
+        to_trg, to_atr, risk, risk_atr, atr_pct = watchlist.live_row(r, close, atr)
+        rows.append({'Ticker': r['ticker'], 'Last': close, 'ATR': atr, 'ATR %': atr_pct * 100,
+                     'Trigger': r['trigger'], 'To trigger': to_trg * 100, 'To trigger, ATR': to_atr * 100,
+                     'Stop': r['stop'], 'Risk': risk * 100, 'Risk, ATR': risk_atr * 100, 'Note': r['note'],
+                     'Remove': bool(r.get('remove', False)), 'Added': r['added']})
     view = pd.DataFrame(rows)
-    c_tab, c_ch = st.columns([1.55, 1], gap='medium')
-    with c_tab:
-        ed = st.data_editor(
-            view, key=f'wl_editor_{st.session_state.get("wl_sha") or "local"}', hide_index=True,
-            use_container_width=True, num_rows='fixed',
-            column_order=['Ticker', 'Last', 'Trigger', 'To trigger', 'Stop', 'Risk', 'Note', 'Remove', 'Added'],
-            disabled=['Ticker', 'Added', 'Last', 'To trigger', 'Risk'],
-            column_config={
-                'Ticker': st.column_config.TextColumn(width='small'),
-                'Last': st.column_config.NumberColumn(format='%.2f', width='small'),
-                'Trigger': st.column_config.NumberColumn(format='%.2f', width='small', help='Price where the setup triggers'),
-                'To trigger': st.column_config.NumberColumn(format='%+.1f%%', width='small',
-                                                            help='Distance from the last close to the trigger'),
-                'Stop': st.column_config.NumberColumn(format='%.2f', width='small', help='Where the setup is wrong'),
-                'Risk': st.column_config.NumberColumn(format='%.1f%%', width='small',
-                                                      help='Trigger to stop, in % of the trigger'),
-                'Note': st.column_config.TextColumn(width='medium', help='Setup, level, what you wait for'),
-                'Added': st.column_config.TextColumn(width='small'),
-                'Remove': st.column_config.CheckboxColumn(width='small'),
-            })
-        new = d.copy()
-        new['note'] = ed['Note'].fillna('').astype(str).values
-        new['trigger'] = pd.to_numeric(ed['Trigger'], errors='coerce').values
-        new['stop'] = pd.to_numeric(ed['Stop'], errors='coerce').values
-        new = new[~ed['Remove'].fillna(False).astype(bool).values]
-        changed = not watchlist._clean(new).equals(watchlist._clean(d))
-        b1, b2 = st.columns([1, 3])
-        with b1:
-            if st.button('Save changes', type='primary', disabled=not changed, key='wl_save', use_container_width=True):
-                if _wl_commit(new, 'watchlist: edit'):
-                    st.rerun()
-        with b2:
-            st.markdown('<div style="font-size:0.70rem;color:#9b958f;padding-top:8px;">Edit Trigger, Stop and Note in '
-                        'the table, tick Remove to drop a name, then Save. Saved to GitHub (branch "watchlist"), so '
-                        'it is the same on every device.' + (' <b style="color:#e3b48e;">Unsaved changes.</b>' if changed else '')
-                        + '</div>', unsafe_allow_html=True)
+    ekey = f'wl_editor_{st.session_state.get("wl_ver", 0)}'
+    st.data_editor(
+        view, key=ekey, hide_index=True, use_container_width=True, num_rows='fixed',
+        on_change=_wl_apply_edits, args=(ekey,),
+        column_order=['Ticker', 'Last', 'ATR', 'Trigger', 'To trigger', 'To trigger, ATR', 'Stop', 'Risk', 'Risk, ATR',
+                      'Note', 'Remove', 'Added'],
+        disabled=['Ticker', 'Last', 'ATR', 'ATR %', 'To trigger', 'To trigger, ATR', 'Risk', 'Risk, ATR', 'Added'],
+        column_config={
+            'Ticker': st.column_config.TextColumn(width='small'),
+            'Last': st.column_config.NumberColumn(format='%.2f', width='small'),
+            'ATR': st.column_config.NumberColumn(format='%.2f', width='small',
+                                                 help='Average true range, 14 days (Wilder), in $'),
+            'Trigger': st.column_config.NumberColumn(format='%.2f', width='small', help='Price where the setup triggers'),
+            'To trigger': st.column_config.NumberColumn(format='%+.1f%%', width='small',
+                                                        help='Move from the last close to the trigger, in %. '
+                                                             '+ = price must rise, − = price must fall'),
+            'To trigger, ATR': st.column_config.NumberColumn(format='%+.0f%%', width='small',
+                                                             help='Move from the last close to the trigger as a % of '
+                                                                  'one ATR (100% = one average day)'),
+            'Stop': st.column_config.NumberColumn(format='%.2f', width='small', help='Where the setup is wrong'),
+            'Risk': st.column_config.NumberColumn(format='%.1f%%', width='small',
+                                                  help='Trigger to stop, in % of the trigger'),
+            'Risk, ATR': st.column_config.NumberColumn(format='%.0f%%', width='small',
+                                                       help='Trigger to stop as a % of one ATR'),
+            'Note': st.column_config.TextColumn(width='large', help='Setup, level, what you wait for'),
+            'Remove': st.column_config.CheckboxColumn(width='small'),
+            'Added': st.column_config.TextColumn(width='small'),
+        })
+    new = d[~d['remove'].fillna(False).astype(bool)].drop(columns=['remove'])
+    changed = not watchlist._clean(new).equals(watchlist._clean(saved))
+    b1, b2, b3 = st.columns([1, 1, 4])
+    with b1:
+        if st.button('Save changes', type='primary', disabled=not changed, key='wl_save', use_container_width=True):
+            if _wl_commit(new, 'watchlist: edit'):
+                st.session_state.pop('wl_draft', None)
+                st.session_state['wl_ver'] = st.session_state.get('wl_ver', 0) + 1
+                st.rerun()
+    with b2:
+        if st.button('Discard', disabled=not changed, key='wl_discard', use_container_width=True):
+            st.session_state.pop('wl_draft', None)
+            st.session_state['wl_ver'] = st.session_state.get('wl_ver', 0) + 1
+            st.rerun()
+    with b3:
+        st.markdown('<div style="font-size:0.70rem;color:#9b958f;padding-top:8px;">Edit Trigger, Stop and Note (the '
+                    'other columns update as you type), tick Remove to drop a name, then Save. ATR = 14-day average '
+                    'true range; "ATR" columns show the move as a % of one average day. Saved to GitHub (branch '
+                    '"watchlist"), the same on every device.'
+                    + (' <b style="color:#e3b48e;">Unsaved changes.</b>' if changed else '') + '</div>',
+                    unsafe_allow_html=True)
+    tick = list(d['ticker'])
+    cur = st.session_state.get('wl_pick')
+    pick = st.radio('Chart', tick, index=tick.index(cur) if cur in tick else 0, horizontal=True,
+                    key='wl_radio', label_visibility='collapsed')
+    st.session_state['wl_pick'] = pick
+    h = _chart_history(pick)
+    if h is None or len(h) < 30:
+        st.info(f'No price history for {pick}.')
+        return
+    fig = chart_view.figure(h, pick, height=380)
+    r = d[d['ticker'] == pick].iloc[0]
+    for val, col, lbl in ((r['trigger'], '#85cac5', 'trigger'), (r['stop'], '#f4a062', 'stop')):
+        if pd.notna(val):
+            fig.add_hline(y=float(val), line=dict(color=col, width=1.4, dash='dash'),
+                          annotation_text=f'{lbl} {float(val):,.2f}', annotation_position='top left',
+                          annotation_font=dict(color=col, size=11))
+    c_ch, _sp = st.columns([1.4, 1])
     with c_ch:
-        tick = list(d['ticker'])
-        cur = st.session_state.get('wl_pick')
-        pick = st.radio('Chart', tick, index=tick.index(cur) if cur in tick else 0, horizontal=True,
-                        key='wl_radio', label_visibility='collapsed')
-        st.session_state['wl_pick'] = pick
-        h = _chart_history(pick)
-        if h is None or len(h) < 30:
-            st.info(f'No price history for {pick}.')
-            return
-        fig = chart_view.figure(h, pick, height=340)
-        r = d[d['ticker'] == pick].iloc[0]
-        for val, col, lbl in ((r['trigger'], '#85cac5', 'trigger'), (r['stop'], '#f4a062', 'stop')):
-            if pd.notna(val):
-                fig.add_hline(y=float(val), line=dict(color=col, width=1.4, dash='dash'),
-                              annotation_text=f'{lbl} {float(val):,.2f}', annotation_position='top left',
-                              annotation_font=dict(color=col, size=11))
         chart_view.show(st, components, fig, 'wl_chart', _CHART_CFG)
 
 

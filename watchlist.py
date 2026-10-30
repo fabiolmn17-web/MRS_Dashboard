@@ -132,3 +132,24 @@ def metrics(row, close):
     to_trg = (float(trg) / close - 1) if _fin(trg) and _fin(close) and close else math.nan
     risk = (abs(float(trg) - float(stp)) / float(trg)) if _fin(trg) and _fin(stp) and float(trg) else math.nan
     return to_trg, risk
+
+
+def atr14(h: pd.DataFrame) -> float:
+    """Wilder ATR(14) on daily bars (the TradingView default)."""
+    if h is None or len(h) < 15:
+        return math.nan
+    c, hi, lo = h['Close'], h['High'], h['Low']
+    tr = pd.concat([hi - lo, (hi - c.shift()).abs(), (lo - c.shift()).abs()], axis=1).max(axis=1)
+    return float(tr.ewm(alpha=1 / 14, adjust=False).mean().iloc[-1])
+
+
+def live_row(row, close, atr):
+    """All computed columns for one entry: To trigger (% and % of ATR), Risk (% and % of ATR), ATR as % of price."""
+    trg, stp = row.get('trigger'), row.get('stop')
+    ok_c, ok_a = _fin(close) and close, _fin(atr) and atr
+    to_trg = (float(trg) / close - 1) if _fin(trg) and ok_c else math.nan
+    to_trg_atr = (float(trg) - close) / atr if _fin(trg) and ok_c and ok_a else math.nan
+    risk = (abs(float(trg) - float(stp)) / float(trg)) if _fin(trg) and _fin(stp) and float(trg) else math.nan
+    risk_atr = abs(float(trg) - float(stp)) / atr if _fin(trg) and _fin(stp) and ok_a else math.nan
+    atr_pct = atr / close if ok_a and ok_c else math.nan
+    return to_trg, to_trg_atr, risk, risk_atr, atr_pct
