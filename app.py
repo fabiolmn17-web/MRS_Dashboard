@@ -865,6 +865,10 @@ def _wl_apply_edits(key):
         if i >= len(d):
             continue
         for col, val in cols.items():
+            if col == 'Chart':                       # v5.4: tick a row to show its chart (replaces the radio row)
+                if val:
+                    st.session_state['wl_pick'] = d.at[i, 'ticker']
+                continue
             c = _WL_MAP.get(col)
             if c in ('trigger', 'stop'):
                 d.at[i, c] = pd.to_numeric(val, errors='coerce')
@@ -877,10 +881,17 @@ def _wl_apply_edits(key):
 
 
 def _wl_section_body():
+    """v5.4: the watchlist sits in a collapsible section (open by default; the open/closed state is kept while the
+    page is open)."""
+    st.markdown('<div class="section-header">Watchlist</div>', unsafe_allow_html=True)
+    with st.expander('Watchlist table and chart (click to open / close)', expanded=True):
+        _wl_inner()
+
+
+def _wl_inner():
     saved = _wl_df()
     d = _wl_draft()
     err = st.session_state.get('wl_err')
-    st.markdown('<div class="section-header">Watchlist</div>', unsafe_allow_html=True)
     if err:
         st.caption(f'⚠ {err}')
     if d.empty:
@@ -888,13 +899,17 @@ def _wl_section_body():
                     '<b style="color:#e3b48e;">☆ Add to watchlist</b> above a chart in the scanner or the ticker '
                     'lookup below.</div>', unsafe_allow_html=True)
         return
+    tick = list(d['ticker'])
+    cur = st.session_state.get('wl_pick')
+    pick = cur if cur in tick else tick[0]
+    st.session_state['wl_pick'] = pick
     rows = []
     for _, r in d.iterrows():
         h = _chart_history(r['ticker'])
         close = float(h['Close'].iloc[-1]) if h is not None and len(h) else np.nan
         atr = watchlist.atr14(h)
         to_trg, to_atr, risk, risk_atr, atr_pct = watchlist.live_row(r, close, atr)
-        rows.append({'Ticker': r['ticker'], 'Last': close, 'ATR': atr, 'ATR %': atr_pct * 100,
+        rows.append({'Ticker': r['ticker'], 'Chart': r['ticker'] == pick, 'Last': close, 'ATR': atr, 'ATR %': atr_pct * 100,
                      'Trigger': r['trigger'], 'To trigger': to_trg * 100, 'To trigger, ATR': to_atr * 100,
                      'Stop': r['stop'], 'Risk': risk * 100, 'Risk, ATR': risk_atr * 100, 'Note': r['note'],
                      'Remove': bool(r.get('remove', False)), 'Added': r['added']})
@@ -903,11 +918,13 @@ def _wl_section_body():
     st.data_editor(
         view, key=ekey, hide_index=True, use_container_width=True, num_rows='fixed',
         on_change=_wl_apply_edits, args=(ekey,),
-        column_order=['Ticker', 'Last', 'ATR', 'Trigger', 'To trigger', 'To trigger, ATR', 'Stop', 'Risk', 'Risk, ATR',
+        column_order=['Ticker', 'Chart', 'Last', 'ATR', 'Trigger', 'To trigger', 'To trigger, ATR', 'Stop', 'Risk', 'Risk, ATR',
                       'Note', 'Remove', 'Added'],
         disabled=['Ticker', 'Last', 'ATR', 'ATR %', 'To trigger', 'To trigger, ATR', 'Risk', 'Risk, ATR', 'Added'],
         column_config={
             'Ticker': st.column_config.TextColumn(width='small'),
+            'Chart': st.column_config.CheckboxColumn('📈', width='small',
+                                                     help='Tick a row to show its chart below the table'),
             'Last': st.column_config.NumberColumn(format='%.2f', width='small'),
             'ATR': st.column_config.NumberColumn(format='%.2f', width='small',
                                                  help='Average true range, 14 days (Wilder), in $'),
@@ -942,17 +959,12 @@ def _wl_section_body():
             st.session_state['wl_ver'] = st.session_state.get('wl_ver', 0) + 1
             st.rerun()
     with b3:
-        st.markdown('<div style="font-size:0.70rem;color:#9b958f;padding-top:8px;">Edit Trigger, Stop and Note (the '
+        st.markdown('<div style="font-size:0.70rem;color:#9b958f;padding-top:8px;">Tick 📈 to chart a name. Edit Trigger, Stop and Note (the '
                     'other columns update as you type), tick Remove to drop a name, then Save. ATR = 14-day average '
                     'true range; "ATR" columns show the move as a % of one average day. Saved to GitHub (branch '
                     '"watchlist"), the same on every device.'
                     + (' <b style="color:#e3b48e;">Unsaved changes.</b>' if changed else '') + '</div>',
                     unsafe_allow_html=True)
-    tick = list(d['ticker'])
-    cur = st.session_state.get('wl_pick')
-    pick = st.radio('Chart', tick, index=tick.index(cur) if cur in tick else 0, horizontal=True,
-                    key='wl_radio', label_visibility='collapsed')
-    st.session_state['wl_pick'] = pick
     h = _chart_history(pick)
     if h is None or len(h) < 30:
         st.info(f'No price history for {pick}.')
