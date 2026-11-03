@@ -6,6 +6,8 @@ Handles filtering of ETFs, preferred shares, warrants, etc.
 """
 
 import logging
+import re
+from datetime import date
 from pathlib import Path
 from typing import List, Dict, Optional, Set
 import pandas as pd
@@ -29,12 +31,60 @@ EXCLUDED_SUFFIXES = {
     ".WS",   # Warrants
     ".U",    # Units
     ".R",    # Rights
-    "-A",    # Class shares (keep these)
-    "-B",
-    "-C",
+    # "-A" / "-B" / "-C" class shares are KEPT (BRK-B, BF-B were wrongly dropped before 3 Nov 2026)
     ".PR",   # Preferred
     "-P",
 }
+
+
+
+# ── US liquid universe (3 Nov 2026) ──────────────────────────────────────────
+# Every NYSE / NASDAQ / AMEX listing from the daily NASDAQ screener copies kept on GitHub (rreichel3/US-Stock-Symbols,
+# reachable from GitHub Actions, unlike iShares and api.nasdaq.com), filtered to common stocks and ADRs with a market
+# cap of at least $1B and a price of at least $10. The scanner then drops names whose 50-day average dollar volume is
+# under $20M (scanner.MIN_DOLLAR_VOLUME), from its own price download. The last good list is saved next to this file
+# (universe_us.csv) and used when the download fails; the S&P 500 is the last resort.
+US_LIST_URL = 'https://raw.githubusercontent.com/rreichel3/US-Stock-Symbols/main/{ex}/{ex}_full_tickers.json'
+SAVED_UNIVERSE = Path(__file__).parent / 'universe_us.csv'
+US_MIN_MCAP = 1e9
+US_MIN_PRICE = 10.0
+US_MIN_NAMES = 900                         # fewer = the download is broken: use the saved list
+_NOT_COMMON = re.compile(r'\bnotes?\b|debenture|preferred|\bwarrants?\b|\brights?\b(?! to receive)|perpetual|'
+                         r'\bunits?\s*$|acquisition corp|\bETF\b|\bfund\b', re.I)
+NASDAQ_TO_YF_SECTOR = {'Technology': 'Technology', 'Finance': 'Financial Services', 'Health Care': 'Healthcare',
+                       'Consumer Discretionary': 'Consumer Cyclical', 'Consumer Staples': 'Consumer Defensive',
+                       'Industrials': 'Industrials', 'Energy': 'Energy', 'Utilities': 'Utilities',
+                       'Real Estate': 'Real Estate', 'Basic Materials': 'Basic Materials',
+                       'Telecommunications': 'Communication Services'}
+
+
+def build_us_liquid(timeout: int = 60) -> pd.DataFrame:
+    """Download and filter the US listings. Columns: ticker, name, exchange, sector (yfinance naming, from NASDAQ's
+    coarse classification: a fallback only), industry, market_cap, price, country, built."""
+    rows = []
+    for ex in ('nyse', 'nasdaq', 'amex'):
+        r = requests.get(US_LIST_URL.format(ex=ex), timeout=timeout, headers={'User-Agent': 'Mozilla/5.0'})
+        r.raise_for_status()
+        for x in r.json():
+            x['exchange'] = ex.upper()
+            rows.append(x)
+    d = pd.DataFrame(rows)
+    d['price'] = pd.to_numeric(d['lastsale'].astype(str).str.replace(r'[$,]', '', regex=True), errors='coerce')
+    d['market_cap'] = pd.to_numeric(d['marketCap'], errors='coerce')
+    sym = d['symbol'].astype(str).str.strip()
+    d = d[~sym.str.contains(r'\^', regex=True)].copy()                 # ^ = preferred series
+    d['ticker'] = d['symbol'].astype(str).str.strip().str.replace('/', '-', regex=False)   # BRK/B -> BRK-B
+    dv = d['price'] * pd.to_numeric(d['volume'], errors='coerce')
+    # market cap missing in the source for a few real stocks (BF-B): keep those if the day traded >= $20M
+    big = (d['market_cap'] >= US_MIN_MCAP) | ((d['market_cap'].isna() | (d['market_cap'] <= 0)) & (dv >= 20e6))
+    d = d[big & (d['price'] >= US_MIN_PRICE) & (d['ticker'].str.len() <= 6)
+          & ~d['name'].astype(str).str.contains(_NOT_COMMON)]
+    d = d.drop_duplicates('ticker')
+    out = pd.DataFrame({'ticker': d['ticker'], 'name': d['name'].astype(str).str.strip(), 'exchange': d['exchange'],
+                        'sector': d['sector'].map(NASDAQ_TO_YF_SECTOR).fillna(''), 'industry': d['industry'].fillna(''),
+                        'market_cap': d['market_cap'], 'price': d['price'], 'country': d['country'].fillna(''),
+                        'built': date.today().isoformat()})
+    return out.sort_values('market_cap', ascending=False).reset_index(drop=True)
 
 
 class UniverseManager:
@@ -44,6 +94,8 @@ class UniverseManager:
         self.config = config or get_config()
         self._tickers: List[str] = []
         self._ticker_info: Dict[str, Dict] = {}
+        self.source_note = ''                      # what load_universe actually used (written into the scan)
+        self.us_meta: Dict[str, Dict] = {}         # ticker -> name / sector / industry from the US list
 
     # ── Static fallback ────────────────────────────────────────────────────────
     # Core S&P 500 members — used when all network sources fail.
@@ -309,6 +361,36 @@ class UniverseManager:
 
         return filtered
 
+    def _load_us_liquid(self) -> List[str]:
+        """Live list (saved for next time), else the saved list. Sets self.source_note and self.us_meta."""
+        df = None
+        try:
+            df = build_us_liquid()
+            if len(df) >= US_MIN_NAMES:
+                tmp = SAVED_UNIVERSE.with_suffix('.tmp')
+                df.to_csv(tmp, index=False)
+                tmp.replace(SAVED_UNIVERSE)
+                self.source_note = f'US liquid list, live ({len(df)} names)'
+            else:
+                logger.warning(f'US list download gave only {len(df)} names: using the saved list')
+                df = None
+        except Exception as e:
+            logger.warning(f'US list download failed: {e}')
+            df = None
+        if df is None and SAVED_UNIVERSE.exists():
+            try:
+                df = pd.read_csv(SAVED_UNIVERSE)
+                self.source_note = f"US liquid list, saved {str(df['built'].iloc[0]) if len(df) else '?'} ({len(df)} names)"
+            except Exception as e:
+                logger.warning(f'Saved US list unreadable: {e}')
+                df = None
+        if df is None:
+            return []
+        self.us_meta = {str(r.ticker): {'name': str(r.name), 'sector': str(r.sector) if pd.notna(r.sector) else '',
+                                        'industry': str(r.industry) if pd.notna(r.industry) else ''}
+                        for r in df.itertuples()}
+        return df['ticker'].astype(str).tolist()
+
     def load_universe(self, source: Optional[str] = None) -> List[str]:
         """
         Load the stock universe based on configuration.
@@ -327,16 +409,27 @@ class UniverseManager:
 
         tickers = []
 
-        if source == "sp500":
+        self.source_note = source
+        if not hasattr(self, 'us_meta'):
+            self.us_meta = {}
+        if source in ("us_liquid", "russell1000", "russell3000"):
+            # 3 Nov 2026: the iShares Russell download failed on GitHub Actions every night, and the fallback
+            # quietly gave the S&P 500 only. Russell requests now get the US liquid list (same idea, broader).
+            tickers = self._load_us_liquid()
+            if not tickers:
+                logger.warning("US liquid list unavailable: S&P 500 + Nasdaq 100")
+                tickers = list(set(self._fetch_sp500() + self._fetch_nasdaq100()))
+                self.source_note = 'S&P 500 + Nasdaq 100 (fallback)'
+        elif source == "sp500":
             tickers = self._fetch_sp500()
         elif source == "sp500_nasdaq100":
             tickers = list(set(self._fetch_sp500() + self._fetch_nasdaq100()))
-        elif source == "russell1000":
+        elif source == "ishares_russell1000":
             tickers = self._fetch_russell_from_ishares("IWB")
             if not tickers:
                 logger.warning("iShares fallback failed, using S&P 500 + Nasdaq 100")
                 tickers = list(set(self._fetch_sp500() + self._fetch_nasdaq100()))
-        elif source == "russell3000":
+        elif source == "ishares_russell3000":
             tickers = self._fetch_russell_from_ishares("IWV")
             if not tickers:
                 logger.warning("iShares IWV failed, falling back to Russell 1000 (IWB)")

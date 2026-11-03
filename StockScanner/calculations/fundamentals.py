@@ -28,6 +28,10 @@ Thresholds aligned with Pine Script CAN SLIM Fundamentals indicator:
   Rev growth   STRICT ≥ 25%   RELAXED ≥ 15%
 
 EPS Acceleration: eps_qtr_yoy > eps_prev_qtr_yoy (recent quarter growing faster)
+
+Low-base guard (3 Nov 2026): EPS growth does not count toward STRICT / RELAXED when the same quarter a year ago
+had EPS <= 0 (growth from a loss is not a growth rate), or when the growth is above +300% (a near-zero base:
+e.g. PSX +4,319%, AMCR +984% on 3 Nov 2026). Flagged as eps_low_base; the number is still shown.
 """
 
 from typing import Any, Dict, List, Optional
@@ -44,6 +48,7 @@ class FundamentalCalculator:
     STRICT_REV_MIN  = 0.25
     RELAXED_EPS_MIN = 0.20
     RELAXED_REV_MIN = 0.15
+    LOW_BASE_MAX    = 3.0      # EPS growth above +300% = low base, not counted
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -87,6 +92,7 @@ class FundamentalCalculator:
                     if eps_data.get('q0_yoy') is not None:
                         result['eps_qtr_yoy']      = eps_data['q0_yoy']
                         result['eps_prev_qtr_yoy'] = eps_data.get('q1_yoy')
+                        result['eps_yago']         = eps_data.get('q4')
                         result['eps_source']        = 'stmt'
             except Exception:
                 pass
@@ -153,6 +159,12 @@ class FundamentalCalculator:
                 result['eps_annual_proxy'] = float(eg)
             except (TypeError, ValueError):
                 pass
+
+        # ── Low-base guard (3 Nov 2026) ───────────────────────────────────────
+        if eps_now is not None and not self._is_nan(eps_now):
+            yago = result.get('eps_yago')
+            result['eps_low_base'] = bool((yago is not None and not self._is_nan(yago) and float(yago) <= 0)
+                                          or float(eps_now) > self.LOW_BASE_MAX)
 
         # ── Data quality + pass flags ─────────────────────────────────────────
         result['data_quality']   = self._assess_quality(result)
@@ -225,7 +237,8 @@ class FundamentalCalculator:
             if q5 != 0 and not np.isnan(q5):
                 q1_yoy = (q1 - q5) / abs(q5)
         return {'q0_yoy': q0_yoy if not np.isnan(q0_yoy) else None,
-                'q1_yoy': q1_yoy if not np.isnan(q1_yoy) else None}
+                'q1_yoy': q1_yoy if not np.isnan(q1_yoy) else None,
+                'q0': q0, 'q4': q4}
 
     # ── Scoring ───────────────────────────────────────────────────────────────
 
@@ -247,6 +260,8 @@ class FundamentalCalculator:
         """
         if r.get('ttm_positive') is False:   # explicitly unprofitable
             return False
+        if r.get('eps_low_base'):            # growth from a loss or a near-zero base
+            return False
         eps = r.get('eps_qtr_yoy')
         if self._is_nan(eps) or eps < self.STRICT_EPS_MIN:
             return False
@@ -261,6 +276,8 @@ class FundamentalCalculator:
         TTM gate: only applied when ttm_positive is explicitly False.
         """
         if r.get('ttm_positive') is False:   # explicitly unprofitable
+            return False
+        if r.get('eps_low_base'):            # growth from a loss or a near-zero base
             return False
         eps = r.get('eps_qtr_yoy')
         if self._is_nan(eps) or eps < self.RELAXED_EPS_MIN:
@@ -287,6 +304,8 @@ class FundamentalCalculator:
             'eps_annual_proxy': None,
             'eps_source':       None,   # 'stmt' | 'yahoo' | None
             'eps_accelerating': None,   # True | False | None
+            'eps_yago':         None,   # EPS of the same quarter a year ago (statement tier only)
+            'eps_low_base':     None,   # True = growth from <= 0 or > +300%: not counted
             'rev_qtr_yoy':      None,
             'rev_source':       None,   # 'stmt' | 'yahoo' | None
             'roe':              None,

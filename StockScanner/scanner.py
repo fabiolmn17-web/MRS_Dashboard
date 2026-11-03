@@ -1,12 +1,13 @@
 """
 scanner.py — CAN SLIM Stock Scanner
 =====================================
-Orchestrates a full S&P 500 scan:
+Orchestrates the nightly scan (3 Nov 2026: US liquid universe, ~1,500-2,000 names, see data/universe.py):
 
 Pipeline:
-  1. Fetch S&P 500 universe (Wikipedia)
+  1. Universe: US common stocks / ADRs, market cap >= $1B, price >= $10 (saved list as fallback; S&P 500 last);
+     then 50-day average dollar volume >= $20M from the price download
   2. Batch download 1Y price history for all tickers + SPY (single yf.download call)
-  3. Fast pass per stock: technicals + RS (no per-stock API calls)
+  3. Fast pass per stock: technicals + RS; "L" = RS rating >= 80 (IBD-style percentile across the universe)
   4. Slow pass for candidates only: fetch fundamentals (per-stock yfinance call)
   5. Compute actionability (patterns) for all fundamentally-passing stocks
   6. Save results to output/scan_results.csv
@@ -36,6 +37,7 @@ from .calculations import (
     FundamentalCalculator,
     PatternDetector,
 )
+from .calculations.relative_strength import weighted_performance, rs_ratings
 from .data.universe import UniverseManager
 from . import momentum
 
@@ -49,6 +51,8 @@ RESULTS_CSV = OUTPUT_DIR / 'scan_results.csv'
 PRICE_DAYS    = 420   # ~14 months calendar
 BATCH_SIZE    = 100   # tickers per yf.download call
 RATE_DELAY    = 0.4   # seconds between fundamental fetch calls
+MIN_DOLLAR_VOLUME = 20e6   # universe: 50-day average dollar volume (close x volume), 3 Nov 2026
+RS_MIN_RATING     = 80     # "L": RS rating (percentile 1-99 across the scanned universe) >= 80, 3 Nov 2026
 
 
 def run_scan(
@@ -80,10 +84,12 @@ def run_scan(
     log('═' * 60)
 
     # ── Step 1: Universe ──────────────────────────────────────────────────────
-    log('\n[1/5] Loading S&P 500 universe...')
+    log('\n[1/5] Loading the universe...')
     um = UniverseManager()
     tickers = um.load_universe(source=universe_source)
-    log(f'  {len(tickers)} tickers loaded')
+    universe_note = getattr(um, 'source_note', '') or universe_source
+    us_meta = getattr(um, 'us_meta', {}) or {}
+    log(f'  {len(tickers)} tickers loaded ({universe_note})')
 
     if not tickers:
         log('  ERROR: No tickers loaded — aborting')
@@ -101,6 +107,19 @@ def run_scan(
     log(f'  SPY: {len(spy_df)} bars ({spy_df.index[-1].date()} last)')
     log(f'  Price data fetched for {len(price_data)-1}/{len(tickers)} stocks')
 
+    # Liquidity: drop names whose 50-day average dollar volume is under MIN_DOLLAR_VOLUME (3 Nov 2026)
+    dollar_vol = {}
+    for t_ in tickers:
+        df_ = price_data.get(t_)
+        if df_ is None or df_.empty or 'Volume' not in df_.columns:
+            continue
+        dv_ = (df_['Close'] * df_['Volume']).dropna().iloc[-50:]
+        dollar_vol[t_] = float(dv_.mean()) if len(dv_) else np.nan
+    n_before = len(tickers)
+    tickers = [t_ for t_ in tickers if dollar_vol.get(t_, 0) >= MIN_DOLLAR_VOLUME]
+    log(f'  {len(tickers)} pass the liquidity floor (50-day dollar volume >= ${MIN_DOLLAR_VOLUME / 1e6:.0f}M; '
+        f'{n_before - len(tickers)} dropped)')
+
     # ── Step 3: Fast pass — technicals + RS ──────────────────────────────────
     log('\n[3/5] Technical + RS fast filter...')
     tech_calc = TechnicalCalculator()
@@ -109,6 +128,7 @@ def run_scan(
     tech_pass    = []
     all_tech_rows = []
     mom_by       = {}
+    perf_by      = {}
 
     for ticker in tickers:
         df = price_data.get(ticker)
@@ -118,6 +138,7 @@ def run_scan(
         tech = tech_calc.compute(df)
         rs   = rs_calc.compute(df, spy_df)
         mom_by[ticker] = momentum.momentum_fields(df, spy_df)
+        perf_by[ticker] = weighted_performance(df['Close'])
 
         row = {
             'ticker':            ticker,
@@ -135,15 +156,22 @@ def run_scan(
             'rs_composite':      rs['rs_composite'],
             'rs_label':          rs['rs_label'],
             'passes_technical':  tech['passes_technical'],
-            'passes_rs':         rs['rs_ok'],
+            'passes_rs':         False,                 # set below from the RS rating
             'tech_fail_reason':  tech['fail_reason'],
+            'dollar_volume_50d': dollar_vol.get(ticker),
         }
         all_tech_rows.append(row)
 
-        if tech['passes_technical'] and rs['rs_ok']:
-            tech_pass.append(ticker)
+    # "L": RS rating across the whole scanned universe (until 3 Nov 2026: RS composite > 0 = beats SPY in 2 of 3 periods)
+    ratings = rs_ratings(perf_by)
+    for row in all_tech_rows:
+        row['rs_rating'] = ratings.get(row['ticker'], np.nan)
+        row['passes_rs'] = bool(np.isfinite(row['rs_rating']) and row['rs_rating'] >= RS_MIN_RATING)
+        if row['passes_technical'] and row['passes_rs']:
+            tech_pass.append(row['ticker'])
 
-    log(f'  {len(tech_pass)}/{len(all_tech_rows)} pass tech + RS filter')
+    log(f'  {sum(r["passes_technical"] for r in all_tech_rows)} pass the technical filter; '
+        f'{len(tech_pass)}/{len(all_tech_rows)} also have RS rating >= {RS_MIN_RATING}')
 
     if not tech_pass:
         log('  No candidates after tech filter — saving empty results')
@@ -194,12 +222,15 @@ def run_scan(
     for i, ticker in enumerate(sorted(set(mom_names) | set(tech_pass) | held)):
         m = {'next_earnings': momentum.next_earnings(ticker)}
         if ticker not in fund_results and ticker not in gics:
+            um_ = us_meta.get(ticker, {})
             try:
                 info = yf.Ticker(ticker).info or {}
-                m.update({'name': info.get('longName') or info.get('shortName', ticker),
-                          'sector': info.get('sector', ''), 'industry': info.get('industry', '')})
+                m.update({'name': info.get('longName') or info.get('shortName') or um_.get('name', ticker),
+                          'sector': info.get('sector') or um_.get('sector', ''),
+                          'industry': info.get('industry') or um_.get('industry', '')})
             except Exception:
-                m.update({'name': ticker, 'sector': '', 'industry': ''})
+                m.update({'name': um_.get('name', ticker), 'sector': um_.get('sector', ''),
+                          'industry': um_.get('industry', '')})
         meta[ticker] = m
         time.sleep(RATE_DELAY)
         if verbose and (i + 1) % 25 == 0:
@@ -235,9 +266,12 @@ def run_scan(
         all_rows.append({
             # Identity
             'ticker':             ticker,
-            'name':               fund.get('name') or mt.get('name') or gics.get(ticker, {}).get('name', ticker),
-            'sector':             fund.get('sector') or mt.get('sector') or gics.get(ticker, {}).get('sector', ''),
-            'industry':           fund.get('industry') or mt.get('industry') or gics.get(ticker, {}).get('industry', ''),
+            'name':               (fund.get('name') or mt.get('name') or gics.get(ticker, {}).get('name')
+                                   or us_meta.get(ticker, {}).get('name', ticker)),
+            'sector':             (fund.get('sector') or mt.get('sector') or gics.get(ticker, {}).get('sector')
+                                   or us_meta.get(ticker, {}).get('sector', '')),
+            'industry':           (fund.get('industry') or mt.get('industry') or gics.get(ticker, {}).get('industry')
+                                   or us_meta.get(ticker, {}).get('industry', '')),
             # Price
             'close':              row['price'],
             'sma50':              row['sma50'],
@@ -246,6 +280,7 @@ def run_scan(
             'pct_from_ath':       row['pct_from_ath'],
             'pct_from_52w_high':  row.get('pct_from_52w_high'),
             'avg_volume_50d':     row['avg_volume_50d'],
+            'dollar_volume_50d':  row.get('dollar_volume_50d'),
             # RS
             'rs_1y':              row['rs_1y'],
             'rs_6m':              row['rs_6m'],
@@ -253,12 +288,15 @@ def run_scan(
             'rs_1m':              row.get('rs_1m'),
             'rs_composite':       row['rs_composite'],
             'rs_label':           row['rs_label'],
+            'rs_rating':          row.get('rs_rating'),
             # Fundamentals
             'eps_qtr_yoy':        fund.get('eps_qtr_yoy'),
             'eps_prev_qtr_yoy':   fund.get('eps_prev_qtr_yoy'),
             'eps_annual_proxy':   fund.get('eps_annual_proxy'),
             'eps_source':         fund.get('eps_source'),        # 'stmt'|'yahoo'
             'eps_accelerating':   fund.get('eps_accelerating'),  # True|False|None
+            'eps_yago':           fund.get('eps_yago'),          # EPS of the same quarter a year ago
+            'eps_low_base':       fund.get('eps_low_base'),      # True = growth from <= 0 or > 300%: not counted
             'rev_qtr_yoy':        fund.get('rev_qtr_yoy'),
             'rev_source':         fund.get('rev_source'),        # 'stmt'|'yahoo'
             'roe':                fund.get('roe'),
@@ -293,13 +331,14 @@ def run_scan(
             'mrs_score':          mrs_score,
             'mrs_state':          mrs_state,
             'scan_date':          date.today().isoformat(),
+            'universe':           universe_note,
         })
 
     results_df = pd.DataFrame(all_rows)
 
-    # Sort: CAN SLIM candidates first, then by RS composite desc
+    # Sort: CAN SLIM candidates first, then by RS rating desc
     sort_mask = results_df['pass_mode'].notna()
-    passing   = results_df[sort_mask].sort_values('rs_composite', ascending=False)
+    passing   = results_df[sort_mask].sort_values('rs_rating', ascending=False)
     rejected  = results_df[~sort_mask]
     final_df  = pd.concat([passing, rejected], ignore_index=True)
 

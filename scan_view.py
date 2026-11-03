@@ -78,7 +78,7 @@ def squeeze_cell(r):
 
 
 HEAD = [('Ticker', 'l'), ('Sector', 'l'), ('Close', ''), ('% 52W Hi', ''), ('RS label (held)', 'l'),
-        ('RS 3M', ''), ('RS 1M', ''), ('Ext vs SMA50', ''), ('Momentum', 'c'), ('5-day', ''), ('CAN SLIM', 'c'),
+        ('RS 3M', ''), ('RS 1M', ''), ('RS rtg', ''), ('Ext vs SMA50', ''), ('Momentum', 'c'), ('5-day', ''), ('CAN SLIM', 'c'),
         ('EPS QoQ', ''), ('ATR', 'c'), ('Squeeze', 'c'), ('Earnings', ''), ('Leader industry', 'l')]
 
 CSS = """
@@ -173,12 +173,21 @@ def build_html(df: pd.DataFrame, sec_label: dict, sec_score: dict, leader_hold: 
         h += f'<td class="l" data-s="{_sv(hs) * 1000 + (0 if _nan(days) else float(days))}">{rs_html}</td>'
         for k in ('rs_3m', 'rs_1m'):
             h += f'<td class="num" data-s="{_sv(r.get(k))}" style="color:{_col(r.get(k))};">{_pct(r.get(k))}</td>'
+        # RS rating (3 Nov 2026): IBD-style percentile 1-99 across the scanned universe; >= 80 = CAN SLIM "L"
+        rr = r.get('rs_rating')
+        rr_c = DIM if _nan(rr) else TEAL if float(rr) >= 80 else '#e8dccb' if float(rr) >= 50 else COPPER
+        h += (f'<td class="num" data-s="{_sv(rr)}" style="color:{rr_c};" title="RS rating: weighted 12-month performance '
+              f'(last quarter x2) ranked 1-99 across the scanned universe; 80+ = top 20%">'
+              f'{"—" if _nan(rr) else int(float(rr))}</td>')
         h += (f'<td class="num" data-s="{_sv(ext)}">{"—" if _nan(ext) else f"{float(ext):+.2f}"} '
               f'{chip(ez, EXT_COL.get(ez, DIM), ez in ("Near", "Just below"))}</td>')
         h += f'<td class="c" data-s="{_e(mz)}">{chip(mz, MOM_COL.get(mz, DIM), mz in ("Persistent", "Building"))}</td>'
         h += f'<td class="num" data-s="{_sv(r5)}" style="color:{_col(r5)};">{"—" if _nan(r5) else f"{float(r5):+.1f}%"}{pb_txt}</td>'
         h += f'<td class="c" data-s="{ {"STRICT": 2, "RELAXED": 1}.get(mode, 0) }">{cs}</td>'
-        h += f'<td class="num" data-s="{_sv(eps)}" style="color:{_col(eps)};">{_pct(eps, 0)}</td>'
+        low = str(r.get('eps_low_base')).lower() == 'true'
+        low_html = (' <span class="sub" title="Growth from a loss or a near-zero base a year ago (or above +300%): not '
+                    'counted for CAN SLIM" style="color:#e3b48e;">low base</span>') if low else ''
+        h += f'<td class="num" data-s="{_sv(eps)}" style="color:{DIM if low else _col(eps)};">{_pct(eps, 0)}{low_html}</td>'
         h += f'<td class="c" data-s="{int(atr_c)}" style="color:{"#e8dccb" if atr_c else "#6e675f"};">{"●" if atr_c else "—"}</td>'
         h += f'<td class="c" data-s="{sq_sort}">{sq_html}</td>'
         h += f'<td class="num" data-s="{e_sort}">{e_html}</td>'

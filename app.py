@@ -346,7 +346,7 @@ with st.sidebar:
     _b20_auto_last = _last_val('b20_auto')
     with st.form('daily_inputs_form'):
         inp_b20_auto = st.checkbox('B20%: automatic (full S&P 500, daily run)', value=True,
-                                   help='The daily run computes B20% from all S&P 500 stocks (the scanner universe), the '
+                                   help='The daily run computes B20% from all S&P 500 stocks, the '
                                         'same definition as S5TW. Untick to enter the TradingView S5TW value instead. '
                                         + (f'Last automatic value: {_b20_auto_last:.2f}%.' if _b20_auto_last == _b20_auto_last
                                            else 'No automatic value stored yet (first run after this update).'))
@@ -1108,8 +1108,9 @@ def _scan_lookup(sd, sec_label, sec_score, leader_hold):
     c_in, c_note = st.columns([1, 3])
     with c_in:
         q = st.text_input('Look up a ticker', value='', key='ms_lookup', placeholder='e.g. CRM, PNTG, XNCR',
-                          help='Shows the stock as the scan sees it. S&P 500 names come from the nightly scan; '
-                               'any other US ticker is computed live from prices (no CAN SLIM fundamentals).')
+                          help='Shows the stock as the scan sees it. Names in the nightly universe (US stocks, market cap ≥ $1B, '
+                               'price ≥ $10, 50-day dollar volume ≥ $20M) come from the scan; any other US ticker is '
+                               'computed live from prices (no CAN SLIM fundamentals).')
     t = (q or '').strip().upper().lstrip('$')
     if not t:
         return
@@ -1213,15 +1214,23 @@ if _scan_df is not None and len(_scan_df) > 0:
 
     _scan_mrs = _sd['mrs_score'].iloc[0] if 'mrs_score' in _sd.columns else None
     _n_mom = int(_sd['_mom'].sum())
+    _uni_src = str(_sd['universe'].dropna().iloc[0]) if 'universe' in _sd.columns and _sd['universe'].notna().any() else ''
+    _n_strict = int((_sd['pass_mode'] == 'STRICT').sum())
+    _n_relax = int(_sd['pass_mode'].isin(['STRICT', 'RELAXED']).sum())
     st.markdown(
         f'<div style="font-size:0.78rem;color:#a89f95;margin-bottom:6px;">'
-        f'Scan date <b style="color:#f3ece2;">{_scan_date}</b> · universe {len(_sd)} stocks · '
+        f'Scan date <b style="color:#f3ece2;">{_scan_date}</b> · universe {len(_sd)} stocks'
+        + (f' <span style="color:#6e675f;">({_html_mod.escape(_uni_src)})</span>' if _uni_src else '') + ' · '
         f'<b style="color:#f3ece2;">{_n_mom}</b> on the momentum list · '
-        f'{int((_sd["pass_mode"] == "STRICT").sum())} CAN SLIM strict · {int((_sd["pass_mode"] == "RELAXED").sum())} relaxed'
+        f'{_n_strict} CAN SLIM strict · {_n_relax} relaxed (incl. strict)'
         + (f' · MRS at scan {float(_scan_mrs):+.2f}' if _scan_mrs is not None and pd.notna(_scan_mrs) else '')
         + ' · updated nightly 10 PM UTC</div>', unsafe_allow_html=True)
     if not _has_mom:
         st.info('The momentum columns arrive with the next nightly scan. Until then the table shows the CAN SLIM candidates.')
+    if len(_sd) < 900:          # 3 Nov 2026: the broad US universe is ~1,500+ names; fewer = it fell back
+        st.warning(f'The scan covered only {len(_sd)} stocks' + (f' ({_uni_src})' if _uni_src else '') + ': the US '
+                   'universe download did not work in the nightly run, so the lists are shorter than usual. Check the '
+                   '"CAN SLIM Scanner" run on GitHub (Actions tab).')
 
     _scan_lookup(_sd, _sec_label, _sec_score, _leader_hold)
 
@@ -1266,8 +1275,8 @@ if _scan_df is not None and len(_scan_df) > 0:
         _v = _v[_v['_mom'] & _v['pass_mode'].notna()]
     elif _lmode == 'CAN SLIM strict':
         _v = _v[_v['pass_mode'] == 'STRICT']
-    elif _lmode == 'CAN SLIM relaxed':
-        _v = _v[_v['pass_mode'] == 'RELAXED']
+    elif _lmode == 'CAN SLIM relaxed':                 # 3 Nov 2026: relaxed or better (strict names included)
+        _v = _v[_v['pass_mode'].isin(['STRICT', 'RELAXED'])]
     if _EXT_OPTS[_emode] is not None and 'ext_zone' in _v.columns:
         _v = _v[_v['ext_zone'].isin(_EXT_OPTS[_emode])]
     if _mz_sel and 'mom_zone' in _v.columns:

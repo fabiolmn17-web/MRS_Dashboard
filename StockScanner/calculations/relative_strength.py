@@ -113,3 +113,37 @@ class RelativeStrengthCalculator:
         result['rs_ok']       = composite > 0.0  # outperforming in at least 2 of 3 periods
 
         return result
+
+
+# ── RS rating (3 Nov 2026): IBD-style percentile rank, the "L" of CAN SLIM ────────────────────────────────
+# Weighted 12-month price performance, the latest quarter counting double: 40% last 63 bars + 20% each of the three
+# quarters before. Ranked across the whole scanned universe, 1-99 (99 = strongest). Stocks with 6-12 months of history
+# use the quarters they have (weights renormalised); under ~6 months = no rating.
+RS_QUARTER_WEIGHTS = (0.4, 0.2, 0.2, 0.2)
+
+
+def weighted_performance(close: pd.Series) -> float:
+    c = close.dropna()
+    n = len(c)
+    if n < 127:
+        return np.nan
+    parts = []
+    for i, w in enumerate(RS_QUARTER_WEIGHTS):
+        a, b = 63 * i, 63 * (i + 1)
+        if n > b:
+            x0, x1 = float(c.iloc[-1 - b]), float(c.iloc[-1 - a])
+            if x0 > 0:
+                parts.append((x1 / x0 - 1.0, w))
+    if not parts:
+        return np.nan
+    return sum(r * w for r, w in parts) / sum(w for _, w in parts)
+
+
+def rs_ratings(perf: dict) -> dict:
+    """ticker -> weighted performance  =>  ticker -> RS rating 1-99 (nan where no performance)."""
+    s = pd.Series(perf, dtype=float).dropna()
+    if len(s) < 2:
+        return {k: np.nan for k in perf}
+    r = s.rank(method='average')
+    rating = (1 + 98 * (r - 1) / (len(s) - 1)).round()
+    return {k: float(rating.get(k, np.nan)) for k in perf}
