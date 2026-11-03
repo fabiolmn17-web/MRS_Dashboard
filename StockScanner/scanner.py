@@ -40,6 +40,7 @@ from .calculations import (
 from .calculations.relative_strength import weighted_performance, rs_ratings
 from .data.universe import UniverseManager
 from . import momentum
+from . import bases
 
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ OUTPUT_DIR  = Path(__file__).parent / 'output'
 RESULTS_CSV = OUTPUT_DIR / 'scan_results.csv'
 
 # Price history period (calendar days) — covers 252+ trading days for 1Y RS
-PRICE_DAYS    = 420   # ~14 months calendar
+PRICE_DAYS    = 500   # x1.5 in _batch_download = ~750 calendar days (~2 years): cups up to 65 weeks + their prior uptrend
 BATCH_SIZE    = 100   # tickers per yf.download call
 RATE_DELAY    = 0.4   # seconds between fundamental fetch calls
 MIN_DOLLAR_VOLUME = 20e6   # universe: 50-day average dollar volume (close x volume), 3 Nov 2026
@@ -237,7 +238,7 @@ def run_scan(
             log(f'  ... {i+1} names done')
 
     # ── Step 5: Patterns (actionability) ─────────────────────────────────────
-    log('\n[5/5] Computing actionability (ATR compression + squeeze) for every scanned stock...')
+    log('\n[5/5] Actionability (ATR compression, squeeze, 21-day / 52-week breakouts, bases) for every scanned stock...')
     pattern_calc = PatternDetector()
 
     all_rows = []
@@ -250,8 +251,13 @@ def run_scan(
         mt  = meta.get(ticker, {})
         # every scanned stock (cheap, price data only): the squeeze and ATR filters work on any list
         df = price_data.get(ticker)
+        bse = {}
         if df is not None:
             pat = pattern_calc.compute(df)
+            try:                                  # 21-day / 52-week breakouts and bases (bases.py, 3 Nov 2026)
+                bse = bases.detect(df, row.get('rs_rating'))
+            except Exception as e:
+                logger.debug(f'{ticker}: bases error {e}')
 
         # Determine overall pass mode
         passes_strict  = fund.get('passes_strict',  False)
@@ -324,6 +330,8 @@ def run_scan(
             'passes_relaxed':     passes_relaxed,
             'pass_mode':          pass_mode,
             'tech_fail_reason':   row['tech_fail_reason'],
+            # Breakouts and bases (bases.py)
+            **{k: bse.get(k) for k in bases.FIELDS},
             # Momentum & trend (momentum.py)
             **{k: mom.get(k) for k in momentum.FIELDS},
             'next_earnings':      mt.get('next_earnings', ''),
@@ -348,6 +356,11 @@ def run_scan(
     elapsed   = time.time() - t_start
     log(f'\n  ✓ Strict candidates:  {n_strict}')
     log(f'  ✓ Relaxed candidates: {n_relaxed}')
+    if 'base_type' in final_df:
+        log(f"  Bases: {final_df['base_type'].value_counts().to_dict()} · "
+            f"states {final_df['base_state'].value_counts().to_dict()}")
+        log(f"  Breakouts today: 21-day high {int(final_df['bo21'].fillna(False).astype(bool).sum())}, "
+            f"52-week high {int(final_df['bo52'].fillna(False).astype(bool).sum())}")
     log(f'  Total scanned: {len(final_df)} | Elapsed: {elapsed:.0f}s')
 
     # Save

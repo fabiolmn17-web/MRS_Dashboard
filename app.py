@@ -1010,12 +1010,14 @@ def _scan_chart_panel(tickers):
         f'<span style="font-family:IBM Plex Mono,monospace;color:{dcol};">{dc * 100:+.2f}%</span></div>'
         f'<div style="font-size:0.72rem;color:#a89f95;line-height:1.6;">'
         f'vs SMA 50 <b style="color:#e8dccb;">{_d(lv["sma50"])}</b> · vs SMA 200 <b style="color:#b9805a;">{_d(lv["sma200"])}</b>'
-        f' · vs 52W high <b style="color:#e3b48e;">{_d(lv["hi52"])}</b> · vs 20D high <b style="color:#9b958f;">{_d(lv["hi20"])}</b></div>',
+        f' · vs 52W high <b style="color:#e3b48e;">{_d(lv["hi52"])}</b> · vs 21D high <b style="color:#9b958f;">{_d(lv["hi21"])}</b></div>',
         unsafe_allow_html=True)
     _wl_star(t, 'wl_star_scan')
     chart_view.show(st, components, chart_view.figure(h, t, height=520), 'scan_chart', _CHART_CFG)
     st.markdown('<div style="font-size:0.66rem;color:#9b958f;">Daily, last 12 months. SMA 50 / 200; 52W high = highest '
-                'high of the last 252 sessions; 20D high = highest high of the 20 sessions before today. Click a row '
+                'high of the last 252 sessions; 21D high = highest high of the 21 sessions before today. Base (if any): '
+                'shaded box, cup line and handle, dashed pivot line (found on these unadjusted prices; the table\'s '
+                'pivot comes from the scan\'s dividend-adjusted prices and can differ by the dividends since). Click a row '
                 'in the table (or use the ↑ / ↓ keys) to switch; drag a box or use the mouse wheel to zoom, double-click '
                 'for the full 12 months. The zoom is kept when you switch tickers.</div>', unsafe_allow_html=True)
 
@@ -1090,6 +1092,11 @@ def _lookup_live(ticker):
     rs = RelativeStrengthCalculator().compute(h, spy)
     row.update({k: rs.get(k) for k in ('rs_1y', 'rs_6m', 'rs_3m', 'rs_1m')})
     row.update(PatternDetector().compute(h))
+    try:                                         # 21-day / 52-week breakouts and the current base (no RS rating here)
+        from StockScanner import bases as _bases
+        row.update(_bases.detect(h))
+    except Exception:
+        pass
     c = h['Close']
     row['sma200'] = float(c.rolling(200).mean().iloc[-1]) if len(c) >= 200 else np.nan
     row['sma50'] = float(c.rolling(50).mean().iloc[-1])
@@ -1267,6 +1274,30 @@ if _scan_df is not None and len(_scan_df) > 0:
                                   'compression (black / red / orange dots). Fired = out of the squeeze today after a squeeze yesterday.')
     with _g6:
         _no_earn = st.checkbox('Hide earnings ≤ 7 days', value=False, key='ms_earn')
+    # breakouts and bases (StockScanner/bases.py, 3 Nov 2026)
+    _has_base = 'base_type' in _sd.columns
+    _BASE_OPTS = {'Any': None, 'Any base': 'any', 'Cup with handle': 'Cup w/ handle', 'Flat base': 'Flat base',
+                  'High tight flag': 'High tight flag'}
+    _BO_OPTS = ['Any', 'Near pivot (≤ 5% below)', 'Broke out today (base pivot)', 'Broke out in the last 5 sessions',
+                'Near pivot or broke out (≤ 5 sessions)', '21-day high breakout today', '52-week high breakout today',
+                '21-day or 52-week breakout today']
+    _h1, _h2, _h3, _h4 = st.columns([1.1, 1.5, 1.0, 1.4])
+    with _h1:
+        _bt_f = st.selectbox('Base pattern', list(_BASE_OPTS), index=0, key='ms_base', disabled=not _has_base,
+                             help='Rule-based, nightly. Cup with handle (O\'Neil): prior uptrend ≥ 30%, cup 7–65 weeks '
+                                  'and 12–33% deep with a rounded bottom, right lip within 10% of the left, handle 1–6 '
+                                  'weeks, ≤ 12% deep, in the upper half; pivot = handle high + $0.10. Flat base: ≥ 5 weeks '
+                                  'within 15% after a ≥ 20% advance; pivot = base high. High tight flag: ≥ +100% in '
+                                  '4–8 weeks, then a 10–25% pullback over 3–5 weeks; pivot = flag high. Descriptive.')
+    with _h2:
+        _bs_f = st.selectbox('Pivot / breakout', _BO_OPTS, index=0, key='ms_bostate', disabled=not _has_base,
+                             help='Near pivot = close at most 5% below the base pivot. Broke out = closed above it '
+                                  '(today, or 1–4 sessions ago and still above). 21-day / 52-week = today\'s close above '
+                                  'the highest high of the prior 21 / 252 sessions.')
+    with _h3:
+        _bv_f = st.checkbox('Breakout volume ≥ 1.4×', value=False, key='ms_bovol', disabled=not _has_base,
+                            help='The breakout day\'s volume at least 1.4× its 50-day average (O\'Neil: +40–50%). '
+                                 'Base breakouts: the breakout day; 21-day / 52-week: today.')
 
     _v = _sd
     if _lmode == 'Momentum list':
@@ -1304,7 +1335,45 @@ if _scan_df is not None and len(_scan_df) > 0:
     if _no_earn and 'next_earnings' in _v.columns:
         _dd = (pd.to_datetime(_v['next_earnings'], errors='coerce') - pd.Timestamp.today().normalize()).dt.days
         _v = _v[~_dd.between(0, 7)]
-    _v = _v.sort_values(['held_score', 'rs_3m'], ascending=[False, False], na_position='last')
+    _sort_pivot = False
+    if _has_base:
+        _tb = lambda c_: _v[c_].astype(str).str.lower().eq('true')
+        _bst = _v['base_state'].fillna('').astype(str)
+        _btype = _v['base_type'].fillna('').astype(str)
+        if _BASE_OPTS[_bt_f] == 'any':
+            _v = _v[_btype != '']
+        elif _BASE_OPTS[_bt_f]:
+            _v = _v[_btype == _BASE_OPTS[_bt_f]]
+        _bst = _bst[_v.index]
+        _broke = _bst.str.startswith('Broke out')
+        if _bs_f.startswith('Near pivot ('):
+            _v, _sort_pivot = _v[_bst == 'Near pivot'], True
+        elif _bs_f == 'Broke out today (base pivot)':
+            _v = _v[_bst == 'Broke out today']
+        elif _bs_f == 'Broke out in the last 5 sessions':
+            _v = _v[_broke]
+        elif _bs_f.startswith('Near pivot or'):
+            _v, _sort_pivot = _v[_broke | (_bst == 'Near pivot')], True
+        elif _bs_f == '21-day high breakout today':
+            _v = _v[_tb('bo21')]
+        elif _bs_f == '52-week high breakout today':
+            _v = _v[_tb('bo52')]
+        elif _bs_f == '21-day or 52-week breakout today':
+            _v = _v[_tb('bo21') | _tb('bo52')]
+        if _bv_f:
+            _bst2 = _v['base_state'].fillna('').astype(str)
+            _vol = pd.to_numeric(_v['vol_ratio'], errors='coerce')
+            _keep = _vol >= 1.4
+            if _bs_f in ('Broke out today (base pivot)', 'Broke out in the last 5 sessions') or _bs_f.startswith('Near pivot or'):
+                _b2 = _bst2.str.startswith('Broke out')
+                _keep = (pd.to_numeric(_v['base_bo_vol'], errors='coerce') >= 1.4) & _b2
+                if _bs_f.startswith('Near pivot or'):
+                    _keep = _keep | ~_b2               # near-pivot names have no breakout volume yet: kept
+            _v = _v[_keep]
+    if _sort_pivot:                                    # closest to the pivot (and broken out) first
+        _v = _v.assign(_pd=pd.to_numeric(_v['base_dist_pct'], errors='coerce')).sort_values('_pd', ascending=False)
+    else:
+        _v = _v.sort_values(['held_score', 'rs_3m'], ascending=[False, False], na_position='last')
 
     if _v.empty:
         st.info('No stocks match the selected filters.')

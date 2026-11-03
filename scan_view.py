@@ -79,13 +79,60 @@ def squeeze_cell(r):
 
 HEAD = [('Ticker', 'l'), ('Sector', 'l'), ('Close', ''), ('% 52W Hi', ''), ('RS label (held)', 'l'),
         ('RS 3M', ''), ('RS 1M', ''), ('RS rtg', ''), ('Ext vs SMA50', ''), ('Momentum', 'c'), ('5-day', ''), ('CAN SLIM', 'c'),
-        ('EPS QoQ', ''), ('ATR', 'c'), ('Squeeze', 'c'), ('Earnings', ''), ('Leader industry', 'l')]
+        ('EPS QoQ', ''), ('ATR', 'c'), ('Squeeze', 'c'), ('Base / pivot', 'l'), ('Breakout', 'c'), ('Earnings', ''),
+        ('Leader industry', 'l')]
+
+BASE_ABBR = {'Cup w/ handle': 'Cup·H', 'Flat base': 'Flat', 'High tight flag': 'HTF'}
+
+
+def base_cell(r):
+    """(html, sort key) for the Base / pivot column (bases.py fields; '—' for older CSVs)."""
+    bt = _s(r.get('base_type'))
+    if not bt or bt == 'None':
+        return '<span style="color:#6e675f;">—</span>', -1
+    st_ = _s(r.get('base_state'))
+    pv, dist = r.get('base_pivot'), r.get('base_dist_pct')
+    broke = st_.startswith('Broke out')
+    col = TEAL if broke else COPPER if st_ == 'Near pivot' else DIM
+    q = r.get('base_quality')
+    stars = '' if _nan(q) else ' <span class="sub" title="Quality: volume dry-up, tight closes, RS rating ≥ 80">' + \
+        '★' * int(float(q)) + '☆' * (3 - int(float(q))) + '</span>'
+    if broke:
+        bv = r.get('base_bo_vol')
+        vtxt = '' if _nan(bv) else (f' <span style="color:{TEAL if float(bv) >= 1.4 else DIM};">'
+                                    f'{float(bv):.1f}× vol</span>')
+        txt = f'{_e(st_.replace("Broke out ", "out "))}{vtxt}'
+    else:
+        txt = '' if _nan(dist) else f'{float(dist) * 100:+.1f}%'
+    pv_txt = '' if _nan(pv) else f' <span class="sub">to {float(pv):,.2f}</span>'
+    w = r.get('base_weeks')
+    wk = '' if _nan(w) else f' <span class="sub">{float(w):.0f}w</span>'
+    rank = {'Broke out today': 4}.get(st_, 3 if broke else 2 if st_ == 'Near pivot' else 1)
+    sk = rank * 1000 + (0 if _nan(dist) else float(dist) * 100)
+    dep = r.get('base_depth')
+    title = _e(f"{bt}: pivot {pv}" + ('' if _nan(dep) else f", depth {float(dep) * 100:.0f}%")
+               + ('' if not _s(r.get('base_start')) else f", from {_s(r.get('base_start'))}"))
+    return (f'<span title="{title}">{chip(BASE_ABBR.get(bt, bt), col, broke or st_ == "Near pivot")}{wk} '
+            f'<span style="color:{col};">{txt}</span>{pv_txt}{stars}</span>'), sk
+
+
+def breakout_cell(r):
+    """(html, sort key): today's close above the prior 21-session / 252-session high, with today's volume ratio."""
+    b21 = str(r.get('bo21')).lower() == 'true'
+    b52 = str(r.get('bo52')).lower() == 'true'
+    if not (b21 or b52):
+        return '<span style="color:#6e675f;">—</span>', 0
+    vr = r.get('vol_ratio')
+    vtxt = '' if _nan(vr) else (f' <span class="sub" style="color:{TEAL if float(vr) >= 1.4 else DIM};">'
+                                f'{float(vr):.1f}×</span>')
+    chips = (chip('52W', COPPER, True) + ' ' if b52 else '') + (chip('21D', TEAL, True) if b21 else '')
+    return chips + vtxt, (2 if b52 else 1) + (0 if _nan(vr) else min(float(vr), 9) / 10)
 
 CSS = """
 <style>
 body{margin:0;background:transparent;font-family:Barlow,system-ui,sans-serif;}
 .wrap{overflow-x:auto;}
-table{width:100%;border-collapse:collapse;min-width:1040px;}
+table{width:100%;border-collapse:collapse;min-width:1240px;}
 th{background:#2a2724;color:#a89f95;font-size:0.70rem;font-weight:600;padding:7px 6px;text-align:right;white-space:nowrap;cursor:pointer;user-select:none;position:sticky;top:0;}
 th.l,td.l{text-align:left;} th.c,td.c{text-align:center;}
 th:hover{color:#e3b48e;}
@@ -190,6 +237,10 @@ def build_html(df: pd.DataFrame, sec_label: dict, sec_score: dict, leader_hold: 
         h += f'<td class="num" data-s="{_sv(eps)}" style="color:{DIM if low else _col(eps)};">{_pct(eps, 0)}{low_html}</td>'
         h += f'<td class="c" data-s="{int(atr_c)}" style="color:{"#e8dccb" if atr_c else "#6e675f"};">{"●" if atr_c else "—"}</td>'
         h += f'<td class="c" data-s="{sq_sort}">{sq_html}</td>'
+        b_html, b_sort = base_cell(r)
+        h += f'<td class="l" data-s="{b_sort}">{b_html}</td>'
+        o_html, o_sort = breakout_cell(r)
+        h += f'<td class="c" data-s="{o_sort}">{o_html}</td>'
         h += f'<td class="num" data-s="{e_sort}">{e_html}</td>'
         h += f'<td class="l" data-s="{_e(etf)}">{chip(etf, TEAL, True) if etf else "<span style=color:#6e675f>—</span>"}</td>'
         h += '</tr>'

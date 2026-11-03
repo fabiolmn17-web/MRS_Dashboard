@@ -5,7 +5,9 @@ One ticker at a time, fetched on demand (yfinance, per-ticker history like the r
 Shows the last ~12 months of daily candles with:
   SMA 50 and SMA 200 (computed on the full 2-year history, so the 200-day line starts at the left edge)
   52-week high  = highest high of the last 252 sessions (including today)
-  20-day high   = highest high of the 20 sessions BEFORE today (the pivot a breakout has to clear)
+  21-day high   = highest high of the 21 sessions BEFORE today (the pivot a breakout has to clear; 20 until 3 Nov 2026)
+  Base overlay  (3 Nov 2026) the current base from StockScanner/bases.py on this chart's own (unadjusted) prices:
+                shaded base, the cup's left lip / low / right lip, the handle, and the pivot line
 Descriptive chart only: same data the scanner uses, no signals.
 """
 import numpy as np
@@ -15,7 +17,9 @@ import plotly.graph_objects as go
 UP, DOWN = '#85cac5', '#f4a062'
 SMA50_COL, SMA200_COL = '#e8dccb', '#b9805a'
 HI52_COL, HI20_COL = '#e3b48e', '#9b958f'
+BASE_COL, PIVOT_COL = '#85cac5', '#f3ece2'
 BARS = 252
+HI_N = 21                                   # short-term high: the 21 sessions before today
 
 
 def fetch(ticker: str):
@@ -26,7 +30,7 @@ def fetch(ticker: str):
         h = yf.Ticker(ticker).history(period='10y', auto_adjust=False)
         if h is None or h.empty or 'Close' not in h.columns:
             return None
-        h = h[['Open', 'High', 'Low', 'Close']].dropna()
+        h = h[[c_ for c_ in ('Open', 'High', 'Low', 'Close', 'Volume') if c_ in h.columns]].dropna(subset=['Close'])
         h.index = pd.to_datetime(h.index).tz_localize(None).normalize()
         return h
     except Exception:
@@ -35,15 +39,17 @@ def fetch(ticker: str):
 
 def levels(h: pd.DataFrame) -> dict:
     """Key levels from the full history (last bar = latest session)."""
-    out = {'hi52': np.nan, 'hi20': np.nan, 'sma50': np.nan, 'sma200': np.nan, 'close': np.nan, 'chg': np.nan}
+    out = {'hi52': np.nan, 'hi20': np.nan, 'hi21': np.nan, 'sma50': np.nan, 'sma200': np.nan, 'close': np.nan,
+           'chg': np.nan}
     if h is None or len(h) < 2:
         return out
     c = h['Close']
     out['close'] = float(c.iloc[-1])
     out['chg'] = float(c.iloc[-1] / c.iloc[-2] - 1)
     out['hi52'] = float(h['High'].iloc[-252:].max())
-    if len(h) > 20:
-        out['hi20'] = float(h['High'].iloc[-21:-1].max())
+    if len(h) > HI_N:
+        out['hi21'] = float(h['High'].iloc[-HI_N - 1:-1].max())
+        out['hi20'] = out['hi21']               # old key, kept for callers that still read it
     if len(c) >= 50:
         out['sma50'] = float(c.rolling(50).mean().iloc[-1])
     if len(c) >= 200:
@@ -51,7 +57,53 @@ def levels(h: pd.DataFrame) -> dict:
     return out
 
 
-def figure(h: pd.DataFrame, ticker: str, height: int = 520) -> go.Figure:
+def base_info(h: pd.DataFrame) -> dict:
+    """The current base / breakout state on this history (bases.detect), {} when unavailable."""
+    try:
+        from StockScanner import bases
+        return bases.detect(h)
+    except Exception:
+        return {}
+
+
+def _add_base(fig, v, b):
+    """Draw the base from bases.detect output b on the visible bars v (category x axis = date strings)."""
+    if not b or not b.get('base_type'):
+        return
+    xs = list(v.index.strftime('%Y-%m-%d'))
+    first, last = xs[0], xs[-1]
+    clip = lambda d: None if d is None else (first if d < first else d if d in xs else
+                                             next((x for x in xs if x >= d), last))
+    x0, x1 = clip(b.get('base_start')), clip(b.get('base_end'))
+    pv, typ = b['base_pivot'], b['base_type']
+    lo = b.get('base_low')
+    if x0 and x1 and lo is not None:
+        fig.add_shape(type='rect', xref='x', yref='y', x0=x0, x1=x1, y0=lo, y1=pv, layer='below', line_width=0,
+                      fillcolor='rgba(133,202,197,0.08)')
+    if typ == 'Cup w/ handle':
+        pts = [(b.get('base_left_date'), b.get('base_left')), (b.get('base_low_date'), lo),
+               (b.get('base_right_date'), pv - 0.10)]
+        pts = [(clip(d), y) for d, y in pts if d and y is not None and d >= first]
+        if len(pts) >= 2:
+            fig.add_trace(go.Scatter(x=[p[0] for p in pts], y=[p[1] for p in pts], mode='lines+markers',
+                                     line=dict(color=BASE_COL, width=1.4, shape='spline', smoothing=1.1, dash='dot'),
+                                     marker=dict(size=6, color=BASE_COL), name='Cup', hoverinfo='skip',
+                                     showlegend=False))
+        hs = clip(b.get('handle_start'))
+        if hs and b.get('handle_low') is not None:
+            fig.add_shape(type='rect', xref='x', yref='y', x0=hs, x1=x1, y0=b['handle_low'], y1=pv, layer='below',
+                          line=dict(color=BASE_COL, width=1, dash='dot'), fillcolor='rgba(133,202,197,0.10)')
+    state = b.get('base_state') or ''
+    lbl = f"{typ} · pivot {pv:,.2f} · {state}"
+    if x0:
+        fig.add_shape(type='line', xref='x', yref='y', x0=x0, x1=last, y0=pv, y1=pv,
+                      line=dict(color=PIVOT_COL, width=1.3, dash='dash'))
+        fig.add_annotation(x=x0, y=pv, xref='x', yref='y', text=lbl, showarrow=False, xanchor='left', yanchor='bottom',
+                           font=dict(size=10, color=PIVOT_COL), bgcolor='rgba(18,18,18,0.75)')
+
+
+def figure(h: pd.DataFrame, ticker: str, height: int = 520, base: dict = None) -> go.Figure:
+    """base: bases.detect(h) output to draw (computed here when None; pass {} to draw none)."""
     c = h['Close']
     s50 = c.rolling(50).mean()
     s200 = c.rolling(200).mean()
@@ -70,14 +122,15 @@ def figure(h: pd.DataFrame, ticker: str, height: int = 520) -> go.Figure:
                              line=dict(color=SMA200_COL, width=1.5), hoverinfo='skip'))
     hi52, hi20 = lv['hi52'], lv['hi20']
     same = (not np.isnan(hi52)) and (not np.isnan(hi20)) and abs(hi52 / hi20 - 1) < 0.003
-    lines = [(hi52, HI52_COL, 'dash', '52W & 20D high' if same else '52W high', 'top left')]
+    lines = [(hi52, HI52_COL, 'dash', '52W & 21D high' if same else '52W high', 'top left')]
     if not same:
-        lines.append((hi20, HI20_COL, 'dot', '20D high', 'bottom left'))
+        lines.append((hi20, HI20_COL, 'dot', '21D high', 'bottom left'))
     for y, col, dash, lbl, pos in lines:
         if not np.isnan(y):
             fig.add_hline(y=y, line=dict(color=col, width=1, dash=dash),
                           annotation=dict(text=f'{lbl} {y:,.2f}', font=dict(size=10, color=col), bgcolor='rgba(18,18,18,0.75)'),
                           annotation_position=pos)
+    _add_base(fig, v, base_info(h) if base is None else base)
     # month ticks on the category axis: first session of each month
     first = ~v.index.to_period('M').duplicated()
     tv = list(x[first])[1:]
