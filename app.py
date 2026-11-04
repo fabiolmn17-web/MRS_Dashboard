@@ -1123,11 +1123,13 @@ def _scan_counts_html(sd):
         ('Lists', [('Momentum', mom, '#85cac5'), ('CAN SLIM strict', pm == 'STRICT', '#85cac5'),
                    ('CAN SLIM relaxed', pm.isin(['STRICT', 'RELAXED']), '#e3b48e'),
                    ('Momentum + CAN SLIM', mom & pm.notna(), '#85cac5')]),
-        ('Bases', [('Cup w/ handle', bt == 'Cup w/ handle', '#85cac5'), ('Flat base', bt == 'Flat base', '#e8dccb'),
-                   ('High tight flag', bt == 'High tight flag', '#e3b48e')]),
+        ('Bases', [('Cup w/ handle', bt == 'Cup w/ handle', '#85cac5'), ('VCP', bt == 'VCP', '#85cac5'),
+                   ('Flat base', bt == 'Flat base', '#e8dccb'), ('Tight area', bt == 'Tight area', '#e8dccb'),
+                   ('High tight flag', bt == 'High tight flag', '#e3b48e'), ('Trend template ✓', tb('tt_pass'), '#9b958f')]),
         ('Pivot', [('Near pivot', bs == 'Near pivot', '#e3b48e'), ('Broke out today', bs == 'Broke out today', '#85cac5'),
                    ('Broke out ≤ 5 sessions', bs.str.startswith('Broke out'), '#85cac5')]),
-        ('Breakouts today', [('21-day high', tb('bo21'), '#85cac5'), ('52-week high', tb('bo52'), '#e3b48e')]),
+        ('Breakouts today', [('Pivot high 10/10', tb('piv_bo'), '#85cac5'), ('21-day high', tb('bo21'), '#85cac5'),
+                             ('52-week high', tb('bo52'), '#e3b48e')]),
     ]
     h = '<div style="display:flex;flex-wrap:wrap;gap:8px;margin:2px 0 10px 0;">'
     for g, items in groups:
@@ -1309,28 +1311,39 @@ if _scan_df is not None and len(_scan_df) > 0:
         _no_earn = st.checkbox('Hide earnings ≤ 7 days', value=False, key='ms_earn')
     # breakouts and bases (StockScanner/bases.py, 3 Nov 2026)
     _has_base = 'base_type' in _sd.columns
-    _BASE_OPTS = {'Any': None, 'Any base': 'any', 'Cup with handle': 'Cup w/ handle', 'Flat base': 'Flat base',
-                  'High tight flag': 'High tight flag'}
+    _BASE_OPTS = {'Any': None, 'Any base': 'any', 'Cup with handle': 'Cup w/ handle', 'VCP (Minervini)': 'VCP',
+                  'Flat base': 'Flat base', 'Tight area': 'Tight area', 'High tight flag': 'High tight flag'}
     _BO_OPTS = ['Any', 'Near pivot (≤ 5% below)', 'Broke out today (base pivot)', 'Broke out in the last 5 sessions',
-                'Near pivot or broke out (≤ 5 sessions)', '21-day high breakout today', '52-week high breakout today',
-                '21-day or 52-week breakout today']
+                'Near pivot or broke out (≤ 5 sessions)', 'Pivot high (10/10) breakout today',
+                '21-day high breakout today', '52-week high breakout today', '21-day or 52-week breakout today']
     _h1, _h2, _h3, _h4 = st.columns([1.1, 1.5, 1.0, 1.4])
     with _h1:
         _bt_f = st.selectbox('Base pattern', list(_BASE_OPTS), index=0, key='ms_base', disabled=not _has_base,
-                             help='Rule-based, nightly. Cup with handle (O\'Neil): prior uptrend ≥ 30%, cup 7–65 weeks '
-                                  'and 12–33% deep with a rounded bottom, right lip within 10% of the left, handle 1–6 '
-                                  'weeks, ≤ 12% deep, in the upper half; pivot = handle high + $0.10. Flat base: ≥ 5 weeks '
-                                  'within 15% after a ≥ 20% advance; pivot = base high. High tight flag: ≥ +100% in '
-                                  '4–8 weeks, then a 10–25% pullback over 3–5 weeks; pivot = flag high. Descriptive.')
+                             help='Rule-based, nightly (v2, 4 Nov 2026). Pivots = 10/10 swing highs, as in TradingView '
+                                  '"Pivot Points High Low". Flat base: starts AT the most recent 10/10 pivot high that no '
+                                  'close has cleared, ≥ 25 sessions, ≤ 15% deep; pivot = that high. Tight area: the same '
+                                  'but 10–24 sessions and ≤ 8% deep. Both need ≥ 20% advance into the pivot. VCP '
+                                  '(Minervini): trend template passed, ≥ 2 contractions each ≤ 85% of the one before, the '
+                                  'first 10–35%, the last ≤ 10%, volume drying up in the last one; pivot = high of the '
+                                  'last contraction. Cup with handle (O\'Neil): prior uptrend ≥ 30%, cup 7–65 weeks, '
+                                  '12–33% deep, handle ≤ 12% in the upper half; pivot = handle high + $0.10. High tight '
+                                  'flag: ≥ +100% in 4–8 weeks, then a 10–25% pullback. Descriptive, untested.')
     with _h2:
         _bs_f = st.selectbox('Pivot / breakout', _BO_OPTS, index=0, key='ms_bostate', disabled=not _has_base,
                              help='Near pivot = close at most 5% below the base pivot. Broke out = closed above it '
-                                  '(today, or 1–4 sessions ago and still above). 21-day / 52-week = today\'s close above '
-                                  'the highest high of the prior 21 / 252 sessions.')
+                                  '(today, or 1–4 sessions ago and still above). Pivot high (10/10) = today\'s close above '
+                                  'the most recent 10/10 swing high not yet cleared by a close (any stock, base or not). '
+                                  '21-day / 52-week = today\'s close above the highest high of the prior 21 / 252 sessions.')
     with _h3:
         _bv_f = st.checkbox('Breakout volume ≥ 1.4×', value=False, key='ms_bovol', disabled=not _has_base,
                             help='The breakout day\'s volume at least 1.4× its 50-day average (O\'Neil: +40–50%). '
-                                 'Base breakouts: the breakout day; 21-day / 52-week: today.')
+                                 'Base breakouts: the breakout day; pivot high / 21-day / 52-week: today.')
+    with _h4:
+        _tt_f = st.checkbox('Trend template (Minervini) ✓', value=False, key='ms_tt',
+                            disabled=not (_has_base and 'tt_pass' in _sd.columns),
+                            help='All 8: close > 150- and 200-day; 150 > 200; 200-day rising over a month; 50 > 150 and '
+                                 '200; close > 50-day; ≥ 30% above the 52-week low; within 25% of the 52-week high; '
+                                 'RS rating ≥ 70.')
 
     _v = _sd
     if _lmode == 'Momentum list':
@@ -1387,12 +1400,16 @@ if _scan_df is not None and len(_scan_df) > 0:
             _v = _v[_broke]
         elif _bs_f.startswith('Near pivot or'):
             _v, _sort_pivot = _v[_broke | (_bst == 'Near pivot')], True
+        elif _bs_f == 'Pivot high (10/10) breakout today':
+            _v = _v[_tb('piv_bo')] if 'piv_bo' in _v.columns else _v.iloc[0:0]
         elif _bs_f == '21-day high breakout today':
             _v = _v[_tb('bo21')]
         elif _bs_f == '52-week high breakout today':
             _v = _v[_tb('bo52')]
         elif _bs_f == '21-day or 52-week breakout today':
             _v = _v[_tb('bo21') | _tb('bo52')]
+        if _tt_f and 'tt_pass' in _v.columns:
+            _v = _v[_tb('tt_pass')]
         if _bv_f:
             _bst2 = _v['base_state'].fillna('').astype(str)
             _vol = pd.to_numeric(_v['vol_ratio'], errors='coerce')

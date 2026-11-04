@@ -82,7 +82,8 @@ HEAD = [('Ticker', 'l'), ('Sector', 'l'), ('Close', ''), ('% 52W Hi', ''), ('RS 
         ('EPS QoQ', ''), ('ATR', 'c'), ('Squeeze', 'c'), ('Base / pivot', 'l'), ('Breakout', 'c'), ('Earnings', ''),
         ('Leader industry', 'l')]
 
-BASE_ABBR = {'Cup w/ handle': 'Cup·H', 'Flat base': 'Flat', 'High tight flag': 'HTF'}
+BASE_ABBR = {'Cup w/ handle': 'Cup·H', 'Flat base': 'Flat', 'High tight flag': 'HTF', 'VCP': 'VCP',
+             'Tight area': 'Tight'}
 
 
 def base_cell(r):
@@ -107,6 +108,10 @@ def base_cell(r):
     pv_txt = '' if _nan(pv) else f' <span class="sub">to {float(pv):,.2f}</span>'
     w = r.get('base_weeks')
     wk = '' if _nan(w) else f' <span class="sub">{float(w):.0f}w</span>'
+    vc = _s(r.get('vcp_contractions'))
+    if bt == 'VCP' and vc and vc != 'None':           # e.g. "VCP 3T 18% · 9% · 4%"
+        n_ = r.get('vcp_n')
+        wk += (f' <span class="sub">{"" if _nan(n_) else f"{int(float(n_))}T "}{_e(vc)}</span>')
     rank = {'Broke out today': 4}.get(st_, 3 if broke else 2 if st_ == 'Near pivot' else 1)
     sk = rank * 1000 + (0 if _nan(dist) else float(dist) * 100)
     dep = r.get('base_depth')
@@ -120,13 +125,17 @@ def breakout_cell(r):
     """(html, sort key): today's close above the prior 21-session / 252-session high, with today's volume ratio."""
     b21 = str(r.get('bo21')).lower() == 'true'
     b52 = str(r.get('bo52')).lower() == 'true'
-    if not (b21 or b52):
+    bpv = str(r.get('piv_bo')).lower() == 'true'      # v2: close above the active 10/10 pivot high
+    if not (b21 or b52 or bpv):
         return '<span style="color:#6e675f;">—</span>', 0
     vr = r.get('vol_ratio')
     vtxt = '' if _nan(vr) else (f' <span class="sub" style="color:{TEAL if float(vr) >= 1.4 else DIM};">'
                                 f'{float(vr):.1f}×</span>')
-    chips = (chip('52W', COPPER, True) + ' ' if b52 else '') + (chip('21D', TEAL, True) if b21 else '')
-    return chips + vtxt, (2 if b52 else 1) + (0 if _nan(vr) else min(float(vr), 9) / 10)
+    ph = r.get('piv_hi')
+    ptitle = '' if _nan(ph) else f' title="Above the 10/10 pivot high {float(ph):,.2f} ({_e(_s(r.get("piv_date")))})"'
+    chips = ((chip('52W', COPPER, True) + ' ' if b52 else '') + (chip('21D', TEAL, True) + ' ' if b21 else '')
+             + (f'<span{ptitle}>{chip("PIV", TEAL, True)}</span>' if bpv else ''))
+    return chips + vtxt, (2 if b52 else 1 if b21 else 0.5) + (0 if _nan(vr) else min(float(vr), 9) / 10)
 
 CSS = """
 <style>

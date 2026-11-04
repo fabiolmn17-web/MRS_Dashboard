@@ -49,7 +49,8 @@ FIELDS = ['hi21', 'bo21', 'd21_pct', 'hi52w', 'bo52', 'd52_pct', 'vol_ratio',
           'base_type', 'base_state', 'base_days_since_bo', 'base_pivot', 'base_dist_pct', 'base_dist_atr',
           'base_depth', 'base_weeks', 'base_start', 'base_end', 'base_low', 'base_low_date', 'base_left',
           'base_left_date', 'base_right_date', 'handle_start', 'handle_low', 'handle_depth', 'base_prior_adv',
-          'base_bo_vol', 'base_quality', 'base_dryup', 'base_tight']
+          'base_bo_vol', 'base_quality', 'base_dryup', 'base_tight',
+          'piv_hi', 'piv_date', 'piv_bo', 'piv_dist_pct', 'tt_pass', 'tt_score', 'vcp_n', 'vcp_contractions', 'vcp_points']
 
 
 def _atr(h, l, c, n=14):
@@ -75,26 +76,126 @@ def _local_peaks(h, lo, hi, w=10):
 
 
 # ── patterns, each evaluated on bars [0 .. e] (e = the base's last session) ──────────────────────────────────────
-def _flat_base(h, l, c, e):
-    if e < 25 + 65:
+PIV_L, PIV_R = 10, 10          # swing pivots as in Fabio's TradingView "Pivot Points High Low" (10 left / 10 right)
+
+
+def pivot_highs(h, e, L=PIV_L, R=PIV_R):
+    """Confirmed pivot highs on bars [0 .. e]: h[i] is the highest high of the L bars before and R bars after
+    (strictly above the left side, like ta.pivothigh). Needs R bars after i, so i <= e - R."""
+    out = []
+    for i in range(L, e - R + 1):
+        if h[i] > h[i - L:i].max() and h[i] >= h[i + 1:i + R + 1].max():
+            out.append(i)
+    return out
+
+
+def pivot_lows(l, e, L=PIV_L, R=PIV_R):
+    out = []
+    for i in range(L, e - R + 1):
+        if l[i] < l[i - L:i].min() and l[i] <= l[i + 1:i + R + 1].min():
+            out.append(i)
+    return out
+
+
+def active_pivot(h, c, e, L=PIV_L, R=PIV_R):
+    """The most recent confirmed pivot high that no CLOSE has cleared since (intraday probes allowed): the
+    resistance a breakout has to clear. Index or None."""
+    for i in reversed(pivot_highs(h, e, L, R)):
+        if i < e and c[i + 1:e + 1].max() <= h[i]:
+            return i
+        if i >= e:
+            continue
+        return None                                   # the latest pivot was already cleared: no active pivot
+    return None
+
+
+def _pivot_base(h, l, c, e):
+    """Flat base / tight area anchored on the active pivot (v2, 4 Nov 2026): the base runs from the pivot high to e
+    and never closes above it. Flat base: >= 25 sessions, <= 15% deep. Tight area: 10-24 sessions, <= 8% deep.
+    Both after a prior advance >= 20% (pivot vs the lowest low of the 65 sessions before it)."""
+    p = active_pivot(h, c, e)
+    if p is None or p < 65:
         return None
-    top, bot = h[e], l[e]
-    s = e
-    while s - 1 >= 0 and e - s < 325:
-        t2, b2 = max(top, h[s - 1]), min(bot, l[s - 1])
-        if (t2 - b2) / t2 > 0.15:
-            break
-        top, bot, s = t2, b2, s - 1
-    if e - s + 1 < 25 or s < 65:
-        return None
-    prior_low = l[s - 65:s].min()
-    adv = c[s] / prior_low - 1
+    n = e - p + 1
+    pv = h[p]
+    low = l[p:e + 1].min()
+    depth = (pv - low) / pv
+    adv = pv / l[p - 65:p].min() - 1
     if adv < 0.20:
         return None
-    seg = slice(s, e + 1)
-    return dict(type='Flat base', start=s, end=e, pivot=float(h[seg].max()), low=float(l[seg].min()),
-                low_i=s + int(np.argmin(l[seg])), depth=float((h[seg].max() - l[seg].min()) / h[seg].max()),
-                prior_adv=float(adv))
+    if n >= 25 and depth <= 0.15:
+        typ = 'Flat base'
+    elif 10 <= n < 25 and depth <= 0.08:
+        typ = 'Tight area'
+    else:
+        return None
+    return dict(type=typ, start=p, end=e, pivot=float(pv), low=float(low), low_i=p + int(np.argmin(l[p:e + 1])),
+                depth=float(depth), prior_adv=float(adv), left=float(pv), left_i=p)
+
+
+def _swing_highs(h, a, e, w=5):
+    """5/5 swing highs inside [a, e] (confirmed: w bars after them inside [.., e])."""
+    return [i for i in range(max(a, w), e - w + 1) if h[i] >= h[i - w:i + w + 1].max()]
+
+
+def _vcp(h, l, c, v, e, ctx):
+    """Volatility contraction pattern (Minervini), rule-based, on bars [0 .. e]:
+    - trend template (ctx['tt'] at e): price > 150- and 200-day, 150 > 200, 200 rising over 21 sessions, 50 > 150 and
+      200, price > 50-day, >= 30% above the 52-week low, within 25% of the 52-week high, RS rating >= 70 (if known)
+    - base: from the highest high of the last 325 sessions (no close above it since), 15-325 sessions long
+    - contractions: each swing high (5/5) to the lowest low before the next swing high; >= 2 of them, each <= 85% of
+      the previous one, the first 10-35%, the last <= 10%
+    - volume dry-up: average volume of the last contraction below the 50-day average (skipped without volume)
+    Pivot = the high of the last contraction."""
+    if not ctx.get('tt', False):
+        return None
+    a = max(0, e - 325)
+    i0 = a + int(np.argmax(h[a:e - 4]))
+    if c[i0 + 1:e + 1].max() > h[i0] or not (15 <= e - i0 <= 325):
+        return None
+    sh = [i0] + [i for i in _swing_highs(h, i0 + 1, e) if h[i] <= h[i0]]
+    # keep swing highs separated by a real pullback: walk forward, one contraction per swing high
+    con, k = [], 0
+    while k < len(sh):
+        i = sh[k]
+        nxt = next((j for j in sh[k + 1:] if j > i), None)
+        stop = (nxt - 1) if nxt is not None else e
+        if stop <= i:
+            k += 1
+            continue
+        lo_i = i + 1 + int(np.argmin(l[i + 1:stop + 1]))
+        d = (h[i] - l[lo_i]) / h[i]
+        con.append((i, lo_i, d))
+        # next swing high after the low
+        k = next((m for m in range(k + 1, len(sh)) if sh[m] > lo_i), len(sh))
+    con = [x for x in con if x[2] >= 0.01]
+    if len(con) < 2:
+        return None
+    ds = [x[2] for x in con]
+    if not (0.10 <= ds[0] <= 0.35) or ds[-1] > 0.10 or any(ds[j] > 0.85 * ds[j - 1] for j in range(1, len(ds))):
+        return None
+    li, lo_i, _ = con[-1]
+    if np.isfinite(v[li:e + 1]).any():
+        v50 = np.nanmean(v[max(0, e - 49):e + 1])
+        if not np.nanmean(v[li:e + 1]) < v50:
+            return None
+    return dict(type='VCP', start=i0, end=e, pivot=float(h[li]), low=float(l[i0:e + 1].min()),
+                low_i=i0 + int(np.argmin(l[i0:e + 1])), depth=float(ds[0]), prior_adv=None, left=float(h[i0]),
+                left_i=i0, vcp=[(int(a_), int(b_), float(d_)) for a_, b_, d_ in con])
+
+
+def _trend_template(h, l, c, e, rs=None):
+    """Minervini's trend template at bar e: (all passed, number passed of 8)."""
+    if e < 220:
+        return False, 0
+    cl = c[:e + 1]
+    s50, s150, s200 = cl[-50:].mean(), cl[-150:].mean(), cl[-200:].mean()
+    s200_21 = c[e - 220:e - 20].mean()
+    lo52, hi52 = l[max(0, e - 251):e + 1].min(), h[max(0, e - 251):e + 1].max()
+    px = c[e]
+    t = [px > s150 and px > s200, s150 > s200, s200 > s200_21, s50 > s150 and s50 > s200, px > s50,
+         px >= 1.3 * lo52, px >= 0.75 * hi52, (rs is None or not np.isfinite(rs) or rs >= 70)]
+    return all(t), int(sum(t))
 
 
 def _cup_handle(h, l, c, e):
@@ -170,12 +271,11 @@ def _high_tight_flag(h, l, c, e):
     return None
 
 
-def _base_at(h, l, c, e):
-    for f in (_cup_handle, _high_tight_flag, _flat_base):
-        b = f(h, l, c, e)
-        if b:
-            return b
-    return None
+def _base_at(h, l, c, v, e, rs=None):
+    tt, _ = _trend_template(h, l, c, e, rs)
+    b = _cup_handle(h, l, c, e) or _vcp(h, l, c, v, e, {'tt': tt}) or _high_tight_flag(h, l, c, e) \
+        or _pivot_base(h, l, c, e)
+    return b
 
 
 def detect(df: pd.DataFrame, rs_rating: Optional[float] = None) -> dict:
@@ -202,10 +302,18 @@ def detect(df: pd.DataFrame, rs_rating: Optional[float] = None) -> dict:
         hi52 = float(h[last - 252:last].max())
         out.update(hi52w=hi52, bo52=bool(c[last] > hi52), d52_pct=float(c[last] / hi52 - 1))
     out['vol_ratio'] = vr(last)
+    # v2: the active 10/10 pivot high (as yesterday) and today's close against it; Minervini trend template today
+    if n > PIV_L + PIV_R + 2:
+        p_ = active_pivot(h, c, last - 1)
+        if p_ is not None:
+            out.update(piv_hi=round(float(h[p_]), 2), piv_date=ds(p_), piv_bo=bool(c[last] > h[p_]),
+                       piv_dist_pct=float(c[last] / h[p_] - 1))
+    tt_, tts_ = _trend_template(h, l, c, last, rs_rating)
+    out.update(tt_pass=tt_, tt_score=tts_)
 
     # the current base (ends yesterday); else a base cleared 1..RECENT sessions ago and still held
     base, bo_i = None, None
-    b = _base_at(h, l, c, last - 1)
+    b = _base_at(h, l, c, v, last - 1, rs_rating)
     if b:
         base = b
         if c[last] > b['pivot']:
@@ -215,7 +323,7 @@ def detect(df: pd.DataFrame, rs_rating: Optional[float] = None) -> dict:
             e = last - 1 - k
             if e < 60:
                 break
-            b = _base_at(h, l, c, e)
+            b = _base_at(h, l, c, v, e, rs_rating)
             if b and c[e + 1] > b['pivot'] and c[last] > b['pivot']:
                 base, bo_i = b, e + 1
                 break
@@ -242,5 +350,9 @@ def detect(df: pd.DataFrame, rs_rating: Optional[float] = None) -> dict:
         base_left=base.get('left'), base_left_date=ds(base.get('left_i')), base_right_date=ds(base.get('right_i')),
         handle_start=ds(base.get('handle_i')), handle_low=base.get('handle_low'), handle_depth=base.get('handle_depth'),
         base_prior_adv=base.get('prior_adv'), base_bo_vol=vr(bo_i) if bo_i is not None else None,
-        base_quality=q, base_dryup=dry, base_tight=tight)
+        base_quality=q, base_dryup=dry, base_tight=tight,
+        vcp_n=len(base['vcp']) if base.get('vcp') else None,
+        vcp_contractions=' · '.join(f"{x[2] * 100:.0f}%" for x in base['vcp']) if base.get('vcp') else None,
+        vcp_points=';'.join(f"{ds(a_)},{h[a_]:.2f},{ds(b_)},{l[b_]:.2f}" for a_, b_, _ in base['vcp'])
+        if base.get('vcp') else None)
     return out

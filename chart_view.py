@@ -94,6 +94,20 @@ def _add_base(fig, v, b):
         if hs and b.get('handle_low') is not None:
             fig.add_shape(type='rect', xref='x', yref='y', x0=hs, x1=x1, y0=b['handle_low'], y1=pv, layer='below',
                           line=dict(color=BASE_COL, width=1, dash='dot'), fillcolor='rgba(133,202,197,0.10)')
+    if typ == 'VCP' and b.get('vcp_points'):                 # contractions: swing high -> low, numbered
+        for j, seg in enumerate(str(b['vcp_points']).split(';')):
+            try:
+                d1, y1, d2, y2 = seg.split(',')
+                x1_, x2_ = clip(d1), clip(d2)
+                if d1 < first:
+                    continue
+                fig.add_trace(go.Scatter(x=[x1_, x2_], y=[float(y1), float(y2)], mode='lines+markers',
+                                         line=dict(color=BASE_COL, width=1.3, dash='dot'), marker=dict(size=5, color=BASE_COL),
+                                         hoverinfo='skip', showlegend=False))
+                fig.add_annotation(x=x2_, y=float(y2), xref='x', yref='y', text=f'{j + 1}', showarrow=False, yshift=-10,
+                                   font=dict(size=10, color=BASE_COL))
+            except ValueError:
+                continue
     state = b.get('base_state') or ''
     lbl = f"{typ} · pivot {pv:,.2f} · {state}"
     if x0:
@@ -101,6 +115,26 @@ def _add_base(fig, v, b):
                       line=dict(color=PIVOT_COL, width=1.3, dash='dash'))
         fig.add_annotation(x=x0, y=pv, xref='x', yref='y', text=lbl, showarrow=False, xanchor='left', yanchor='bottom',
                            font=dict(size=10, color=PIVOT_COL), bgcolor='rgba(18,18,18,0.75)')
+
+
+def _add_pivots(fig, h, v):
+    """Confirmed 10/10 pivot highs / lows (same rule as the TradingView 'Pivot Points High Low' script), as small
+    price labels on the visible bars."""
+    try:
+        from StockScanner import bases
+    except Exception:
+        return
+    hh, ll = h['High'].to_numpy(float), h['Low'].to_numpy(float)
+    e = len(hh) - 1
+    off = len(h) - len(v)
+    xs = list(v.index.strftime('%Y-%m-%d'))
+    for kind, idx, arr, pos in (('H', bases.pivot_highs(hh, e), hh, 'top'), ('L', bases.pivot_lows(ll, e), ll, 'bottom')):
+        idx = [i for i in idx if i >= off]
+        if not idx:
+            continue
+        fig.add_trace(go.Scatter(x=[xs[i - off] for i in idx], y=[arr[i] for i in idx], mode='text',
+                                 text=[f'{arr[i]:,.2f}' for i in idx], textposition=f'{pos} center',
+                                 textfont=dict(size=9, color='#9b958f'), hoverinfo='skip', showlegend=False))
 
 
 def figure(h: pd.DataFrame, ticker: str, height: int = 520, base: dict = None) -> go.Figure:
@@ -132,6 +166,7 @@ def figure(h: pd.DataFrame, ticker: str, height: int = 520, base: dict = None) -
                           annotation=dict(text=f'{lbl} {y:,.2f}', font=dict(size=10, color=col), bgcolor='rgba(18,18,18,0.75)'),
                           annotation_position=pos)
     _add_base(fig, v, base_info(h) if base is None else base)
+    _add_pivots(fig, h, v)
     # volume pane (4 Nov 2026): bars coloured by the candle, 50-day average line; its own axis under the price
     has_vol = 'Volume' in v.columns and pd.to_numeric(v['Volume'], errors='coerce').fillna(0).gt(0).any()
     if has_vol:
