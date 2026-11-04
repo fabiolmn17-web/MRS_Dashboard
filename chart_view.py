@@ -193,8 +193,8 @@ def figure(h: pd.DataFrame, ticker: str, height: int = 520, base: dict = None) -
         legend=dict(orientation='h', x=0, y=1.0, yanchor='bottom', font=dict(size=10), bgcolor='rgba(0,0,0,0)'),
         hovermode='x', spikedistance=-1, dragmode='zoom')
     # crosshair (4 Nov 2026): dotted vertical and horizontal lines that follow the cursor, date label on the x axis
-    _spk = dict(showspikes=True, spikemode='across', spikesnap='cursor', spikethickness=1, spikedash='dot',
-                spikecolor='#9b958f')
+    _spk = dict(showspikes=True, spikemode='across', spikesnap='cursor', spikethickness=0.5, spikedash='dot',
+                spikecolor='rgba(168,159,149,0.55)')
     fig.update_xaxes(**_spk)
     fig.update_yaxes(**_spk)
     if has_vol:

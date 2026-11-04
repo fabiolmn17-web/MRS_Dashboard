@@ -1010,7 +1010,7 @@ def _wl_inner():
     if h is None or len(h) < 30:
         st.info(f'No price history for {pick}.')
         return
-    fig = chart_view.figure(h, pick, height=380)
+    fig = chart_view.figure(h, pick, height=640)       # 4 Nov 2026: as tall as the side panel next to it
     r = d[d['ticker'] == pick].iloc[0]
     for val, col, lbl in ((r['trigger'], '#85cac5', 'trigger'), (r['stop'], '#f4a062', 'stop')):
         if pd.notna(val):
