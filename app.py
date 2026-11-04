@@ -1111,6 +1111,39 @@ def _lookup_live(ticker):
     return row
 
 
+def _scan_counts_html(sd):
+    """4 Nov 2026: how many names are on each list / in each base state (whole universe), and how many of those are
+    also on the momentum list (small grey number). Same definitions as the filters below."""
+    tb = lambda c: sd[c].astype(str).str.lower().eq('true') if c in sd.columns else pd.Series(False, index=sd.index)
+    mom = sd['_mom'] if '_mom' in sd.columns else pd.Series(False, index=sd.index)
+    pm = sd['pass_mode'] if 'pass_mode' in sd.columns else pd.Series(None, index=sd.index)
+    bt = sd['base_type'].fillna('').astype(str) if 'base_type' in sd.columns else pd.Series('', index=sd.index)
+    bs = sd['base_state'].fillna('').astype(str) if 'base_state' in sd.columns else pd.Series('', index=sd.index)
+    groups = [
+        ('Lists', [('Momentum', mom, '#85cac5'), ('CAN SLIM strict', pm == 'STRICT', '#85cac5'),
+                   ('CAN SLIM relaxed', pm.isin(['STRICT', 'RELAXED']), '#e3b48e'),
+                   ('Momentum + CAN SLIM', mom & pm.notna(), '#85cac5')]),
+        ('Bases', [('Cup w/ handle', bt == 'Cup w/ handle', '#85cac5'), ('Flat base', bt == 'Flat base', '#e8dccb'),
+                   ('High tight flag', bt == 'High tight flag', '#e3b48e')]),
+        ('Pivot', [('Near pivot', bs == 'Near pivot', '#e3b48e'), ('Broke out today', bs == 'Broke out today', '#85cac5'),
+                   ('Broke out ≤ 5 sessions', bs.str.startswith('Broke out'), '#85cac5')]),
+        ('Breakouts today', [('21-day high', tb('bo21'), '#85cac5'), ('52-week high', tb('bo52'), '#e3b48e')]),
+    ]
+    h = '<div style="display:flex;flex-wrap:wrap;gap:8px;margin:2px 0 10px 0;">'
+    for g, items in groups:
+        h += ('<div style="background:#161514;border:1px solid #2a2724;border-radius:6px;padding:6px 10px;">'
+              f'<div style="font-size:0.62rem;letter-spacing:0.08em;color:#9b958f;text-transform:uppercase;'
+              f'margin-bottom:2px;">{g}</div><div style="display:flex;gap:14px;">')
+        for lab, mask, col in items:
+            n, nm = int(mask.sum()), int((mask & mom).sum())
+            sub = '' if lab.startswith('Momentum') else f'<span style="color:#6e675f;font-size:0.64rem;"> · {nm} mom</span>'
+            h += (f'<div style="white-space:nowrap;"><span style="font-family:IBM Plex Mono,monospace;font-size:1.0rem;'
+                  f'font-weight:600;color:{col if n else "#6e675f"};">{n}</span> '
+                  f'<span style="font-size:0.70rem;color:#c9c1b7;">{lab}</span>{sub}</div>')
+        h += '</div></div>'
+    return h + '</div>'
+
+
 def _scan_lookup(sd, sec_label, sec_score, leader_hold):
     c_in, c_note = st.columns([1, 3])
     with c_in:
@@ -1228,8 +1261,7 @@ if _scan_df is not None and len(_scan_df) > 0:
         f'<div style="font-size:0.78rem;color:#a89f95;margin-bottom:6px;">'
         f'Scan date <b style="color:#f3ece2;">{_scan_date}</b> · universe {len(_sd)} stocks'
         + (f' <span style="color:#6e675f;">({_html_mod.escape(_uni_src)})</span>' if _uni_src else '') + ' · '
-        f'<b style="color:#f3ece2;">{_n_mom}</b> on the momentum list · '
-        f'{_n_strict} CAN SLIM strict · {_n_relax} relaxed (incl. strict)'
+        f'{_n_mom} on the momentum list'
         + (f' · MRS at scan {float(_scan_mrs):+.2f}' if _scan_mrs is not None and pd.notna(_scan_mrs) else '')
         + ' · updated nightly 10 PM UTC</div>', unsafe_allow_html=True)
     if not _has_mom:
@@ -1239,6 +1271,7 @@ if _scan_df is not None and len(_scan_df) > 0:
                    'universe download did not work in the nightly run, so the lists are shorter than usual. Check the '
                    '"CAN SLIM Scanner" run on GitHub (Actions tab).')
 
+    st.markdown(_scan_counts_html(_sd), unsafe_allow_html=True)
     _scan_lookup(_sd, _sec_label, _sec_score, _leader_hold)
 
     _LIST_OPTS = ['Momentum list', 'Momentum list that also meets CAN SLIM', 'CAN SLIM strict', 'CAN SLIM relaxed',

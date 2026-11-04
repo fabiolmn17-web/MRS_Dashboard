@@ -6,6 +6,7 @@ Shows the last ~12 months of daily candles with:
   SMA 50 and SMA 200 (computed on the full 2-year history, so the 200-day line starts at the left edge)
   52-week high  = highest high of the last 252 sessions (including today)
   21-day high   = highest high of the 21 sessions BEFORE today (the pivot a breakout has to clear; 20 until 3 Nov 2026)
+  Volume pane   (4 Nov 2026) daily volume bars (teal up / orange down day) and the 50-day average, under the price
   Base overlay  (3 Nov 2026) the current base from StockScanner/bases.py on this chart's own (unadjusted) prices:
                 shaded base, the cup's left lip / low / right lip, the handle, and the pivot line
 Descriptive chart only: same data the scanner uses, no signals.
@@ -131,6 +132,18 @@ def figure(h: pd.DataFrame, ticker: str, height: int = 520, base: dict = None) -
                           annotation=dict(text=f'{lbl} {y:,.2f}', font=dict(size=10, color=col), bgcolor='rgba(18,18,18,0.75)'),
                           annotation_position=pos)
     _add_base(fig, v, base_info(h) if base is None else base)
+    # volume pane (4 Nov 2026): bars coloured by the candle, 50-day average line; its own axis under the price
+    has_vol = 'Volume' in v.columns and pd.to_numeric(v['Volume'], errors='coerce').fillna(0).gt(0).any()
+    if has_vol:
+        vol = pd.to_numeric(v['Volume'], errors='coerce').fillna(0)
+        va50 = pd.to_numeric(h['Volume'], errors='coerce').rolling(50).mean().iloc[-BARS:]
+        up = (v['Close'] >= v['Open']).to_numpy()
+        fig.add_trace(go.Bar(x=x, y=vol, yaxis='y2', name='Volume', showlegend=False,
+                             marker=dict(color=np.where(up, 'rgba(133,202,197,0.55)', 'rgba(244,160,98,0.55)'), line_width=0),
+                             hovertemplate='Volume %{y:,.0f}<extra></extra>'))
+        fig.add_trace(go.Scatter(x=x, y=va50, yaxis='y2', name='Vol 50d avg', mode='lines', showlegend=False,
+                                 line=dict(color='#e8dccb', width=1, dash='dot'),
+                                 hovertemplate='50-day avg %{y:,.0f}<extra></extra>'))
     # month ticks on the category axis: first session of each month
     first = ~v.index.to_period('M').duplicated()
     tv = list(x[first])[1:]
@@ -140,9 +153,14 @@ def figure(h: pd.DataFrame, ticker: str, height: int = 520, base: dict = None) -
         paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
         xaxis=dict(type='category', rangeslider=dict(visible=False), showgrid=False, tickangle=0,
                    tickmode='array', tickvals=tv, ticktext=tt, tickfont=dict(size=10)),
-        yaxis=dict(side='right', tickfont=dict(size=10), gridcolor='#1f1d1b'),
+        yaxis=dict(side='right', tickfont=dict(size=10), gridcolor='#1f1d1b', domain=[0.22, 1.0] if has_vol else [0, 1]),
+        bargap=0.15,
         legend=dict(orientation='h', x=0, y=1.0, yanchor='bottom', font=dict(size=10), bgcolor='rgba(0,0,0,0)'),
         hovermode='x unified', dragmode='zoom')
+    if has_vol:
+        fig.update_layout(yaxis2=dict(side='right', domain=[0, 0.17], showgrid=False, nticks=3, tickformat='.2s',
+                                      tickfont=dict(size=9, color='#9b958f'), rangemode='tozero', anchor='x'),
+                          xaxis=dict(anchor='y2'))                 # month labels under the volume pane
     return fig
 
 
