@@ -80,7 +80,7 @@ def squeeze_cell(r):
 HEAD = [('Ticker', 'l'), ('Sector', 'l'), ('Close', ''), ('% 52W Hi', ''), ('RS label (held)', 'l'),
         ('RS 3M', ''), ('RS 1M', ''), ('RS rtg', ''), ('Ext vs SMA50', ''), ('Momentum', 'c'), ('5-day', ''), ('CAN SLIM', 'c'),
         ('EPS QoQ', ''), ('ATR', 'c'), ('Squeeze', 'c'), ('Base / pivot', 'l'), ('Breakout', 'c'), ('Earnings', ''),
-        ('Leader industry', 'l')]
+        ('Industry (rank · state)', 'l')]
 
 BASE_ABBR = {'Cup w/ handle': 'Cup·H', 'Flat base': 'Flat', 'High tight flag': 'HTF', 'VCP': 'VCP',
              'Tight area': 'Tight'}
@@ -121,6 +121,32 @@ def base_cell(r):
             f'<span style="color:{col};">{txt}</span>{pv_txt}{stars}</span>'), sk
 
 
+def ind_cell(r, etf=''):
+    """(html, sort key): industry group from the scanned stocks (industry_groups.py, 4 Nov 2026): RS-rating rank inside
+    the group, leader chip, and the group's held MRS state without the stock. Falls back to the ETF holding."""
+    g = _s(r.get('ind_group'))
+    if not g or g == 'None':
+        return (chip(etf, TEAL, True) if etf else '<span style="color:#6e675f;">—</span>'), (1 if etf else 0)
+    rk, n = r.get('ind_rank'), r.get('ind_n')
+    role = _s(r.get('ind_role'))
+    sc = r.get('ind_score')
+    lab = _s(r.get('ind_label')).title()
+    short = g if len(g) <= 26 else g[:25] + '…'
+    rk_txt = '' if _nan(rk) or _nan(n) else f' <span class="sub">{int(float(rk))}/{int(float(n))}</span>'
+    if role.startswith('Leader'):
+        ccol = TEAL if 'leading' in role else ORANGE if 'lagging' in role else COPPER
+        lead = chip('LEADER', ccol, 'leading' in role) + ' '
+    else:
+        lead = ''
+    st_txt = '' if _nan(sc) else f' <span style="color:{_score_col(sc)};">{float(sc):+.1f}</span>'
+    title = _e(f"{g} · rank {'' if _nan(rk) else int(float(rk))} of {'' if _nan(n) else int(float(n))} by RS rating · "
+               f"industry without this stock: {lab or 'n/a'} ({_s(r.get('ind_trend')).title()})"
+               + (f" · {role}" if role else ''))
+    rank_k = {'Leader · leading industry': 3, 'Leader': 2, 'Leader · lagging industry': 1}.get(role, 0)
+    sk = rank_k * 1000 + (0 if _nan(sc) else float(sc) * 100) - (0 if _nan(rk) else float(rk))
+    return f'<span title="{title}">{lead}{_e(short)}{rk_txt}{st_txt}</span>', sk
+
+
 def breakout_cell(r):
     """(html, sort key): today's close above the prior 21-session / 252-session high, with today's volume ratio."""
     b21 = str(r.get('bo21')).lower() == 'true'
@@ -141,7 +167,7 @@ CSS = """
 <style>
 body{margin:0;background:transparent;font-family:Barlow,system-ui,sans-serif;}
 .wrap{overflow-x:auto;}
-table{width:100%;border-collapse:collapse;min-width:1240px;}
+table{width:100%;border-collapse:collapse;min-width:1360px;}
 th{background:#2a2724;color:#a89f95;font-size:0.70rem;font-weight:600;padding:7px 6px;text-align:right;white-space:nowrap;cursor:pointer;user-select:none;position:sticky;top:0;}
 th.l,td.l{text-align:left;} th.c,td.c{text-align:center;}
 th:hover{color:#e3b48e;}
@@ -251,7 +277,8 @@ def build_html(df: pd.DataFrame, sec_label: dict, sec_score: dict, leader_hold: 
         o_html, o_sort = breakout_cell(r)
         h += f'<td class="c" data-s="{o_sort}">{o_html}</td>'
         h += f'<td class="num" data-s="{e_sort}">{e_html}</td>'
-        h += f'<td class="l" data-s="{_e(etf)}">{chip(etf, TEAL, True) if etf else "<span style=color:#6e675f>—</span>"}</td>'
+        i_html, i_sort = ind_cell(r, etf)
+        h += f'<td class="l" data-s="{i_sort}">{i_html}</td>'
         h += '</tr>'
     h += '</tbody></table></div>' + ('' if clickable else JS)
     return h

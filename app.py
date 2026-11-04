@@ -1111,6 +1111,54 @@ def _lookup_live(ticker):
     return row
 
 
+def _industry_groups_panel(sd):
+    """4 Nov 2026: industry groups built from the scanned stocks (StockScanner/industry_groups.py) and their leaders,
+    plus a TradingView watchlist of the leaders."""
+    if sd is None or 'ind_group' not in sd.columns or not sd['ind_group'].notna().any():
+        return
+    from StockScanner import industry_groups as _ig
+    gt = _ig.group_table(sd)
+    if gt.empty:
+        return
+    n_lead = int(gt['Leading'].sum())
+    with st.expander(f'Industry groups from the scanned stocks: {len(gt)} groups, {n_lead} leading · leaders inside each',
+                     expanded=False):
+        h = ('<div style="max-height:420px;overflow:auto;"><table style="width:100%;border-collapse:collapse;'
+             'font-size:0.74rem;"><thead><tr>')
+        for c in ['Group', 'Sector', 'N', 'Held RS', 'Trend', 'Days', 'RS 3M', 'RS 1M', 'Median RS rtg', 'Leaders']:
+            h += (f'<th style="background:#2a2724;color:#a89f95;padding:5px 6px;text-align:left;position:sticky;top:0;'
+                  f'white-space:nowrap;">{c}</th>')
+        h += '</tr></thead><tbody>'
+        for _, g in gt.iterrows():
+            sc = pd.to_numeric(pd.Series([g['Score']]), errors='coerce').iloc[0]
+            col = ('#85cac5' if sc >= 1.0 else '#e8dccb' if sc >= 0.5 else '#9b958f' if sc > -0.5 else '#f4a062') \
+                if pd.notna(sc) else '#6e675f'
+            lead = ('<span style="color:#85cac5;font-weight:700;">★ </span>' if g['Leading'] else '')
+            pc = lambda v: '—' if v is None or pd.isna(v) else f'{float(v) * 100:+.1f}%'
+            td = 'style="padding:4px 6px;border-bottom:1px solid #1a1918;white-space:nowrap;"'
+            h += (f'<tr><td {td}>{lead}{_html_mod.escape(str(g["Group"]))}</td>'
+                  f'<td {td}>{_html_mod.escape(str(YF_TO_SECTOR.get(g["Sector"], g["Sector"])))}</td><td {td}>{g["N"]}</td>'
+                  f'<td {td}><b style="color:{col};">{"" if pd.isna(sc) else f"{sc:+.1f} "}'
+                  f'{_html_mod.escape(str(g["Label"] or "").title())}</b></td>'
+                  f'<td {td}>{_html_mod.escape(str(g["Trend"] or "").title())}</td>'
+                  f'<td {td}>{"" if pd.isna(g["Days"]) else int(g["Days"])}</td>'
+                  f'<td {td}>{pc(g["RS 3M"])}</td><td {td}>{pc(g["RS 1M"])}</td>'
+                  f'<td {td}>{"" if pd.isna(g["Median RS rating"]) else int(g["Median RS rating"])}</td>'
+                  f'<td {td}><b style="color:#e3b48e;">{_html_mod.escape(str(g["Leaders"]))}</b></td></tr>')
+        h += '</tbody></table></div>'
+        st.markdown(h, unsafe_allow_html=True)
+        st.caption('Equal-weight index of each group\'s scanned members vs SPY, MRS rules (held 3 sessions). ★ = leading '
+                   '(held +1.5 with RS 1M not negative, or +0.5 and Improving). Leaders: top 20% of the group by RS rating '
+                   '(at least the top 3), held RS ≥ +1.0, above the 200-day, within 25% of the 52-week high. Groups = '
+                   'NASDAQ industries; under 5 names merged. Descriptive, untested.')
+        wl = _ig.tv_watchlist(sd)
+        if wl:
+            st.download_button('TradingView watchlist of the leaders (.txt)', wl,
+                               file_name=f'MRS_industry_leaders_{date.today().isoformat()}.txt', mime='text/plain',
+                               key='ig_wl', help='TradingView: watchlist menu → Import list. Two sections: leaders in '
+                                                 'leading industries, other industry leaders.')
+
+
 def _scan_counts_html(sd):
     """4 Nov 2026: how many names are on each list / in each base state (whole universe), and how many of those are
     also on the momentum list (small grey number). Same definitions as the filters below."""
@@ -1128,6 +1176,10 @@ def _scan_counts_html(sd):
                    ('High tight flag', bt == 'High tight flag', '#e3b48e'), ('Trend template ✓', tb('tt_pass'), '#9b958f')]),
         ('Pivot', [('Near pivot', bs == 'Near pivot', '#e3b48e'), ('Broke out today', bs == 'Broke out today', '#85cac5'),
                    ('Broke out ≤ 5 sessions', bs.str.startswith('Broke out'), '#85cac5')]),
+        ('Industry leaders', [('Leader', sd['ind_role'].fillna('').astype(str).str.startswith('Leader')
+                               if 'ind_role' in sd.columns else pd.Series(False, index=sd.index), '#e3b48e'),
+                              ('In a leading industry', sd['ind_role'].fillna('').astype(str).eq('Leader · leading industry')
+                               if 'ind_role' in sd.columns else pd.Series(False, index=sd.index), '#85cac5')]),
         ('Breakouts today', [('Pivot high 10/10', tb('piv_bo'), '#85cac5'), ('21-day high', tb('bo21'), '#85cac5'),
                              ('52-week high', tb('bo52'), '#e3b48e')]),
     ]
@@ -1203,8 +1255,20 @@ def _scan_lookup(sd, sec_label, sec_score, leader_hold):
     else:
         lines.append('<b style="color:#f3ece2;">CAN SLIM:</b> not checked (outside the nightly universe)')
     etf = leader_hold.get(t)
-    lines.append('<b style="color:#f3ece2;">Leader industry:</b> '
-                 + (f'top-10 holding of {etf}' if etf else 'not a top-10 holding of a leader industry ETF'))
+    _g = r.get('ind_group')
+    if isinstance(_g, str) and _g:
+        _rk, _n, _role = r.get('ind_rank'), r.get('ind_n'), r.get('ind_role')
+        _role = _role if isinstance(_role, str) and _role else 'not a leader'
+        _isc = r.get('ind_score')
+        _isc = '' if _isc is None or pd.isna(_isc) else f'{float(_isc):+.1f} '
+        lines.append('<b style="color:#f3ece2;">Industry:</b> ' + _html_mod.escape(_g)
+                     + ('' if _rk is None or pd.isna(_rk) else f' · RS-rating rank {int(_rk)} of {int(_n)}')
+                     + f' · <b>{_html_mod.escape(_role)}</b> · industry without this stock: {_isc}'
+                     + _html_mod.escape(str(r.get('ind_label') or '').title()) + ' ('
+                     + _html_mod.escape(str(r.get('ind_trend') or '').title()) + ')')
+    else:
+        lines.append('<b style="color:#f3ece2;">Leader industry:</b> '
+                     + (f'top-10 holding of {etf}' if etf else 'not a top-10 holding of a leader industry ETF'))
     c_txt, c_ch = st.columns([1.15, 1], gap='medium')
     with c_txt:
         st.markdown('<div style="font-size:0.78rem;color:#c9c1b7;line-height:1.9;margin:2px 0 6px 0;">'
@@ -1275,6 +1339,7 @@ if _scan_df is not None and len(_scan_df) > 0:
 
     st.markdown(_scan_counts_html(_sd), unsafe_allow_html=True)
     _scan_lookup(_sd, _sec_label, _sec_score, _leader_hold)
+    _industry_groups_panel(_sd)
 
     _LIST_OPTS = ['Momentum list', 'Momentum list that also meets CAN SLIM', 'CAN SLIM strict', 'CAN SLIM relaxed',
                   'All scanned stocks']
@@ -1298,7 +1363,14 @@ if _scan_df is not None and len(_scan_df) > 0:
     with _g2:
         _lead_sec = st.checkbox('Leading sectors only', value=False, key='ms_leadsec', help='Sector RS score +1 or higher (held label).')
     with _g3:
-        _lead_ind = st.checkbox('In a leader industry', value=False, key='ms_leadind', help='Top-10 holding of an industry ETF on the Leaders-to-buy list.')
+        _IND_OPTS = ['Any', 'Industry leader', 'Leader in a leading industry', 'In a leading industry (any stock)']
+        _ind_f = st.selectbox('Industry', _IND_OPTS, index=0, key='ms_indlead',
+                              help='Industry = NASDAQ industry group of the scanned stocks (groups under 5 names merged). '
+                                   'Leader: top 20% of its group by RS rating (at least the top 3), held RS score ≥ +1.0, '
+                                   'above the 200-day and within 25% of the 52-week high. Leading industry: the group '
+                                   'without the stock is held +1.5 with RS 1M not negative, or +0.5 and Improving (same '
+                                   'rule as the Leaders-to-buy list). Descriptive, untested. Older scans without industry '
+                                   'groups: falls back to "top-10 holding of a leader industry ETF".')
     with _g4:
         _atr_f = st.checkbox('ATR compressed', value=False, key='ms_atr')
     with _g5:
@@ -1364,8 +1436,17 @@ if _scan_df is not None and len(_scan_df) > 0:
         _v_sect = _v_sect[_v.index]
     if _lead_sec:
         _v = _v[_v_sect.map(lambda s: (_sec_score.get(s) or -9) >= 1.0)]
-    if _lead_ind:
-        _v = _v[_v['ticker'].astype(str).isin(_leader_hold.keys())]
+    if _ind_f != 'Any':
+        if 'ind_role' in _v.columns and _v['ind_role'].notna().any():
+            _role = _v['ind_role'].fillna('').astype(str)
+            if _ind_f == 'Industry leader':
+                _v = _v[_role.str.startswith('Leader')]
+            elif _ind_f == 'Leader in a leading industry':
+                _v = _v[_role == 'Leader · leading industry']
+            else:
+                _v = _v[_v['ind_leading'].astype(str).str.lower() == 'true']
+        else:
+            _v = _v[_v['ticker'].astype(str).isin(_leader_hold.keys())]
     if _atr_f:
         _v = _v[_v['_atr']]
     if _sq_f == 'In a squeeze (any level)':

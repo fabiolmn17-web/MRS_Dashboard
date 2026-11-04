@@ -18,6 +18,10 @@ and `mom_list` = held RS score >= +1.0 and both trend conditions. Momentum-list 
 sector / industry and the next earnings date even when they are not CAN SLIM candidates. Everything
 goes into the same scan_results.csv (the GitHub workflow commits only that file).
 
+Industry groups and leaders (added 4 Nov 2026, industry_groups.py): every stock gets its NASDAQ industry group,
+the group's MRS state from an equal-weight index of its members (with and without the stock), its RS-rating rank
+inside the group and an industry-leader flag. Stored as columns of scan_results.csv (ind_*, grp_*).
+
 Runtime: ~3-5 min for S&P 500 (dominated by fundamental fetch step)
 """
 
@@ -41,6 +45,7 @@ from .calculations.relative_strength import weighted_performance, rs_ratings
 from .data.universe import UniverseManager
 from . import momentum
 from . import bases
+from . import industry_groups
 
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
@@ -343,6 +348,12 @@ def run_scan(
         })
 
     results_df = pd.DataFrame(all_rows)
+
+    # Industry groups from the scanned stocks and the leaders inside them (industry_groups.py, 4 Nov 2026)
+    try:
+        results_df = industry_groups.assign(results_df, price_data, spy_df, us_meta, log)
+    except Exception as e:
+        log(f'  Industry groups failed: {e}')
 
     # Sort: CAN SLIM candidates first, then by RS rating desc
     sort_mask = results_df['pass_mode'].notna()
