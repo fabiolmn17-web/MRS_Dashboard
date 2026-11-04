@@ -32,6 +32,7 @@ import rs_labels
 import market_state
 import risk_panel
 import scan_view
+import heat_score
 import chart_view
 import watchlist
 
@@ -43,7 +44,7 @@ try:
 except Exception:
     _PROC_START = None
 for _m in (pipeline, rs_labels, risk_dial, sector_view, rotation_view, market_state, risk_panel, scan_view,
-           chart_view, watchlist):
+           chart_view, watchlist, heat_score):
     try:
         _mt = os.path.getmtime(_m.__file__)
         _seen = getattr(_m, '_mrs_mtime', None)
@@ -888,6 +889,46 @@ def _wl_section_body():
         _wl_inner()
 
 
+def _ctx_maps():
+    """Sector label / score by display sector and the leaders-list ETF holdings (for panels outside the scanner)."""
+    sl = dict(zip(_sec_df['Sector'], _sec_df['Label'])) if _sec_df is not None else {}
+    ss = dict(zip(_sec_df['Sector'], _sec_df['Score'])) if _sec_df is not None else {}
+    lh = {}
+    if _hold_df is not None and len(_hold_df) and len(_leaders):
+        for _etf in _leaders['ETF']:
+            for _t in _hold_df.loc[_hold_df['ETF'] == _etf, 'ticker']:
+                lh.setdefault(str(_t), _etf)
+    return sl, ss, lh
+
+
+def _wl_side_panel(t):
+    """4 Nov 2026: what the ticker lookup shows, next to the watchlist chart: heat score, the scan row as a list,
+    momentum list / CAN SLIM / industry lines and Ext·Mom."""
+    sl, ss, lh = _ctx_maps()
+    r, in_scan = None, False
+    if _scan_df is not None and len(_scan_df):
+        hit = _scan_df[_scan_df['ticker'].astype(str).str.upper() == t]
+        if len(hit):
+            r, in_scan = hit.iloc[0].to_dict(), True
+    if r is None:
+        r = _lookup_live(t)
+    if r is None:
+        st.caption(f'No scan data or price history for {t}.')
+        return
+    if r.get('ext_zone') in ('Stretched', 'Extreme'):
+        r['ext_zone'] = {'Stretched': 'Above', 'Extreme': 'Far above'}[r['ext_zone']]
+    res = heat_score.compute(r, ss, YF_TO_SECTOR, lh.get(t))
+    r['heat_score'] = res['score']
+    src = f'nightly scan ({_scan_date})' if in_scan else 'computed live from prices (not in the nightly universe)'
+    st.markdown(f'<div style="font-size:0.74rem;color:#a89f95;margin:4px 0 6px 0;"><b style="color:#f3ece2;'
+                f'font-size:0.9rem;">{_html_mod.escape(t)}</b> · {_html_mod.escape(str(r.get("name") or ""))} · {src}</div>'
+                + heat_score.breakdown_html(res, _mom_light.get('on')), unsafe_allow_html=True)
+    st.markdown(scan_view.vertical_html(r, sl, ss, lh, YF_TO_SECTOR), unsafe_allow_html=True)
+    lines = _info_lines(r, t, in_scan, None, lh)
+    st.markdown('<div style="font-size:0.74rem;color:#c9c1b7;line-height:1.75;margin:8px 0 0 0;">'
+                + '<br>'.join(lines) + _extmom_lines(t) + '</div>', unsafe_allow_html=True)
+
+
 def _wl_inner():
     saved = _wl_df()
     d = _wl_draft()
@@ -976,9 +1017,14 @@ def _wl_inner():
             fig.add_hline(y=float(val), line=dict(color=col, width=1.4, dash='dash'),
                           annotation_text=f'{lbl} {float(val):,.2f}', annotation_position='top left',
                           annotation_font=dict(color=col, size=11))
-    c_ch, _sp = st.columns([1.4, 1])
+    c_ch, _sp = st.columns([1.4, 1], gap='medium')
     with c_ch:
         chart_view.show(st, components, fig, 'wl_chart', _CHART_CFG)
+    with _sp:
+        try:
+            _wl_side_panel(pick)
+        except Exception as _e:
+            print(f'[watchlist panel] {_e}')
 
 
 _wl_section = st.fragment(_wl_section_body) if hasattr(st, 'fragment') else _wl_section_body
@@ -1176,6 +1222,10 @@ def _scan_counts_html(sd):
                    ('High tight flag', bt == 'High tight flag', '#e3b48e'), ('Trend template ✓', tb('tt_pass'), '#9b958f')]),
         ('Pivot', [('Near pivot', bs == 'Near pivot', '#e3b48e'), ('Broke out today', bs == 'Broke out today', '#85cac5'),
                    ('Broke out ≤ 5 sessions', bs.str.startswith('Broke out'), '#85cac5')]),
+        ('Heat score', [('Hot 80+', pd.to_numeric(sd['heat_score'], errors='coerce') >= 80
+                         if 'heat_score' in sd.columns else pd.Series(False, index=sd.index), '#85cac5'),
+                        ('Warm 65–79', pd.to_numeric(sd['heat_score'], errors='coerce').between(65, 79.99)
+                         if 'heat_score' in sd.columns else pd.Series(False, index=sd.index), '#649995')]),
         ('Industry leaders', [('Leader', sd['ind_role'].fillna('').astype(str).str.startswith('Leader')
                                if 'ind_role' in sd.columns else pd.Series(False, index=sd.index), '#e3b48e'),
                               ('In a leading industry', sd['ind_role'].fillna('').astype(str).eq('Leader · leading industry')
@@ -1198,35 +1248,8 @@ def _scan_counts_html(sd):
     return h + '</div>'
 
 
-def _scan_lookup(sd, sec_label, sec_score, leader_hold):
-    c_in, c_note = st.columns([1, 3])
-    with c_in:
-        q = st.text_input('Look up a ticker', value='', key='ms_lookup', placeholder='e.g. CRM, PNTG, XNCR',
-                          help='Shows the stock as the scan sees it. Names in the nightly universe (US stocks, market cap ≥ $1B, '
-                               'price ≥ $10, 50-day dollar volume ≥ $20M) come from the scan; any other US ticker is '
-                               'computed live from prices (no CAN SLIM fundamentals).')
-    t = (q or '').strip().upper().lstrip('$')
-    if not t:
-        return
-    hit = sd[sd['ticker'].astype(str).str.upper() == t]
-    in_scan = len(hit) > 0
-    if in_scan:
-        r = hit.iloc[0].to_dict()
-        src = f'nightly scan ({_scan_date})'
-    else:
-        with st.spinner(f'Computing {t} from prices...'):
-            r = _lookup_live(t)
-        if r is None:
-            st.warning(f'No price history found for {t}.')
-            return
-        src = 'computed live from prices (not in the nightly universe; CAN SLIM not checked)'
-    with c_note:
-        st.markdown(f'<div style="font-size:0.74rem;color:#a89f95;padding-top:30px;">'
-                    f'<b style="color:#f3ece2;">{_html_mod.escape(str(r.get("name") or t))}</b> · {src}</div>',
-                    unsafe_allow_html=True)
-    components.html(scan_view.build_html(pd.DataFrame([r]), sec_label, sec_score, leader_hold, YF_TO_SECTOR),
-                    height=96, scrolling=True)
-
+def _info_lines(r, t, in_scan, sd, leader_hold):
+    """Momentum list, CAN SLIM and industry lines for one stock (ticker lookup and watchlist side panel)."""
     def ok(v):
         return str(v).lower() == 'true'
     hs = pd.to_numeric(pd.Series([r.get('held_score')]), errors='coerce').iloc[0]
@@ -1239,7 +1262,7 @@ def _scan_lookup(sd, sec_label, sec_score, leader_hold):
     lines = [f'<b style="color:#f3ece2;">Momentum list:</b> '
              + ('<span style="color:#85cac5;">on the list</span>' if on_list else '<span style="color:#f4a062;">not on the list</span>')
              + ' — ' + ' · '.join(f'{mark(b)} {txt}' for b, txt in checks)]
-    if on_list and in_scan:
+    if on_list and in_scan and sd is not None and '_mom' in sd.columns:
         ml = sd[sd['_mom']].sort_values('rs_3m', ascending=False)['ticker'].astype(str).str.upper().tolist()
         if t in ml:
             lines.append(f'<b style="color:#f3ece2;">Rank:</b> #{ml.index(t) + 1} of {len(ml)} on the momentum list by RS 3M')
@@ -1269,10 +1292,48 @@ def _scan_lookup(sd, sec_label, sec_score, leader_hold):
     else:
         lines.append('<b style="color:#f3ece2;">Leader industry:</b> '
                      + (f'top-10 holding of {etf}' if etf else 'not a top-10 holding of a leader industry ETF'))
+    return lines
+
+
+def _scan_lookup(sd, sec_label, sec_score, leader_hold):
+    c_in, c_note = st.columns([1, 3])
+    with c_in:
+        q = st.text_input('Look up a ticker', value='', key='ms_lookup', placeholder='e.g. CRM, PNTG, XNCR',
+                          help='Shows the stock as the scan sees it. Names in the nightly universe (US stocks, market cap ≥ $1B, '
+                               'price ≥ $10, 50-day dollar volume ≥ $20M) come from the scan; any other US ticker is '
+                               'computed live from prices (no CAN SLIM fundamentals).')
+    t = (q or '').strip().upper().lstrip('$')
+    if not t:
+        return
+    hit = sd[sd['ticker'].astype(str).str.upper() == t]
+    in_scan = len(hit) > 0
+    if in_scan:
+        r = hit.iloc[0].to_dict()
+        src = f'nightly scan ({_scan_date})'
+    else:
+        with st.spinner(f'Computing {t} from prices...'):
+            r = _lookup_live(t)
+        if r is None:
+            st.warning(f'No price history found for {t}.')
+            return
+        src = 'computed live from prices (not in the nightly universe; CAN SLIM not checked)'
+    with c_note:
+        st.markdown(f'<div style="font-size:0.74rem;color:#a89f95;padding-top:30px;">'
+                    f'<b style="color:#f3ece2;">{_html_mod.escape(str(r.get("name") or t))}</b> · {src}</div>',
+                    unsafe_allow_html=True)
+    if 'heat_score' not in r or pd.isna(r.get('heat_score')):
+        r['heat_score'] = heat_score.compute(r, sec_score, YF_TO_SECTOR, leader_hold.get(t))['score']
+    components.html(scan_view.build_html(pd.DataFrame([r]), sec_label, sec_score, leader_hold, YF_TO_SECTOR),
+                    height=96, scrolling=True)
+
+    lines = _info_lines(r, t, in_scan, sd, leader_hold)
     c_txt, c_ch = st.columns([1.15, 1], gap='medium')
     with c_txt:
         st.markdown('<div style="font-size:0.78rem;color:#c9c1b7;line-height:1.9;margin:2px 0 6px 0;">'
                     + '<br>'.join(lines) + _extmom_lines(t) + '</div>', unsafe_allow_html=True)
+        _hr = heat_score.compute(r, sec_score, YF_TO_SECTOR, leader_hold.get(t))
+        st.markdown('<div style="margin:2px 0 8px 0;">' + heat_score.breakdown_html(_hr, _mom_light.get('on'))
+                    + '</div>', unsafe_allow_html=True)
     h = _chart_history(t)
     if h is not None and len(h) >= 30:
         with c_ch:
@@ -1317,6 +1378,7 @@ if _scan_df is not None and len(_scan_df) > 0:
         for _etf in _leaders['ETF']:
             for _t in _hold_df.loc[_hold_df['ETF'] == _etf, 'ticker']:
                 _leader_hold.setdefault(str(_t), _etf)
+    _sd = heat_score.add_column(_sd, _sec_score, YF_TO_SECTOR, _leader_hold)     # heat score 1-100 (4 Nov 2026)
 
     _scan_mrs = _sd['mrs_score'].iloc[0] if 'mrs_score' in _sd.columns else None
     _n_mom = int(_sd['_mom'].sum())
@@ -1388,7 +1450,7 @@ if _scan_df is not None and len(_scan_df) > 0:
     _BO_OPTS = ['Any', 'Near pivot (≤ 5% below)', 'Broke out today (base pivot)', 'Broke out in the last 5 sessions',
                 'Near pivot or broke out (≤ 5 sessions)', 'Pivot high (10/10) breakout today',
                 '21-day high breakout today', '52-week high breakout today', '21-day or 52-week breakout today']
-    _h1, _h2, _h3, _h4 = st.columns([1.1, 1.5, 1.0, 1.4])
+    _h1, _h2, _h3, _h4, _h5 = st.columns([1.1, 1.5, 1.0, 1.4, 1.1])
     with _h1:
         _bt_f = st.selectbox('Base pattern', list(_BASE_OPTS), index=0, key='ms_base', disabled=not _has_base,
                              help='Rule-based, nightly (v2, 4 Nov 2026). Pivots = 10/10 swing highs, as in TradingView '
@@ -1416,6 +1478,15 @@ if _scan_df is not None and len(_scan_df) > 0:
                             help='All 8: close > 150- and 200-day; 150 > 200; 200-day rising over a month; 50 > 150 and '
                                  '200; close > 50-day; ≥ 30% above the 52-week low; within 25% of the 52-week high; '
                                  'RS rating ≥ 70.')
+
+    with _h5:
+        _HEAT_OPTS = {'Any': None, 'Hot (80+)': 80, 'Warm or hotter (65+)': 65, 'Neutral or hotter (45+)': 45}
+        _heat_f = st.selectbox('Heat score', list(_HEAT_OPTS), index=0, key='ms_heat',
+                               help='Heat score 1-100 (descriptive, untested): RS rating 25, RS label + trend tag 15, '
+                                    'industry (group state without the stock + leader inside it) 20, sector 5, distance '
+                                    'from the 52-week high 15, trend (200-day, 50 > 200, SMA50 momentum) 20. No '
+                                    'penalty for extension. The market regime is not in the score: read the momentum '
+                                    'light next to it. Weights follow the evidence; see heat_score.py.')
 
     _v = _sd
     if _lmode == 'Momentum list':
@@ -1447,6 +1518,8 @@ if _scan_df is not None and len(_scan_df) > 0:
                 _v = _v[_v['ind_leading'].astype(str).str.lower() == 'true']
         else:
             _v = _v[_v['ticker'].astype(str).isin(_leader_hold.keys())]
+    if _HEAT_OPTS[_heat_f] is not None and 'heat_score' in _v.columns:
+        _v = _v[pd.to_numeric(_v['heat_score'], errors='coerce') >= _HEAT_OPTS[_heat_f]]
     if _atr_f:
         _v = _v[_v['_atr']]
     if _sq_f == 'In a squeeze (any level)':
@@ -1504,7 +1577,8 @@ if _scan_df is not None and len(_scan_df) > 0:
     if _sort_pivot:                                    # closest to the pivot (and broken out) first
         _v = _v.assign(_pd=pd.to_numeric(_v['base_dist_pct'], errors='coerce')).sort_values('_pd', ascending=False)
     else:
-        _v = _v.sort_values(['held_score', 'rs_3m'], ascending=[False, False], na_position='last')
+        _sk = [c for c in ('heat_score', 'held_score', 'rs_3m') if c in _v.columns]
+        _v = _v.sort_values(_sk, ascending=[False] * len(_sk), na_position='last')
 
     if _v.empty:
         st.info('No stocks match the selected filters.')

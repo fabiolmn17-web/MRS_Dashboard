@@ -7,10 +7,12 @@ whose odds were measured on SPY and QQQ, not on single stocks.
 """
 import html as _html
 import math
+import re
 
 import pandas as pd
 
 from market_state import EXT_COL, MOM_COL, chip
+import heat_score
 
 TEAL, TEAL_M, ORANGE, ORANGE_M, COPPER, DIM = '#85cac5', '#649995', '#f4a062', '#b9805a', '#e3b48e', '#9b958f'
 
@@ -77,7 +79,7 @@ def squeeze_cell(r):
     return '<span style="color:#6e675f;">—</span>' + dot, 0
 
 
-HEAD = [('Ticker', 'l'), ('Sector', 'l'), ('Close', ''), ('% 52W Hi', ''), ('RS label (held)', 'l'),
+HEAD = [('Ticker', 'l'), ('Heat', 'c'), ('Sector', 'l'), ('Close', ''), ('% 52W Hi', ''), ('RS label (held)', 'l'),
         ('RS 3M', ''), ('RS 1M', ''), ('RS rtg', ''), ('Ext vs SMA50', ''), ('Momentum', 'c'), ('5-day', ''), ('CAN SLIM', 'c'),
         ('EPS QoQ', ''), ('ATR', 'c'), ('Squeeze', 'c'), ('Base / pivot', 'l'), ('Breakout', 'c'), ('Earnings', ''),
         ('Industry (rank · state)', 'l')]
@@ -167,7 +169,7 @@ CSS = """
 <style>
 body{margin:0;background:transparent;font-family:Barlow,system-ui,sans-serif;}
 .wrap{overflow-x:auto;}
-table{width:100%;border-collapse:collapse;min-width:1360px;}
+table{width:100%;border-collapse:collapse;min-width:1410px;}
 th{background:#2a2724;color:#a89f95;font-size:0.70rem;font-weight:600;padding:7px 6px;text-align:right;white-space:nowrap;cursor:pointer;user-select:none;position:sticky;top:0;}
 th.l,td.l{text-align:left;} th.c,td.c{text-align:center;}
 th:hover{color:#e3b48e;}
@@ -195,6 +197,96 @@ return a<b?(_a?-1:1):a>b?(_a?1:-1):0});rs.forEach(function(r){tb.appendChild(r)}
 """
 
 
+def _row(r, today, sec_label, sec_score, leader_hold, yf_to_sector, clickable=False) -> str:
+    """One table row (<tr>...</tr>) of the scan table."""
+    h = ''
+    t = _s(r.get('ticker'))
+    sect = yf_to_sector.get(_s(r.get('sector')), _s(r.get('sector')))
+    ssc = sec_score.get(sect)
+    # RS label (held) + days + 1M chip
+    hs = r.get('held_score')
+    lab = _s(r.get('held_label')).title()
+    days = r.get('days_in_label')
+    tag = _s(r.get('tag_1m'))
+    tag_html = chip(tag, ORANGE if tag == '1M ↓' else TEAL, True) if tag else ''
+    pend = _s(r.get('pending_label'))
+    pend_html = f' <span style="color:#e3b48e;font-size:0.66rem;">→ {_e(pend.title())}</span>' if pend else ''
+    rs_html = (f'<b style="color:{_score_col(hs)};">{"" if _nan(hs) else f"{float(hs):+.1f}"} {_e(lab)}</b>'
+               f' <span class="sub">{"" if _nan(days) else str(int(float(days))) + "d"}</span> {tag_html}{pend_html}')
+    ext = r.get('ext_atr')
+    ez = _s(r.get('ext_zone'))
+    ez = {'Stretched': 'Above', 'Extreme': 'Far above'}.get(ez, ez)   # labels before 28 Oct 2026
+    mz = _s(r.get('mom_zone'))
+    r5 = r.get('ret_5d')
+    pb = _s(r.get('pullback'))
+    pb_txt = '' if pb in ('', 'None') else f' <span class="sub">{_e(pb.lower())}</span>'
+    mode = _s(r.get('pass_mode'))
+    cs = chip(mode, TEAL if mode == 'STRICT' else COPPER, True) if mode else '<span style="color:#6e675f;">—</span>'
+    eps = r.get('eps_qtr_yoy')
+    atr_c = str(r.get('atr_compressed')).lower() == 'true'
+    sq_html, sq_sort = squeeze_cell(r)
+    ne = pd.to_datetime(_s(r.get('next_earnings')) or None, errors='coerce')
+    if pd.isna(ne):
+        e_html, e_sort = '<span style="color:#6e675f;">—</span>', 99999
+    else:
+        dd = (ne - today).days
+        soon = 0 <= dd <= 7
+        e_html = (f'<span style="color:{ORANGE if soon else "#a89f95"};font-weight:{700 if soon else 400};">'
+                  f'{ne:%b %d}{" · " + str(dd) + "d" if 0 <= dd <= 14 else ""}</span>')
+        e_sort = dd
+    etf = leader_hold.get(t, '')
+    p52 = r.get('pct_from_52w_high')
+    if _nan(p52):
+        p52 = r.get('pct_52w')
+    p52c = DIM if _nan(p52) else TEAL if float(p52) > -0.05 else COPPER if float(p52) > -0.15 else ORANGE_M
+    h += f'<tr data-t="{_e(t)}">' if clickable else '<tr>'
+    h += f'<td class="l" data-s="{_e(t)}" title="{_e(_s(r.get("name")))}"><b>{_e(t)}</b></td>'
+    hs_ = r.get('heat_score')                       # heat score 1-100 (heat_score.py, 4 Nov 2026)
+    if _nan(hs_):
+        h += '<td class="c" data-s="-999"><span style="color:#6e675f;">—</span></td>'
+    else:
+        hn_, hc_ = heat_score.band(float(hs_))
+        h += (f'<td class="c" data-s="{float(hs_)}" title="Heat score {int(float(hs_))}/100 ({hn_}): RS rating, RS label '
+              f'and trend tag, industry (group state + leader), sector, 52-week high, trend. Descriptive, untested.">'
+              f'<span style="display:inline-block;min-width:30px;border-radius:3px;padding:0 5px;font-family:IBM Plex Mono,'
+              f'monospace;font-weight:700;color:#121212;background:{hc_};">{int(float(hs_))}</span></td>')
+    h += (f'<td class="l" data-s="{_e(sect)}"><span style="color:{_score_col(ssc)};">{_e(sect)}</span>'
+          f'{" <span class=sub>" + _e(sec_label.get(sect, "").title()) + "</span>" if sec_label.get(sect) else ""}</td>')
+    cl = r.get('close')
+    cl_txt = '—' if _nan(cl) else '${:,.2f}'.format(float(cl))
+    h += f'<td class="num" data-s="{_sv(cl)}">{cl_txt}</td>'
+    h += f'<td class="num" data-s="{_sv(p52)}" style="color:{p52c};">{_pct(p52)}</td>'
+    h += f'<td class="l" data-s="{_sv(hs) * 1000 + (0 if _nan(days) else float(days))}">{rs_html}</td>'
+    for k in ('rs_3m', 'rs_1m'):
+        h += f'<td class="num" data-s="{_sv(r.get(k))}" style="color:{_col(r.get(k))};">{_pct(r.get(k))}</td>'
+    # RS rating (3 Nov 2026): IBD-style percentile 1-99 across the scanned universe; >= 80 = CAN SLIM "L"
+    rr = r.get('rs_rating')
+    rr_c = DIM if _nan(rr) else TEAL if float(rr) >= 80 else '#e8dccb' if float(rr) >= 50 else COPPER
+    h += (f'<td class="num" data-s="{_sv(rr)}" style="color:{rr_c};" title="RS rating: weighted 12-month performance '
+          f'(last quarter x2) ranked 1-99 across the scanned universe; 80+ = top 20%">'
+          f'{"—" if _nan(rr) else int(float(rr))}</td>')
+    h += (f'<td class="num" data-s="{_sv(ext)}">{"—" if _nan(ext) else f"{float(ext):+.2f}"} '
+          f'{chip(ez, EXT_COL.get(ez, DIM), ez in ("Near", "Just below"))}</td>')
+    h += f'<td class="c" data-s="{_e(mz)}">{chip(mz, MOM_COL.get(mz, DIM), mz in ("Persistent", "Building"))}</td>'
+    h += f'<td class="num" data-s="{_sv(r5)}" style="color:{_col(r5)};">{"—" if _nan(r5) else f"{float(r5):+.1f}%"}{pb_txt}</td>'
+    h += f'<td class="c" data-s="{ {"STRICT": 2, "RELAXED": 1}.get(mode, 0) }">{cs}</td>'
+    low = str(r.get('eps_low_base')).lower() == 'true'
+    low_html = (' <span class="sub" title="Growth from a loss or a near-zero base a year ago (or above +300%): not '
+                'counted for CAN SLIM" style="color:#e3b48e;">low base</span>') if low else ''
+    h += f'<td class="num" data-s="{_sv(eps)}" style="color:{DIM if low else _col(eps)};">{_pct(eps, 0)}{low_html}</td>'
+    h += f'<td class="c" data-s="{int(atr_c)}" style="color:{"#e8dccb" if atr_c else "#6e675f"};">{"●" if atr_c else "—"}</td>'
+    h += f'<td class="c" data-s="{sq_sort}">{sq_html}</td>'
+    b_html, b_sort = base_cell(r)
+    h += f'<td class="l" data-s="{b_sort}">{b_html}</td>'
+    o_html, o_sort = breakout_cell(r)
+    h += f'<td class="c" data-s="{o_sort}">{o_html}</td>'
+    h += f'<td class="num" data-s="{e_sort}">{e_html}</td>'
+    i_html, i_sort = ind_cell(r, etf)
+    h += f'<td class="l" data-s="{i_sort}">{i_html}</td>'
+    h += '</tr>'
+    return h
+
+
 def build_html(df: pd.DataFrame, sec_label: dict, sec_score: dict, leader_hold: dict, yf_to_sector: dict,
                clickable: bool = False) -> str:
     """df: filtered scan rows. sec_label/sec_score: display sector -> held label / score.
@@ -205,80 +297,34 @@ def build_html(df: pd.DataFrame, sec_label: dict, sec_score: dict, leader_hold: 
         h += f'<th class="{cls}" data-col="{i}" onclick="srt(this)">{lbl}<span class="sarr" id="sa{i}"></span></th>'
     h += '</tr></thead><tbody>'
     for _, r in df.iterrows():
-        t = _s(r.get('ticker'))
-        sect = yf_to_sector.get(_s(r.get('sector')), _s(r.get('sector')))
-        ssc = sec_score.get(sect)
-        # RS label (held) + days + 1M chip
-        hs = r.get('held_score')
-        lab = _s(r.get('held_label')).title()
-        days = r.get('days_in_label')
-        tag = _s(r.get('tag_1m'))
-        tag_html = chip(tag, ORANGE if tag == '1M ↓' else TEAL, True) if tag else ''
-        pend = _s(r.get('pending_label'))
-        pend_html = f' <span style="color:#e3b48e;font-size:0.66rem;">→ {_e(pend.title())}</span>' if pend else ''
-        rs_html = (f'<b style="color:{_score_col(hs)};">{"" if _nan(hs) else f"{float(hs):+.1f}"} {_e(lab)}</b>'
-                   f' <span class="sub">{"" if _nan(days) else str(int(float(days))) + "d"}</span> {tag_html}{pend_html}')
-        ext = r.get('ext_atr')
-        ez = _s(r.get('ext_zone'))
-        ez = {'Stretched': 'Above', 'Extreme': 'Far above'}.get(ez, ez)   # labels before 28 Oct 2026
-        mz = _s(r.get('mom_zone'))
-        r5 = r.get('ret_5d')
-        pb = _s(r.get('pullback'))
-        pb_txt = '' if pb in ('', 'None') else f' <span class="sub">{_e(pb.lower())}</span>'
-        mode = _s(r.get('pass_mode'))
-        cs = chip(mode, TEAL if mode == 'STRICT' else COPPER, True) if mode else '<span style="color:#6e675f;">—</span>'
-        eps = r.get('eps_qtr_yoy')
-        atr_c = str(r.get('atr_compressed')).lower() == 'true'
-        sq_html, sq_sort = squeeze_cell(r)
-        ne = pd.to_datetime(_s(r.get('next_earnings')) or None, errors='coerce')
-        if pd.isna(ne):
-            e_html, e_sort = '<span style="color:#6e675f;">—</span>', 99999
-        else:
-            dd = (ne - today).days
-            soon = 0 <= dd <= 7
-            e_html = (f'<span style="color:{ORANGE if soon else "#a89f95"};font-weight:{700 if soon else 400};">'
-                      f'{ne:%b %d}{" · " + str(dd) + "d" if 0 <= dd <= 14 else ""}</span>')
-            e_sort = dd
-        etf = leader_hold.get(t, '')
-        p52 = r.get('pct_from_52w_high')
-        if _nan(p52):
-            p52 = r.get('pct_52w')
-        p52c = DIM if _nan(p52) else TEAL if float(p52) > -0.05 else COPPER if float(p52) > -0.15 else ORANGE_M
-        h += f'<tr data-t="{_e(t)}">' if clickable else '<tr>'
-        h += f'<td class="l" data-s="{_e(t)}" title="{_e(_s(r.get("name")))}"><b>{_e(t)}</b></td>'
-        h += (f'<td class="l" data-s="{_e(sect)}"><span style="color:{_score_col(ssc)};">{_e(sect)}</span>'
-              f'{" <span class=sub>" + _e(sec_label.get(sect, "").title()) + "</span>" if sec_label.get(sect) else ""}</td>')
-        cl = r.get('close')
-        cl_txt = '—' if _nan(cl) else '${:,.2f}'.format(float(cl))
-        h += f'<td class="num" data-s="{_sv(cl)}">{cl_txt}</td>'
-        h += f'<td class="num" data-s="{_sv(p52)}" style="color:{p52c};">{_pct(p52)}</td>'
-        h += f'<td class="l" data-s="{_sv(hs) * 1000 + (0 if _nan(days) else float(days))}">{rs_html}</td>'
-        for k in ('rs_3m', 'rs_1m'):
-            h += f'<td class="num" data-s="{_sv(r.get(k))}" style="color:{_col(r.get(k))};">{_pct(r.get(k))}</td>'
-        # RS rating (3 Nov 2026): IBD-style percentile 1-99 across the scanned universe; >= 80 = CAN SLIM "L"
-        rr = r.get('rs_rating')
-        rr_c = DIM if _nan(rr) else TEAL if float(rr) >= 80 else '#e8dccb' if float(rr) >= 50 else COPPER
-        h += (f'<td class="num" data-s="{_sv(rr)}" style="color:{rr_c};" title="RS rating: weighted 12-month performance '
-              f'(last quarter x2) ranked 1-99 across the scanned universe; 80+ = top 20%">'
-              f'{"—" if _nan(rr) else int(float(rr))}</td>')
-        h += (f'<td class="num" data-s="{_sv(ext)}">{"—" if _nan(ext) else f"{float(ext):+.2f}"} '
-              f'{chip(ez, EXT_COL.get(ez, DIM), ez in ("Near", "Just below"))}</td>')
-        h += f'<td class="c" data-s="{_e(mz)}">{chip(mz, MOM_COL.get(mz, DIM), mz in ("Persistent", "Building"))}</td>'
-        h += f'<td class="num" data-s="{_sv(r5)}" style="color:{_col(r5)};">{"—" if _nan(r5) else f"{float(r5):+.1f}%"}{pb_txt}</td>'
-        h += f'<td class="c" data-s="{ {"STRICT": 2, "RELAXED": 1}.get(mode, 0) }">{cs}</td>'
-        low = str(r.get('eps_low_base')).lower() == 'true'
-        low_html = (' <span class="sub" title="Growth from a loss or a near-zero base a year ago (or above +300%): not '
-                    'counted for CAN SLIM" style="color:#e3b48e;">low base</span>') if low else ''
-        h += f'<td class="num" data-s="{_sv(eps)}" style="color:{DIM if low else _col(eps)};">{_pct(eps, 0)}{low_html}</td>'
-        h += f'<td class="c" data-s="{int(atr_c)}" style="color:{"#e8dccb" if atr_c else "#6e675f"};">{"●" if atr_c else "—"}</td>'
-        h += f'<td class="c" data-s="{sq_sort}">{sq_html}</td>'
-        b_html, b_sort = base_cell(r)
-        h += f'<td class="l" data-s="{b_sort}">{b_html}</td>'
-        o_html, o_sort = breakout_cell(r)
-        h += f'<td class="c" data-s="{o_sort}">{o_html}</td>'
-        h += f'<td class="num" data-s="{e_sort}">{e_html}</td>'
-        i_html, i_sort = ind_cell(r, etf)
-        h += f'<td class="l" data-s="{i_sort}">{i_html}</td>'
-        h += '</tr>'
+        h += _row(r, today, sec_label, sec_score, leader_hold, yf_to_sector, clickable)
     h += '</tbody></table></div>' + ('' if clickable else JS)
     return h
+
+
+VCSS = """
+<style>
+.vt{width:100%;border-collapse:collapse;font-family:Barlow,system-ui,sans-serif;}
+.vt th{background:transparent;color:#a89f95;font-size:0.70rem;font-weight:600;text-align:left;padding:4px 10px 4px 0;
+       white-space:nowrap;vertical-align:top;cursor:default;position:static;width:1%;}
+.vt td{background:transparent;color:#f3ece2;font-size:0.76rem;padding:4px 0;text-align:left !important;
+       border-bottom:1px solid #1a1918;white-space:normal;}
+.vt td.num{font-family:'IBM Plex Mono',monospace;}
+.vt .sub{color:#a89f95;font-size:0.68rem;}
+</style>
+"""
+
+
+def vertical_html(r, sec_label: dict, sec_score: dict, leader_hold: dict, yf_to_sector: dict) -> str:
+    """The same cells as one scan-table row, as a label / value list (watchlist side panel, 4 Nov 2026)."""
+    row = _row(r, pd.Timestamp.today().normalize(), sec_label, sec_score, leader_hold, yf_to_sector)
+    tds = re.findall(r'<td\b.*?</td>', row, flags=re.S)
+    pairs = list(zip([lbl for lbl, _ in HEAD], tds))
+    half = (len(pairs) + 1) // 2
+    h = VCSS + '<div style="display:flex;flex-wrap:wrap;gap:0 18px;">'
+    for part in (pairs[:half], pairs[half:]):        # two columns side by side (one column on a narrow screen)
+        h += '<table class="vt" style="flex:1 1 240px;width:auto;">'
+        for lbl, td in part:
+            h += f'<tr><th>{lbl}</th>{td}</tr>'
+        h += '</table>'
+    return h + '</div>'

@@ -191,9 +191,14 @@ def figure(h: pd.DataFrame, ticker: str, height: int = 520, base: dict = None) -
         yaxis=dict(side='right', tickfont=dict(size=10), gridcolor='#1f1d1b', domain=[0.22, 1.0] if has_vol else [0, 1]),
         bargap=0.15,
         legend=dict(orientation='h', x=0, y=1.0, yanchor='bottom', font=dict(size=10), bgcolor='rgba(0,0,0,0)'),
-        hovermode='x unified', dragmode='zoom')
+        hovermode='x', spikedistance=-1, dragmode='zoom')
+    # crosshair (4 Nov 2026): dotted vertical and horizontal lines that follow the cursor, date label on the x axis
+    _spk = dict(showspikes=True, spikemode='across', spikesnap='cursor', spikethickness=1, spikedash='dot',
+                spikecolor='#9b958f')
+    fig.update_xaxes(**_spk)
+    fig.update_yaxes(**_spk)
     if has_vol:
-        fig.update_layout(yaxis2=dict(side='right', domain=[0, 0.17], showgrid=False, nticks=3, tickformat='.2s',
+        fig.update_layout(yaxis2=dict(side='right', domain=[0, 0.17], showgrid=False, nticks=3, tickformat='.2s', showspikes=False,
                                       tickfont=dict(size=9, color='#9b958f'), rangemode='tozero', anchor='x'),
                           xaxis=dict(anchor='y2'))                 # month labels under the volume pane
     return fig
