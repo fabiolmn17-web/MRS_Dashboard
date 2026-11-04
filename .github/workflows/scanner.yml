@@ -43,6 +43,7 @@ jobs:
           git config user.email "mrs-bot@epistruct.com"
           git add StockScanner/output/scan_results.csv
           git diff --staged --quiet || git commit -m "scanner: $(date +%Y-%m-%d)"
+          git pull --rebase --autostash || true
           git push
 
       # ── Industry drill-down for the sector table (industry ETFs + top 10 holdings) ──
