@@ -17,6 +17,11 @@ Hold (05_label_variants.py, "V0 + 3d hold"):
 
 Days in label: sessions since the held label last changed (">= N" when the price
 history is shorter than the spell).
+
+Trend (v5.5, 5 Nov 2026): the direction of the label itself. IMPROVING = the held label moved UP within the last
+TREND_DAYS sessions, FADING = it moved DOWN; otherwise STABLE+ / STABLE- / NEUTRAL by the score's sign. Until v5.4 the
+tag compared the 3M and 6M signs, so a laggard upgraded to Underperforming (1Y-, 6M+, 3M-) read FADING. That state
+comparison is kept as 'Shape' and still drives the tested leaders / laggards lists (their tests used it).
 """
 from typing import Optional
 
@@ -24,6 +29,7 @@ import numpy as np
 import pandas as pd
 
 HOLD_DAYS = 3
+TREND_DAYS = 21          # v5.5: a label change counts as Improving / Fading for 21 sessions (one month)
 PERIODS = {'RS 1Y': 252, 'RS 6M': 126, 'RS 3M': 63, 'RS 1M': 21}
 
 
@@ -43,6 +49,25 @@ def trend_tag(s6: int, s3: int) -> str:
     if s3 > 0:   return 'STABLE+'
     if s3 < 0:   return 'STABLE-'
     return 'NEUTRAL'
+
+
+def stable_tag(score: float) -> str:
+    return 'STABLE+' if score > 0 else 'STABLE-' if score < 0 else 'NEUTRAL'
+
+
+def path_trend(scores: list, days: int = TREND_DAYS) -> str:
+    """v5.5: IMPROVING / FADING when the held score changed up / down within the last `days` sessions, else STABLE."""
+    if not scores:
+        return 'NEUTRAL'
+    run = 1
+    for v in reversed(scores[:-1]):
+        if v == scores[-1]:
+            run += 1
+        else:
+            break
+    if run == len(scores) or run > days:
+        return stable_tag(scores[-1])
+    return 'IMPROVING' if scores[-1] > scores[-run - 1] else 'FADING'
 
 
 def _sgn(v) -> int:
@@ -113,13 +138,16 @@ def label_info(s: pd.Series, spy: pd.Series, hold: int = HOLD_DAYS) -> Optional[
         pend_state = cand if (cand is not None and 0.5 * sum(cand) != scores[-1]) else None
         hist_days = len(scores)
         prev_state = held[-2] if len(held) >= 2 else None
+        trend = path_trend(scores)
+        prev_trend = path_trend(scores[:-1]) if len(scores) >= 2 else ''
     else:
         state, run, capped, pend_state, k, hist_days = raw_state, np.nan, True, None, 0, 0
         prev_state = None
+        trend, prev_trend = stable_tag(0.5 * sum(raw_state)), ''
 
     score = 0.5 * sum(state)
     label = composite_label(score)
-    trend = trend_tag(state[1], state[2])
+    shape = trend_tag(state[1], state[2])          # 3M vs 6M sign (the tested lists use it)
 
     # RS 1M early warning (shown, not scored)
     tag_1m = ''
@@ -133,10 +161,11 @@ def label_info(s: pd.Series, spy: pd.Series, hold: int = HOLD_DAYS) -> Optional[
     r1_prev = rh['RS 1M'].iloc[-2] if len(rh) >= 2 else np.nan
     return {
         **rs_now,
-        'Score': score, 'Label': label, 'Trend': trend,
+        'Score': score, 'Label': label, 'Trend': trend, 'Shape': shape,
         # previous session's held reading (for "what changed since yesterday")
         'PrevScore': 0.5 * sum(prev_state) if prev_state is not None else np.nan,
-        'PrevTrend': trend_tag(prev_state[1], prev_state[2]) if prev_state is not None else '',
+        'PrevTrend': prev_trend,
+        'PrevShape': trend_tag(prev_state[1], prev_state[2]) if prev_state is not None else '',
         'PrevRS1M': float(r1_prev) if pd.notna(r1_prev) else np.nan,
         'RawScore': raw_score, 'RawLabel': composite_label(raw_score),
         'DaysInLabel': run, 'DaysCapped': bool(capped), 'LabelHistory': hist_days,
@@ -182,8 +211,9 @@ def shortlist_changes(ind: pd.DataFrame):
     """(added, dropped) industry rows vs the previous session's held labels. Empty if the CSV predates PrevScore."""
     if ind is None or len(ind) == 0 or 'PrevScore' not in ind.columns:
         return pd.DataFrame(), pd.DataFrame()
-    now = _on_list(ind['Score'], ind['Trend'], ind.get('RS 1M'))
-    prev = _on_list(ind['PrevScore'], ind['PrevTrend'], ind.get('PrevRS1M'))
+    sh, psh = ('Shape', 'PrevShape') if 'Shape' in ind.columns and 'PrevShape' in ind.columns else ('Trend', 'PrevTrend')
+    now = _on_list(ind['Score'], ind[sh], ind.get('RS 1M'))
+    prev = _on_list(ind['PrevScore'], ind[psh], ind.get('PrevRS1M'))
     has_prev = pd.to_numeric(ind['PrevScore'], errors='coerce').notna()
     return ind[now & ~prev & has_prev], ind[prev & ~now & has_prev]
 
@@ -201,9 +231,10 @@ def leaders_shortlist(ind: pd.DataFrame) -> pd.DataFrame:
     d['Score'] = pd.to_numeric(d['Score'], errors='coerce')
     r1 = pd.to_numeric(d.get('RS 1M'), errors='coerce')
     a = (d['Score'] >= 1.5) & ~(r1 < 0)
-    b = (d['Score'] == 0.5) & (d['Trend'] == 'IMPROVING')
+    shp = d['Shape'] if 'Shape' in d.columns else d['Trend']      # v5.5: the tested 3M-vs-6M state
+    b = (d['Score'] == 0.5) & (shp == 'IMPROVING')
     out = d[a | b].copy()
-    out['Why'] = np.where(a[a | b], 'Structural leader, 1M not turning down', 'Outperforming + improving')
+    out['Why'] = np.where(a[a | b], 'Structural leader, 1M not turning down', 'Outperforming, 3M stronger than 6M')
     added, _ = shortlist_changes(ind)
     out['New'] = out['ETF'].isin(added['ETF']) if len(added) else False
     return out.sort_values('RS 3M', ascending=False).reset_index(drop=True)
@@ -223,8 +254,9 @@ def laggards_shortlist(ind: pd.DataFrame) -> pd.DataFrame:
     d['Score'] = pd.to_numeric(d['Score'], errors='coerce')
     r1 = pd.to_numeric(d.get('RS 1M'), errors='coerce')
     a = (d['Score'] <= -1.5) & (r1 <= 0)
-    b = (d['Score'] == -0.5) & (d['Trend'] == 'FADING')
+    shp = d['Shape'] if 'Shape' in d.columns else d['Trend']      # v5.5: the tested 3M-vs-6M state
+    b = (d['Score'] == -0.5) & (shp == 'FADING')
     out = d[a | b].copy()
-    out['Why'] = np.where(a[a | b], 'Structural laggard, 1M not turning up', 'Underperforming + fading')
+    out['Why'] = np.where(a[a | b], 'Structural laggard, 1M not turning up', 'Underperforming, 3M weaker than 6M')
     out['RS 3M'] = pd.to_numeric(out['RS 3M'], errors='coerce')
     return out.sort_values('RS 3M', ascending=True).reset_index(drop=True)

@@ -37,14 +37,17 @@ function pick(t, now) {                       // highlight at once; tell the app
 }
 document.addEventListener('click', function (e) {
   var tr = e.target.closest('tr[data-t]'); if (!tr) return;
-  armed = true; pick(tr.dataset.t, true);
+  armed = true; act(); pick(tr.dataset.t, true);
 });
+// v5.5: one table at a time takes the arrow keys (shared flag with the watchlist table)
+function act() { try { window.parent.__mrsActiveTable = 'scan'; } catch (x) {} }
+function isAct() { try { var a = window.parent.__mrsActiveTable; return !a || a === 'scan'; } catch (x) { return true; } }
 // ↑ / ↓ move the selection (and the chart) one row, in the table's current sort order. Active once you have clicked a
 // row or while the mouse is over the table; a click elsewhere on the page or Esc switches it off.
 function onKey(e) {
   if (e.key === 'Escape') { armed = false; return; }
   if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
-  if (!armed) return;
+  if (!armed || !isAct()) return;
   var tg = e.target || {}, tag = (tg.tagName || '').toUpperCase();
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tg.isContentEditable) return;
   var rows = Array.from(document.querySelectorAll('#mt tbody tr[data-t]'));
@@ -61,8 +64,8 @@ function onKey(e) {
   pick(rows[j].dataset.t, false);
 }
 document.addEventListener('keydown', onKey);
-document.addEventListener('mouseenter', function () { armed = true; });
-document.getElementById('root').addEventListener('mouseenter', function () { armed = true; });
+document.addEventListener('mouseenter', function () { armed = true; act(); });
+document.getElementById('root').addEventListener('mouseenter', function () { armed = true; act(); });
 try {                                          // also when the keyboard focus is on the main page
   var PD = window.parent.document;
   if (window.parent.__mrsScanKey) { PD.removeEventListener('keydown', window.parent.__mrsScanKey, true); }

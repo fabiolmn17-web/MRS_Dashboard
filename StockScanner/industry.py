@@ -142,7 +142,8 @@ def rs_row(s: pd.Series, spy: pd.Series) -> Optional[dict]:
       RS(n)     = s_now / s_n_ago - spy_now / spy_n_ago   (n = 252, 126, 63, 21 bars)
       Score     = sum of sign(RS) * 0.5 over 1Y / 6M / 3M (-1.5 .. +1.5); RS 1M not scored
       Hold      = the sign state changes only after 3 consecutive sessions at the new value
-      Trend     = sign shift between RS 6M and RS 3M of the held state
+      Trend     = direction of the held label: up / down within 21 sessions = IMPROVING / FADING, else STABLE (v5.5)
+      Shape     = sign shift between RS 6M and RS 3M of the held state (the tested leaders / laggards lists use it)
       Extra     = RawScore, DaysInLabel, PendingLabel/PendingDays, Tag1M (1M early warning)
       YTD base  = last close of the previous calendar year
     """
@@ -218,7 +219,7 @@ def build_industry_tables(price_data: Dict[str, pd.DataFrame],
                 row.update({k: np.nan for k in ['Close', 'DailyChg', 'YTD', '1Y', '6M', '3M', '1M',
                                                  'RS 1Y', 'RS 6M', 'RS 3M', 'RS 1M', 'Score',
                                                  'RawScore', 'DaysInLabel', 'PendingDays', 'LabelHistory']})
-                row.update({'Label': 'NO DATA', 'Trend': 'NEUTRAL', 'RawLabel': '', 'PendingLabel': '',
+                row.update({'Label': 'NO DATA', 'Trend': 'NEUTRAL', 'Shape': 'NEUTRAL', 'RawLabel': '', 'PendingLabel': '',
                             'Tag1M': '', 'DaysCapped': False})
             else:
                 row.update(r)

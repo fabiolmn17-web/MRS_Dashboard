@@ -10,6 +10,8 @@ RS rating, cross-sectional (25)                 Literature: cross-sectional stoc
                                                 Not tested in our program on single stocks.
 Held RS label vs SPY + trend tag (15)           Tested on ETFs (momentum_rs_persistence, 25 Oct 2026): 3-day hold;
                                                 among Outperforming, IMPROVING beat SPY 55% vs FADING 48% (1 mo).
+                                                v5.5: the trend tag is now the label's direction (up / down in the
+                                                last 21 sessions); the 55 / 48 split was measured on the 3M-vs-6M state.
 Industry: group state + leader inside it (20)   Tested, small: industry momentum (+0.4 / +0.8 / +1.5 pp at 1/3/6 mo,
                                                 TS sign p 0.02). Leader-in-group rank: untested (industry_groups.py).
 Sector state (5)                                Tested: sectors showed NO momentum, so context only (low weight).

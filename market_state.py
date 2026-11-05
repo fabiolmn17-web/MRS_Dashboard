@@ -272,10 +272,10 @@ def leaders_html(short: pd.DataFrame, light: dict, hold_df: pd.DataFrame = None,
     h += '</tbody></table>'
     h += _how('How this list is built and what is tested',
               'Industry ETFs, held labels (a label changes only after 3 sessions in a row at the new value). On the list: '
-              'structural leader (+1.5) whose RS 1M is not negative, or outperforming (+0.5) and IMPROVING (1Y+, 6M−, 3M+). '
+              'structural leader (+1.5) whose RS 1M is not negative, or outperforming (+0.5) with 3M stronger than 6M (1Y+, 6M−, 3M+). '
               'Sorted by RS 3M. Sector rows are context only (sectors showed no momentum since 2008). '
               f'{ev("Tested")} industry leaders kept a small edge vs SPY (+0.4 / +0.8 / +1.5 pp at 1 / 3 / 6 months); '
-              'within outperforming, IMPROVING beat SPY 55% vs 48% of months for FADING. The edge came from Momentum ON '
+              'within outperforming, 3M stronger than 6M beat SPY 55% vs 48% of months for 3M weaker than 6M. The edge came from Momentum ON '
               'periods (+0.8 pp vs −1.9 pp at 1 month when SPY was below its 12-month level, mostly 2008–09). '
               f'{ev("Watch")} the RS 1M filter itself is not tested. {ev("Descriptive")} Strong holdings = top-10 '
               'holdings with RS score ≥ +1 within 10% of the 52-week closing high, by RS 3M: where to start the chart '
@@ -417,7 +417,7 @@ def avoid_html(lag: pd.DataFrame, hold_df: pd.DataFrame = None) -> str:
           'rebound. Short only with your own setup at a level, with a tight stop.</b></div>')
     h += _how('How this list is built and what is tested',
               'Industry ETFs, held labels. On the list: structural laggard (−1.5) whose RS 1M is not positive, or '
-              'underperforming (−0.5) and FADING. Sorted weakest RS 3M first. Weakest holdings = top-10 holdings with RS '
+              'underperforming (−0.5) with 3M weaker than 6M (1Y−, 6M+, 3M−). Sorted weakest RS 3M first. Weakest holdings = top-10 holdings with RS '
               f'score ≤ −1, by RS 3M. {ev("Tested")} Laggards keep lagging SPY slightly, but shorting them has had no '
               'edge: no better than shorting any industry. Outright shorts lost money on average, most in RISK-OFF '
               '(−2.3% a month; a ≥5% squeeze in 55% of months).')

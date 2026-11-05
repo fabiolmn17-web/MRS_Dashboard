@@ -260,7 +260,7 @@ def build_drilldown_html(sec_df: pd.DataFrame, ind_df, hold_df, sort_col: str, s
         h += '</details>'
 
     h += '</div>'
-    note = ('RS = additive return differential vs SPY. Trend = RS sign shift 6M to 3M. '
+    note = ('RS = additive return differential vs SPY. Trend = direction of the label: ↑ IMPROVING / ↓ FADING = upgraded / downgraded in the last 21 sessions, → STABLE otherwise (v5.5). '
             'Score = sign-based composite of RS 1Y / 6M / 3M (range -1.5 to +1.5); RS 1M (21 sessions, same formula) is shown but not scored. '
             'Label hold: the label (and trend) change only after the new reading has held 3 sessions in a row; '
             'Nd = sessions in the current label, "→ X k/3" = a change in progress. '

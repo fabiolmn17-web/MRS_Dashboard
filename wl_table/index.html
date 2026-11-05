@@ -1,0 +1,182 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<!-- Watchlist table as a two-way Streamlit component (v5.5, 5 Nov 2026). Click a row (or move with the up / down arrow
+     keys) to chart it; Trigger, Stop and Note are edited in place, Remove is a tick. The computed columns update as you
+     type. Sends {pick, seq, rows:[{t, trigger, stop, note, remove}]} back to the app. Same message protocol as scan_table. -->
+<style>
+html,body{margin:0;padding:0;background:transparent;font-family:Barlow,system-ui,sans-serif;}
+#root{height:100%;overflow:hidden;} .wrap{height:100%;overflow:auto;}
+table{width:100%;border-collapse:collapse;min-width:980px;}
+th{background:#2a2724;color:#a89f95;font-size:0.70rem;font-weight:600;padding:7px 6px;text-align:right;white-space:nowrap;
+   cursor:pointer;user-select:none;position:sticky;top:0;z-index:3;}
+th:hover{color:#e3b48e;} th.l,td.l{text-align:left;} th.c,td.c{text-align:center;}
+th:first-child,td:first-child{position:sticky;left:0;z-index:2;} th:first-child{z-index:4;}
+td{background:#121212;color:#f3ece2;font-size:0.76rem;padding:5px 6px;text-align:right;border-bottom:1px solid #1a1918;white-space:nowrap;}
+td.num{font-family:'IBM Plex Mono',monospace;}
+tr:hover td{background:#1a1918;} tr[data-t]{cursor:pointer;}
+tr.sel td{background:#2a2420 !important;} tr.sel td:first-child{box-shadow:inset 3px 0 0 #e3b48e;}
+td.t{font-weight:600;}
+input.e{width:100%;box-sizing:border-box;background:transparent;border:1px solid transparent;border-radius:3px;color:#f3ece2;
+   font:inherit;padding:2px 4px;text-align:right;} input.e.l{text-align:left;}
+input.e[inputmode=decimal]{width:76px;} input.e:hover{border-color:#3a3632;} input.e:focus{outline:none;border-color:#e3b48e;background:#1a1918;}
+input.e::placeholder{color:#5f5953;}
+input[type=checkbox]{accent-color:#e3b48e;cursor:pointer;}
+.pos{color:#85cac5;} .neg{color:#f4a062;} .dim{color:#5f5953;}
+.sarr{margin-left:3px;font-size:0.62rem;}
+tr.rm td{opacity:0.45;} tr.rm td.t{text-decoration:line-through;}
+</style></head><body><div id="root"></div>
+<script>
+function send(type, data) { window.parent.postMessage(Object.assign({isStreamlitMessage: true, type: type}, data || {}), '*'); }
+var rows = [], lastJson = null, height = 400, selected = null, seq = 0, ID = 'wl';
+var fin = function (v) { return v !== null && v !== undefined && v !== '' && isFinite(+v); };
+var f2 = function (v) { return fin(v) ? (+v).toFixed(2) : ''; };
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]; }); }
+function live(r) {                              // same formulas as watchlist.live_row
+  var c = +r.last, a = +r.atr, g = fin(r.trigger) ? +r.trigger : null, s = fin(r.stop) ? +r.stop : null, o = {};
+  o.to = (g !== null && fin(r.last) && c) ? g / c - 1 : null;
+  o.toa = (g !== null && fin(r.last) && fin(r.atr) && a) ? (g - c) / a : null;
+  o.risk = (g !== null && s !== null && g) ? Math.abs(g - s) / g : null;
+  o.riska = (g !== null && s !== null && fin(r.atr) && a) ? Math.abs(g - s) / a : null;
+  return o;
+}
+function pct(v, d, sign) {
+  if (v === null || !isFinite(v)) return '<span class="dim">–</span>';
+  var x = (v * 100).toFixed(d), cls = sign ? (v > 0 ? 'pos' : v < 0 ? 'neg' : '') : '';
+  return '<span class="' + cls + '">' + (sign && v > 0 ? '+' : '') + x + '%</span>';
+}
+var COLS = [['Ticker', 'l'], ['Last', ''], ['ATR', ''], ['Trigger', ''], ['To trigger', ''], ['To trigger, ATR', ''], ['Stop', ''],
+            ['Risk', ''], ['Risk, ATR', ''], ['Note', 'l'], ['Remove', 'c'], ['Added', 'l']];
+function sortKey(r, i) {
+  var o = live(r);
+  return [r.t, +r.last, +r.atr, fin(r.trigger) ? +r.trigger : -1e18, o.to, o.toa, fin(r.stop) ? +r.stop : -1e18, o.risk, o.riska,
+          (r.note || '').toLowerCase(), r.remove ? 1 : 0, r.added || ''][i];
+}
+var sc = -1, sa = false;
+function build() {
+  var h = '<div class="wrap"><table id="mt"><thead><tr>';
+  COLS.forEach(function (c, i) {
+    h += '<th class="' + c[1] + '" data-col="' + i + '">' + c[0] + '<span class="sarr">' + (sc === i ? (sa ? '↑' : '↓') : '') + '</span></th>';
+  });
+  h += '</tr></thead><tbody>';
+  var order = rows.map(function (r, i) { return i; });
+  if (sc >= 0) order.sort(function (x, y) {
+    var a = sortKey(rows[x], sc), b = sortKey(rows[y], sc);
+    var na = a === null || a === undefined || (typeof a === 'number' && isNaN(a)), nb = b === null || b === undefined || (typeof b === 'number' && isNaN(b));
+    if (na && nb) return 0; if (na) return 1; if (nb) return -1;
+    return a < b ? (sa ? -1 : 1) : a > b ? (sa ? 1 : -1) : 0;
+  });
+  order.forEach(function (i) {
+    var r = rows[i], o = live(r);
+    h += '<tr data-t="' + esc(r.t) + '" data-i="' + i + '"' + (r.remove ? ' class="rm"' : '') + '>'
+      + '<td class="l t">' + esc(r.t) + '</td>'
+      + '<td class="num">' + f2(r.last) + '</td><td class="num">' + f2(r.atr) + '</td>'
+      + '<td class="num"><input class="e" data-f="trigger" inputmode="decimal" placeholder="–" value="' + (fin(r.trigger) ? (+r.trigger) : '') + '"></td>'
+      + '<td class="num" data-k="to">' + pct(o.to, 1, true) + '</td><td class="num" data-k="toa">' + pct(o.toa, 0, true) + '</td>'
+      + '<td class="num"><input class="e" data-f="stop" inputmode="decimal" placeholder="–" value="' + (fin(r.stop) ? (+r.stop) : '') + '"></td>'
+      + '<td class="num" data-k="risk">' + pct(o.risk, 1, false) + '</td><td class="num" data-k="riska">' + pct(o.riska, 0, false) + '</td>'
+      + '<td class="l" style="min-width:260px;"><input class="e l" data-f="note" placeholder="setup, level, what you wait for" value="' + esc(r.note) + '"></td>'
+      + '<td class="c"><input type="checkbox" data-f="remove"' + (r.remove ? ' checked' : '') + '></td>'
+      + '<td class="l num">' + esc(r.added) + '</td></tr>';
+  });
+  h += '</tbody></table></div>';
+  document.getElementById('root').innerHTML = h;
+  mark(selected);
+}
+function mark(t) {
+  document.querySelectorAll('tr.sel').forEach(function (r) { r.classList.remove('sel'); });
+  if (!t) return;
+  var r = document.querySelector('tr[data-t="' + t + '"]'); if (r) r.classList.add('sel');
+}
+function payload() {
+  return {pick: selected, seq: seq, rows: rows.map(function (r) {
+    return {t: r.t, trigger: fin(r.trigger) ? +r.trigger : null, stop: fin(r.stop) ? +r.stop : null, note: r.note || '', remove: !!r.remove};
+  })};
+}
+var timer = null, lastPick = 0;
+function emit(now) {
+  clearTimeout(timer);
+  timer = setTimeout(function () { seq += 1; send('streamlit:setComponentValue', {value: payload(), dataType: 'json'}); }, now ? 0 : 220);
+}
+function pick(t, now) { selected = t; mark(t); lastPick = Date.now(); emit(now); }
+function refreshRow(tr) {
+  var r = rows[+tr.dataset.i], o = live(r);
+  tr.querySelector('[data-k=to]').innerHTML = pct(o.to, 1, true);
+  tr.querySelector('[data-k=toa]').innerHTML = pct(o.toa, 0, true);
+  tr.querySelector('[data-k=risk]').innerHTML = pct(o.risk, 1, false);
+  tr.querySelector('[data-k=riska]').innerHTML = pct(o.riska, 0, false);
+  tr.classList.toggle('rm', !!r.remove);
+}
+var root = document.getElementById('root');
+root.addEventListener('input', function (e) {           // computed columns follow the typing
+  var el = e.target, tr = el.closest('tr[data-t]'); if (!tr || !el.dataset.f) return;
+  var r = rows[+tr.dataset.i], f = el.dataset.f;
+  if (f === 'remove') r.remove = el.checked;
+  else if (f === 'note') r.note = el.value;
+  else r[f] = el.value.trim() === '' ? null : (isFinite(+el.value.replace(',', '.')) ? +el.value.replace(',', '.') : r[f]);
+  refreshRow(tr);
+  if (f === 'remove') { selected = tr.dataset.t; mark(selected); emit(true); }
+});
+root.addEventListener('change', function (e) {          // send the edit when the field is left or Enter is pressed
+  var el = e.target; if (!el.dataset || !el.dataset.f || el.dataset.f === 'remove') return;
+  emit(true);
+});
+root.addEventListener('keydown', function (e) {
+  if (e.key === 'Enter' && e.target.tagName === 'INPUT') { e.target.blur(); }
+});
+root.addEventListener('click', function (e) {
+  var th = e.target.closest('th[data-col]');
+  if (th) { var c = +th.dataset.col; if (sc === c) sa = !sa; else { sc = c; sa = false; } build(); return; }
+  var tr = e.target.closest('tr[data-t]'); if (!tr) return;
+  activate();
+  if (e.target.tagName === 'INPUT') { if (selected !== tr.dataset.t) pick(tr.dataset.t, true); return; }
+  pick(tr.dataset.t, true);
+});
+// up / down arrows move the selection (and the chart), in the table's current order. Active after a click on the table or
+// while the mouse is over it; never while typing in a field. One table at a time on the page (shared flag with the scanner).
+function activate() { try { window.parent.__mrsActiveTable = ID; } catch (x) {} }
+function active() { try { return window.parent.__mrsActiveTable === ID; } catch (x) { return true; } }
+function onKey(e) {
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+  if (!active()) return;
+  var tg = e.target || {}, tag = (tg.tagName || '').toUpperCase();
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tg.isContentEditable) return;
+  var trs = Array.from(document.querySelectorAll('#mt tbody tr[data-t]')); if (!trs.length) return;
+  var i = trs.findIndex(function (r) { return r.dataset.t === selected; });
+  var j = i < 0 ? 0 : Math.max(0, Math.min(trs.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)));
+  e.preventDefault(); if (j === i) return;
+  var w = document.querySelector('#root .wrap'), r = trs[j], th = document.querySelector('#mt thead');
+  if (w) { var top = r.offsetTop - (th ? th.offsetHeight : 0), bot = r.offsetTop + r.offsetHeight;
+           if (top < w.scrollTop) w.scrollTop = top; else if (bot > w.scrollTop + w.clientHeight) w.scrollTop = bot - w.clientHeight; }
+  pick(trs[j].dataset.t, false);
+}
+document.addEventListener('keydown', onKey);
+root.addEventListener('mouseenter', activate);
+try {
+  var PD = window.parent.document;
+  if (window.parent.__mrsWlKey) PD.removeEventListener('keydown', window.parent.__mrsWlKey, true);
+  if (window.parent.__mrsWlDown) PD.removeEventListener('mousedown', window.parent.__mrsWlDown, true);
+  window.parent.__mrsWlKey = function (e) { try { onKey(e); } catch (x) {} };
+  window.parent.__mrsWlDown = function (e) {
+    if (!(e.target && e.target.closest && e.target.closest('.js-plotly-plot')) && window.parent.__mrsActiveTable === ID) window.parent.__mrsActiveTable = null;
+  };
+  PD.addEventListener('keydown', window.parent.__mrsWlKey, true);
+  PD.addEventListener('mousedown', window.parent.__mrsWlDown, true);
+} catch (x) {}
+window.addEventListener('message', function (e) {
+  if (!e.data || e.data.type !== 'streamlit:render') return;
+  var args = e.data.args || {};
+  var js = JSON.stringify(args.rows || []);
+  if (js !== lastJson) {                         // rebuild only when the app sent different rows (not after our own echo)
+    var mine = JSON.stringify(rows.map(function (r) { return {t: r.t, last: r.last, atr: r.atr, trigger: fin(r.trigger) ? +r.trigger : null,
+                 stop: fin(r.stop) ? +r.stop : null, note: r.note || '', remove: !!r.remove, added: r.added}; }));
+    lastJson = js;
+    if (js !== mine) { rows = JSON.parse(js); build(); }
+  }
+  if (args.selected && args.selected !== selected && Date.now() - lastPick > 2500) selected = args.selected;
+  mark(selected);
+  height = args.height || height;
+  root.style.height = height + 'px';
+  send('streamlit:setFrameHeight', {height: height});
+});
+send('streamlit:componentReady', {apiVersion: 1});
+</script></body></html>

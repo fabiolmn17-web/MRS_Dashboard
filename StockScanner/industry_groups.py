@@ -49,6 +49,7 @@ def _key(ticker: str, row: dict, us_meta: Dict[str, dict]) -> str:
 
 
 def _leading(score, trend, rs1m) -> bool:
+    """trend = the 3M-vs-6M state ('Shape' from v5.5; the tested definition)."""
     if score is None or (isinstance(score, float) and np.isnan(score)):
         return False
     return bool((score >= 1.5 and not (rs1m is not None and np.isfinite(rs1m) and rs1m < 0))
@@ -125,7 +126,7 @@ def assign(df: pd.DataFrame, price_data: Dict[str, pd.DataFrame], spy_df: pd.Dat
         if st:
             upd.update(grp_score=st['Score'], grp_label=st['Label'], grp_trend=st['Trend'], grp_days=st['DaysInLabel'],
                        grp_rs1y=st['RS 1Y'], grp_rs6m=st['RS 6M'], grp_rs3m=st['RS 3M'], grp_rs1m=st['RS 1M'],
-                       grp_leading=_leading(st['Score'], st['Trend'], st['RS 1M']))
+                       grp_leading=_leading(st['Score'], st.get('Shape', st['Trend']), st['RS 1M']))
         upd.update(grp_rank=None if pd.isna(grank.get(g)) else int(grank.get(g)), grp_n_groups=ngroups,
                    grp_med_rating=None if pd.isna(med.get(g)) else float(med.get(g)))
         # without the stock itself
@@ -140,7 +141,7 @@ def assign(df: pd.DataFrame, price_data: Dict[str, pd.DataFrame], spy_df: pd.Dat
             if loo:
                 upd.update(ind_score=loo['Score'], ind_label=loo['Label'], ind_trend=loo['Trend'],
                            ind_days=loo['DaysInLabel'], ind_rs3m=loo['RS 3M'], ind_rs1m=loo['RS 1M'],
-                           ind_leading=_leading(loo['Score'], loo['Trend'], loo['RS 1M']))
+                           ind_leading=_leading(loo['Score'], loo.get('Shape', loo['Trend']), loo['RS 1M']))
         n = r['ind_n']
         rank = r['ind_rank']
         hs = pd.to_numeric(pd.Series([r.get('held_score')]), errors='coerce').iloc[0]

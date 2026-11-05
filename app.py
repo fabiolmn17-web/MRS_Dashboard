@@ -792,6 +792,8 @@ st.divider()
 # Table (click a row) + daily chart panel on the right. The table is a small two-way component
 # (scan_table/index.html) that returns the clicked ticker; the chart is fetched per ticker and cached.
 _scan_table = components.declare_component('scan_table', path=str(Path(__file__).parent / 'scan_table'))
+# v5.5 (5 Nov 2026): the watchlist table, same click / arrow-key selection as the scanner, Trigger / Stop / Note edited in place
+_wl_table = components.declare_component('wl_table', path=str(Path(__file__).parent / 'wl_table'))
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -944,47 +946,35 @@ def _wl_inner():
     cur = st.session_state.get('wl_pick')
     pick = cur if cur in tick else tick[0]
     st.session_state['wl_pick'] = pick
+    _f = lambda v: (float(v) if v is not None and pd.notna(v) and np.isfinite(float(v)) else None)
     rows = []
     for _, r in d.iterrows():
         h = _chart_history(r['ticker'])
         close = float(h['Close'].iloc[-1]) if h is not None and len(h) else np.nan
         atr = watchlist.atr14(h)
-        to_trg, to_atr, risk, risk_atr, atr_pct = watchlist.live_row(r, close, atr)
-        rows.append({'Ticker': r['ticker'], 'Chart': r['ticker'] == pick, 'Last': close, 'ATR': atr, 'ATR %': atr_pct * 100,
-                     'Trigger': r['trigger'], 'To trigger': to_trg * 100, 'To trigger, ATR': to_atr * 100,
-                     'Stop': r['stop'], 'Risk': risk * 100, 'Risk, ATR': risk_atr * 100, 'Note': r['note'],
-                     'Remove': bool(r.get('remove', False)), 'Added': r['added']})
-    view = pd.DataFrame(rows)
-    ekey = f'wl_editor_{st.session_state.get("wl_ver", 0)}'
-    st.data_editor(
-        view, key=ekey, hide_index=True, use_container_width=True, num_rows='fixed',
-        on_change=_wl_apply_edits, args=(ekey,),
-        column_order=['Ticker', 'Chart', 'Last', 'ATR', 'Trigger', 'To trigger', 'To trigger, ATR', 'Stop', 'Risk', 'Risk, ATR',
-                      'Note', 'Remove', 'Added'],
-        disabled=['Ticker', 'Last', 'ATR', 'ATR %', 'To trigger', 'To trigger, ATR', 'Risk', 'Risk, ATR', 'Added'],
-        column_config={
-            'Ticker': st.column_config.TextColumn(width='small'),
-            'Chart': st.column_config.CheckboxColumn('📈', width='small',
-                                                     help='Tick a row to show its chart below the table'),
-            'Last': st.column_config.NumberColumn(format='%.2f', width='small'),
-            'ATR': st.column_config.NumberColumn(format='%.2f', width='small',
-                                                 help='Average true range, 14 days (Wilder), in $'),
-            'Trigger': st.column_config.NumberColumn(format='%.2f', width='small', help='Price where the setup triggers'),
-            'To trigger': st.column_config.NumberColumn(format='%+.1f%%', width='small',
-                                                        help='Move from the last close to the trigger, in %. '
-                                                             '+ = price must rise, − = price must fall'),
-            'To trigger, ATR': st.column_config.NumberColumn(format='%+.0f%%', width='small',
-                                                             help='Move from the last close to the trigger as a % of '
-                                                                  'one ATR (100% = one average day)'),
-            'Stop': st.column_config.NumberColumn(format='%.2f', width='small', help='Where the setup is wrong'),
-            'Risk': st.column_config.NumberColumn(format='%.1f%%', width='small',
-                                                  help='Trigger to stop, in % of the trigger'),
-            'Risk, ATR': st.column_config.NumberColumn(format='%.0f%%', width='small',
-                                                       help='Trigger to stop as a % of one ATR'),
-            'Note': st.column_config.TextColumn(width='large', help='Setup, level, what you wait for'),
-            'Remove': st.column_config.CheckboxColumn(width='small'),
-            'Added': st.column_config.TextColumn(width='small'),
-        })
+        rows.append({'t': str(r['ticker']), 'last': _f(close), 'atr': _f(atr), 'trigger': _f(pd.to_numeric(r['trigger'], errors='coerce')),
+                     'stop': _f(pd.to_numeric(r['stop'], errors='coerce')),
+                     'note': '' if r['note'] is None or (isinstance(r['note'], float) and np.isnan(r['note'])) else str(r['note']),
+                     'remove': bool(r.get('remove', False)), 'added': '' if pd.isna(r['added']) else str(r['added'])})
+    # v5.5: click a row or move with the up / down arrows to chart it (the 📈 column is gone); edits come back with it
+    tkey = f'wl_tbl_{st.session_state.get("wl_ver", 0)}'
+    got = _wl_table(rows=rows, selected=pick, height=min(44 + 31 * len(rows), 420), key=tkey, default=None)
+    if isinstance(got, dict) and f"{tkey}:{got.get('seq')}" != st.session_state.get('wl_seq'):
+        st.session_state['wl_seq'] = f"{tkey}:{got.get('seq')}"
+        d = st.session_state['wl_draft'].copy()
+        pos = {str(t): i for i, t in enumerate(d['ticker'])}
+        for e in got.get('rows') or []:
+            i = pos.get(str(e.get('t')))
+            if i is None:
+                continue
+            d.at[d.index[i], 'trigger'] = pd.to_numeric(e.get('trigger'), errors='coerce')
+            d.at[d.index[i], 'stop'] = pd.to_numeric(e.get('stop'), errors='coerce')
+            d.at[d.index[i], 'note'] = str(e.get('note') or '')
+            d.at[d.index[i], 'remove'] = bool(e.get('remove'))
+        st.session_state['wl_draft'] = d
+        if got.get('pick') in tick and got.get('pick') != pick:
+            pick = got['pick']
+            st.session_state['wl_pick'] = pick
     new = d[~d['remove'].fillna(False).astype(bool)].drop(columns=['remove'])
     changed = not watchlist._clean(new).equals(watchlist._clean(saved))
     b1, b2, b3 = st.columns([1, 1, 4])
@@ -1000,8 +990,8 @@ def _wl_inner():
             st.session_state['wl_ver'] = st.session_state.get('wl_ver', 0) + 1
             st.rerun()
     with b3:
-        st.markdown('<div style="font-size:0.70rem;color:#9b958f;padding-top:8px;">Tick 📈 to chart a name. Edit Trigger, Stop and Note (the '
-                    'other columns update as you type), tick Remove to drop a name, then Save. ATR = 14-day average '
+        st.markdown('<div style="font-size:0.70rem;color:#9b958f;padding-top:8px;">Click a row, or use the ↑ / ↓ keys, to chart a name. Click into Trigger, Stop or Note to edit (the '
+                    'other columns update as you type; Enter or Tab to confirm), tick Remove to drop a name, then Save. ATR = 14-day average '
                     'true range; "ATR" columns show the move as a % of one average day. Saved to GitHub (branch '
                     '"watchlist"), the same on every device.'
                     + (' <b style="color:#e3b48e;">Unsaved changes.</b>' if changed else '') + '</div>',
@@ -1194,7 +1184,7 @@ def _industry_groups_panel(sd):
         h += '</tbody></table></div>'
         st.markdown(h, unsafe_allow_html=True)
         st.caption('Equal-weight index of each group\'s scanned members vs SPY, MRS rules (held 3 sessions). ★ = leading '
-                   '(held +1.5 with RS 1M not negative, or +0.5 and Improving). Leaders: top 20% of the group by RS rating '
+                   '(held +1.5 with RS 1M not negative, or +0.5 with 3M stronger than 6M). Leaders: top 20% of the group by RS rating '
                    '(at least the top 3), held RS ≥ +1.0, above the 200-day, within 25% of the 52-week high. Groups = '
                    'NASDAQ industries; under 5 names merged. Descriptive, untested.')
         wl = _ig.tv_watchlist(sd)
@@ -1430,7 +1420,7 @@ if _scan_df is not None and len(_scan_df) > 0:
                               help='Industry = NASDAQ industry group of the scanned stocks (groups under 5 names merged). '
                                    'Leader: top 20% of its group by RS rating (at least the top 3), held RS score ≥ +1.0, '
                                    'above the 200-day and within 25% of the 52-week high. Leading industry: the group '
-                                   'without the stock is held +1.5 with RS 1M not negative, or +0.5 and Improving (same '
+                                   'without the stock is held +1.5 with RS 1M not negative, or +0.5 with 3M stronger than 6M (same '
                                    'rule as the Leaders-to-buy list). Descriptive, untested. Older scans without industry '
                                    'groups: falls back to "top-10 holding of a leader industry ETF".')
     with _g4:
