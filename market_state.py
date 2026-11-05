@@ -321,7 +321,11 @@ def decision_strip_html(mrs: float, band: str, band_col: str, sessions: int, pct
     h += '<div class="ds"><div class="k" style="font-size:0.68rem;letter-spacing:0.12em;text-transform:uppercase;color:#e3b48e;font-weight:700;margin-bottom:8px;">Today · what to do with it</div>'
     h += '<div class="top">'
     h += f'<div><div class="lab">MRS score</div><div class="big" style="color:{band_col};">{mrs:+.2f}</div><div class="sm">{_e(pct_txt)}</div></div>'
-    h += (f'<div><div class="lab">Regime · session {sessions}</div><div class="reg" style="color:{band_col};">{_e(band)}</div>'
+    _side = 'below' if mrs < 0 else 'above'
+    _tip = (f'The score has been {_side} zero for {sessions} session(s) in a row. This is not the time in the band: the band '
+            f'changes on the session the score crosses a threshold. See \'Band confirming\' for the 3-session hold.')
+    h += (f'<div><div class="lab" title="{_e(_tip)}">Regime · {_side} zero {sessions} session{"s" if sessions != 1 else ""}'
+          f' <span style="cursor:help;">ⓘ</span></div><div class="reg" style="color:{band_col};">{_e(band)}</div>'
           f'<div class="sm" style="color:#e8dccb;margin-top:4px;max-width:250px;">{REGIME_SUB}</div></div>')
     h += (f'<div><div class="lab">Signal quality</div>{chip(sq_lbl, sq_col, True, sq_desc)}'
           f'<div class="sm" style="margin-top:5px;" title="{_e(sq_desc)}">{_e(sq_plain(sq_desc))} '
@@ -353,6 +357,49 @@ def decision_strip_html(mrs: float, band: str, band_col: str, sessions: int, pct
         h += f'<div class="fresh">{fresh}</div>'
     h += '</div>'
     return h.replace('\n', ' ')
+
+
+# ── Band hold (5 Nov 2026, display only) ─────────────────────────────────────────────────────────────────────────
+# The band itself changes on the session the score crosses a threshold. Fabio's rule for reading a band change: it
+# counts after 3 sessions in a row at the new band or beyond it in the same direction ("Mild Risk-Off or better"),
+# the same 3-session hold the RS labels use. Not tested; it does not change the score, the band or any rule.
+BAND_RANK = {'RISK-OFF': 0, 'MILD RISK-OFF': 1, 'NEUTRAL': 2, 'MILD RISK-ON': 3, 'RISK-ON': 4}
+BAND_HOLD = 3
+
+
+def band_hold(bands, hold: int = BAND_HOLD):
+    """bands: band labels oldest -> newest. Returns held band, today's band and the pending run (k of hold)."""
+    inv = {v: k for k, v in BAND_RANK.items()}
+    r = [BAND_RANK[b] for b in bands if b in BAND_RANK]
+    if not r:
+        return None
+    held, run = r[0], []
+    for x in r[1:]:
+        if x == held:
+            run = []
+            continue
+        d = 1 if x > held else -1
+        if run and (1 if run[0] > held else -1) != d:
+            run = []
+        run.append(x)
+        if len(run) >= hold:
+            held, run = (min(run) if d > 0 else max(run)), []
+    if not run:
+        return dict(held=inv[held], cur=inv[r[-1]], k=0, target='', direction=0)
+    d = 1 if run[0] > held else -1
+    target = inv[min(run)] if d > 0 else inv[max(run)]
+    return dict(held=inv[held], cur=inv[r[-1]], k=len(run), target=target, direction=d)
+
+
+def band_hold_line(info) -> str:
+    """'Since the last session' item while a band change is confirming; '' when nothing is pending."""
+    if not info or info['k'] == 0:
+        return ''
+    t = info['target'].title() + (' or better' if info['direction'] > 0 else ' or worse')
+    tip = (f'Held band: {info["held"].title()}. A band change counts after {BAND_HOLD} sessions in a row at the new band '
+           f'or beyond it in the same direction (same hold as the RS labels). Display only, not tested.')
+    return (f'<span title="{_e(tip)}">Band confirming ({BAND_HOLD} sessions needed): {_e(info["held"].title())} → '
+            f'{_e(t)} <b>{info["k"]}/{BAND_HOLD}</b> <span style="color:#a89f95;">ⓘ</span></span>')
 
 
 # ── v5: Avoid list (laggards) ───────────────────────────────────────────────────

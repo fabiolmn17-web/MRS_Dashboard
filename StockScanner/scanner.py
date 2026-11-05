@@ -106,10 +106,30 @@ def run_scan(
     all_tickers = tickers + ['SPY']
     price_data  = _batch_download(all_tickers, PRICE_DAYS, BATCH_SIZE, log)
 
+    # Freshness check (5 Nov 2026): every stock should end on the last completed session
+    exp_day = expected_session()
+    def _lagging(pdict):
+        return [t_ for t_, d_ in pdict.items() if d_ is not None and len(d_) and d_.index.max() < exp_day]
+    lag = _lagging(price_data)
+    if len(lag) > (1 - STALE_SHARE_OK) * max(len(price_data), 1) or 'SPY' in lag:
+        log(f'  {len(lag)} of {len(price_data)} tickers end before {exp_day.date()} — waiting {RETRY_WAIT_S}s and '
+            f're-downloading them once...')
+        time.sleep(RETRY_WAIT_S)
+        again = _batch_download(lag, PRICE_DAYS, BATCH_SIZE, log)
+        for t_, d_ in again.items():
+            if d_ is not None and len(d_) and d_.index.max() > price_data[t_].index.max():
+                price_data[t_] = d_
+        lag = _lagging(price_data)
+
     spy_df = price_data.get('SPY')
     if spy_df is None or spy_df.empty:
         log('  ERROR: SPY data missing — aborting')
         return pd.DataFrame()
+    data_through = spy_df.index.max().normalize()
+    data_behind  = sessions_between(data_through, exp_day)
+    log(f'  Data through {data_through.date()} (expected {exp_day.date()}; '
+        f'{"current" if data_behind == 0 else f"{data_behind} session(s) BEHIND"}); '
+        f'{len(lag)} ticker(s) still end before the expected session')
     log(f'  SPY: {len(spy_df)} bars ({spy_df.index[-1].date()} last)')
     log(f'  Price data fetched for {len(price_data)-1}/{len(tickers)} stocks')
 
@@ -344,6 +364,10 @@ def run_scan(
             'mrs_score':          mrs_score,
             'mrs_state':          mrs_state,
             'scan_date':          date.today().isoformat(),
+            'data_through':       data_through.date().isoformat(),
+            'data_behind':        data_behind,
+            'last_bar':           price_data[ticker].index.max().date().isoformat()
+                                  if price_data.get(ticker) is not None and len(price_data[ticker]) else '',
             'universe':           universe_note,
         })
 
@@ -385,6 +409,48 @@ def run_scan(
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+# ── Session date (5 Nov 2026) ─────────────────────────────────────────────────────────────────────────────────
+# The scheduled 22:00 UTC run usually starts after 02:00 UTC. The 4 and 5 Nov 2026 nightly scans came back without the
+# session that had just closed (GOOGL 278.99 = 2 Nov close in the 4 Nov scan, 280.03 = 3 Nov close in the 5 Nov scan),
+# while a morning run got it. So: ask for data through 2 days ahead (end is exclusive), keep bars up to the last
+# completed NYSE session only (no partial intraday bar), check the result, retry once, and record the real price date
+# in 'data_through' so the dashboard can say when the scan is behind.
+NYSE_HOLIDAYS = {  # full-day closures; extend each year
+    '2026-01-01', '2026-01-19', '2026-02-16', '2026-04-03', '2026-05-25', '2026-06-19', '2026-07-03', '2026-09-07',
+    '2026-11-26', '2026-12-25',
+    '2027-01-01', '2027-01-18', '2027-02-15', '2027-03-26', '2027-05-31', '2027-06-18', '2027-07-05', '2027-09-06',
+    '2027-11-25', '2027-12-24',
+}
+STALE_SHARE_OK = 0.90     # share of stocks that must have the expected last bar
+RETRY_WAIT_S   = 120
+
+
+def _is_session(d) -> bool:
+    return d.weekday() < 5 and d.isoformat() not in NYSE_HOLIDAYS
+
+
+def expected_session(now=None) -> pd.Timestamp:
+    """Last completed NYSE session in New York time (the close is final from 16:15 ET)."""
+    from zoneinfo import ZoneInfo
+    from datetime import timedelta
+    now = now or datetime.now(ZoneInfo('America/New_York'))
+    d = now.date()
+    if (now.hour, now.minute) < (16, 15) or not _is_session(d):
+        d -= timedelta(days=1)
+    while not _is_session(d):
+        d -= timedelta(days=1)
+    return pd.Timestamp(d)
+
+
+def sessions_between(a: pd.Timestamp, b: pd.Timestamp) -> int:
+    """Number of NYSE sessions after a up to and including b (0 when a >= b)."""
+    if a >= b:
+        return 0
+    days = pd.bdate_range(a + pd.Timedelta(days=1), b)
+    return int(sum(1 for x in days if x.date().isoformat() not in NYSE_HOLIDAYS))
+
+
+
 def _batch_download(
     tickers: List[str],
     days: int,
@@ -398,10 +464,11 @@ def _batch_download(
     import yfinance as yf
     from datetime import timedelta
 
-    end   = datetime.now()
-    start = end - timedelta(days=int(days * 1.5))
+    now   = datetime.now()
+    start = now - timedelta(days=int(days * 1.5))
     start_str = start.strftime('%Y-%m-%d')
-    end_str   = end.strftime('%Y-%m-%d')
+    end_str   = (now + timedelta(days=2)).strftime('%Y-%m-%d')     # exclusive: never cut off the last session
+    last_ok   = expected_session()                                  # drop any bar after the last completed session
 
     results = {}
     n_batches = (len(tickers) + batch_size - 1) // batch_size
@@ -444,6 +511,7 @@ def _batch_download(
                     df.index = pd.to_datetime(df.index).tz_localize(None)
                     cols = [c for c in ['Open', 'High', 'Low', 'Close', 'Volume'] if c in df.columns]
                     df = df[cols].dropna(subset=['Close'])
+                    df = df[df.index <= last_ok]
 
                     if not df.empty:
                         results[ticker] = df
@@ -475,6 +543,7 @@ def _batch_download(
                                 df.index = pd.to_datetime(df.index).tz_localize(None)
                                 cols = [c for c in ['Open', 'High', 'Low', 'Close', 'Volume'] if c in df.columns]
                                 df = df[cols].dropna(subset=['Close'])
+                                df = df[df.index <= last_ok]
                                 if not df.empty and df.index.max() > results[ticker].index.max():
                                     results[ticker] = df
                             except Exception as e:
@@ -493,6 +562,7 @@ def _batch_download(
                     df.index = pd.to_datetime(df.index).tz_localize(None)
                     cols = [c for c in ['Open', 'High', 'Low', 'Close', 'Volume'] if c in df.columns]
                     df = df[cols].dropna(subset=['Close'])
+                    df = df[df.index <= last_ok]
                     if not df.empty:
                         results[ticker] = df
                 except Exception:

@@ -96,6 +96,11 @@ def load_scanner_results():
         if df.empty:
             return None, None
         scan_date = df['scan_date'].iloc[0] if 'scan_date' in df.columns else 'unknown'
+        # 5 Nov 2026: label the scan by its price date, not the run date (the nightly run can miss the last session)
+        if 'data_through' in df.columns and pd.notna(df['data_through'].iloc[0]):
+            scan_date = f"{pd.Timestamp(df['data_through'].iloc[0]):%b %d} close"
+        else:
+            scan_date = f'run {scan_date}, price date not recorded'
         return df, scan_date
     except Exception as e:
         print(f'[scanner] load error: {e}')
@@ -696,6 +701,16 @@ if _pend:
     _changes.append(f'<span title="{_esc(_all)}">Labels confirming (3 sessions needed): {_shown}'
                     + (f' <span style="color:#a89f95;">+{_more} more ⓘ</span>' if _more > 0 else '') + '</span>')
 
+# band change confirming (display only, 5 Nov 2026)
+try:
+    _bh = market_state.band_hold([pipeline.regime_label(float(v)) for v in
+                                  hist.sort_values('date')['mrs_score'].dropna().tolist()])
+    _bhl = market_state.band_hold_line(_bh)
+    if _bhl:
+        _changes.append(_bhl)
+except Exception:
+    pass
+
 # ── Freshness of each data block ─────────────────────────────────────────────────
 _fresh = [f'MRS {last_dt:%b %d}']
 if _sec_closes is not None and len(_sec_closes):
@@ -703,7 +718,22 @@ if _sec_closes is not None and len(_sec_closes):
 if _ind_df is not None and 'as_of' in _ind_df.columns:
     _fresh.append(f'industries {_ind_df["as_of"].iloc[0]} (nightly)')
 if _scan_df is not None and _scan_date:
-    _fresh.append(f'scanner {_scan_date} (nightly)')
+    _sth = (pd.to_datetime(_scan_df['data_through'].iloc[0], errors='coerce')
+            if 'data_through' in _scan_df.columns else pd.NaT)
+    if pd.notna(_sth) and _sth < pd.Timestamp(last_dt):
+        _fresh.append(f'<span style="color:#f4a062;" title="The scan has prices through {_sth:%b %d}; the MRS is for '
+                      f'{last_dt:%b %d}. Re-run the scanner workflow (Actions, Run workflow).">scanner {_sth:%b %d} close: '
+                      f'behind the MRS</span>')
+    else:
+        _fresh.append(f'scanner {_scan_date}')
+# industries: the latest price bar in the nightly file
+if _ind_df is not None and 'last_bar' in _ind_df.columns:
+    _ilb = pd.to_datetime(_ind_df['last_bar'], errors='coerce').max()
+    if pd.notna(_ilb):
+        _fresh = [f for f in _fresh if not f.startswith('industries ')]
+        _fresh.insert(2 if len(_fresh) > 1 else 1,
+                      (f'<span style="color:#f4a062;">industries {_ilb:%b %d} close: behind the MRS</span>'
+                       if _ilb < pd.Timestamp(last_dt) else f'industries {_ilb:%b %d} close'))
 
 _deep_line = ''
 if _deep == 'DEEP RISK-OFF':
@@ -1377,7 +1407,7 @@ if _scan_df is not None and len(_scan_df) > 0:
     _n_relax = int(_sd['pass_mode'].isin(['STRICT', 'RELAXED']).sum())
     st.markdown(
         f'<div style="font-size:0.78rem;color:#a89f95;margin-bottom:6px;">'
-        f'Scan date <b style="color:#f3ece2;">{_scan_date}</b> · universe {len(_sd)} stocks'
+        f'Prices <b style="color:#f3ece2;">{_scan_date}</b> · universe {len(_sd)} stocks'
         + (f' <span style="color:#6e675f;">({_html_mod.escape(_uni_src)})</span>' if _uni_src else '') + ' · '
         f'{_n_mom} on the momentum list'
         + (f' · MRS at scan {float(_scan_mrs):+.2f}' if _scan_mrs is not None and pd.notna(_scan_mrs) else '')
