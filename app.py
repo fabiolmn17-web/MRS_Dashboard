@@ -315,6 +315,10 @@ def gamma_shadow_table(h: pd.DataFrame, g: pd.DataFrame) -> pd.DataFrame:
                         if pd.notna(a) and pd.notna(b) else '—')
     m['if_state'] = [_st(a, b) for a, b in zip(m['spx'], m['zero_gamma'])]
     m['gl_state'] = [_st(a, b) for a, b in zip(m['spx'], m['gl_spx'])]
+    # 6 Nov 2026: no Gamma Live flip within +-10% -> the state follows the sign of the net 40d gamma
+    if 'net40_next_bn' in m:
+        nf = m['gl_spx'].isna() & m['net40_next_bn'].notna()
+        m.loc[nf, 'gl_state'] = np.where(m.loc[nf, 'net40_next_bn'] < 0, 'Below (no flip ±10%)', 'Above (no flip ±10%)')
     return m
 
 gshadow = load_gamma_shadow()

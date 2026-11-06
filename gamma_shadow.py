@@ -41,8 +41,13 @@ def main():
         except ValueError:
             row[col] = float('nan')
     if not (200 < row['zg40_next'] < 2000 or 200 < row['zg40_close'] < 2000):
-        print(f'No valid SPY zero gamma in the inputs ({row}) - nothing stored.')
-        sys.exit(1)
+        # 6 Nov 2026: no flip inside the searched band (5 Nov: SPY 733, net 40d gamma -12.7bn, no flip within +-10%)
+        # is a reading, not an error: store the row with the net gamma so the app can show the state.
+        if 200 < row['spy_close'] < 2000 and row['net40_next_bn'] == row['net40_next_bn']:
+            print(f'No SPY zero gamma inside the searched band; stored with net gamma only ({row}).')
+        else:
+            print(f'No valid SPY values in the inputs ({row}) - nothing stored.')
+            sys.exit(1)
     old = pd.read_csv(PATH, dtype={'date': str}) if PATH.exists() else pd.DataFrame(columns=COLS)
     out = pd.concat([old[old['date'] != day], pd.DataFrame([row])], ignore_index=True)
     out = out.reindex(columns=COLS).sort_values('date')

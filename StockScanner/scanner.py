@@ -120,6 +120,18 @@ def run_scan(
             if d_ is not None and len(d_) and d_.index.max() > price_data[t_].index.max():
                 price_data[t_] = d_
         lag = _lagging(price_data)
+        if lag:                                   # 6 Nov 2026: one ticker at a time, the call that works late at night
+            got = _history_each(['SPY'] if 'SPY' in lag else lag[:1], PRICE_DAYS, log)
+            probe = next(iter(got.values()), None)
+            if probe is not None and len(probe) and probe.index.max() >= exp_day:
+                log(f'  single-ticker download has {exp_day.date()}: fetching the {len(lag)} lagging tickers one by one')
+                got.update(_history_each([t_ for t_ in lag if t_ not in got], PRICE_DAYS, log))
+                for t_, d_ in got.items():
+                    if d_ is not None and len(d_) and (t_ not in price_data or d_.index.max() > price_data[t_].index.max()):
+                        price_data[t_] = d_
+                lag = _lagging(price_data)
+            else:
+                log(f'  Yahoo has no {exp_day.date()} bar yet (single-ticker probe): the scan stays one session behind')
 
     spy_df = price_data.get('SPY')
     if spy_df is None or spy_df.empty:
@@ -451,6 +463,31 @@ def sessions_between(a: pd.Timestamp, b: pd.Timestamp) -> int:
 
 
 
+def _history_each(tickers, days, log):
+    """yf.Ticker(t).history(start=...) one ticker at a time, no end date, bars up to the last completed session."""
+    import yfinance as yf
+    from datetime import timedelta
+    start_str = (datetime.now() - timedelta(days=int(days * 1.5))).strftime('%Y-%m-%d')
+    last_ok = expected_session()
+    out = {}
+    for i, t_ in enumerate(tickers):
+        try:
+            df = yf.Ticker(t_).history(start=start_str, auto_adjust=True)
+            if df.empty:
+                continue
+            df.index = pd.to_datetime(df.index).tz_localize(None)
+            cols = [c for c in ['Open', 'High', 'Low', 'Close', 'Volume'] if c in df.columns]
+            df = df[cols].dropna(subset=['Close'])
+            df = df[df.index <= last_ok]
+            if not df.empty:
+                out[t_] = df
+        except Exception as e:
+            logger.debug(f'  {t_}: single download error: {e}')
+        if i and i % 200 == 0:
+            log(f'  ... {i}/{len(tickers)} single downloads')
+    return out
+
+
 def _batch_download(
     tickers: List[str],
     days: int,
@@ -482,7 +519,8 @@ def _batch_download(
             raw = yf.download(
                 batch,
                 start=start_str,
-                end=end_str,
+                # no end (6 Nov 2026): with an explicit end date Yahoo still left out the session that had just
+                # closed at 02:14 UTC; history(start=...) without an end got it at 01:43 UTC (MRS daily run)
                 auto_adjust=True,
                 progress=False,
                 threads=True,
@@ -537,7 +575,7 @@ def _batch_download(
                         for ticker in stale:
                             try:
                                 t = yf.Ticker(ticker)
-                                df = t.history(start=start_str, end=end_str, auto_adjust=True)
+                                df = t.history(start=start_str, auto_adjust=True)
                                 if df.empty:
                                     continue
                                 df.index = pd.to_datetime(df.index).tz_localize(None)
@@ -556,7 +594,7 @@ def _batch_download(
                 try:
                     import yfinance as yf
                     t = yf.Ticker(ticker)
-                    df = t.history(start=start_str, end=end_str, auto_adjust=True)
+                    df = t.history(start=start_str, auto_adjust=True)
                     if df.empty:
                         continue
                     df.index = pd.to_datetime(df.index).tz_localize(None)

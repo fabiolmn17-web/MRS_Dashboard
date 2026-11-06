@@ -292,6 +292,23 @@ def run_industry(verbose: bool = True):
     all_tickers = sorted(set(etfs) | set(stock_tickers) | {'SPY'})
     log(f'[2/3] Price history for {len(all_tickers)} tickers...')
     price_data = _batch_download(all_tickers, PRICE_DAYS, BATCH_SIZE, log)
+    # 6 Nov 2026: the nightly run kept missing the session that had just closed (IGV / SMH showed 4 Nov on 6 Nov).
+    # Same check as the scanner: if SPY or > 10% of tickers end early, fetch those one at a time (no end date).
+    try:
+        from .scanner import expected_session, _history_each
+        exp_day = expected_session()
+        lag = [t for t, d in price_data.items() if d is not None and len(d) and d.index.max() < exp_day]
+        if lag and ('SPY' in lag or len(lag) > 0.10 * max(len(price_data), 1)):
+            probe = _history_each(['SPY'], PRICE_DAYS, log).get('SPY')
+            if probe is not None and len(probe) and probe.index.max() >= exp_day:
+                log(f'  {len(lag)} tickers end before {exp_day.date()}: fetching them one by one')
+                for t, d in _history_each(lag, PRICE_DAYS, log).items():
+                    if d.index.max() > price_data[t].index.max():
+                        price_data[t] = d
+            else:
+                log(f'  Yahoo has no {exp_day.date()} bar yet: the industry table stays one session behind')
+    except Exception as ex:
+        log(f'  freshness check skipped ({ex})')
     missing = [t for t in all_tickers if t not in price_data]
     if missing:
         log(f'  No price data for {len(missing)}: {", ".join(missing[:30])}')

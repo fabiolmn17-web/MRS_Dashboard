@@ -137,6 +137,19 @@ def fetch_b20() -> float:
         if last.empty:
             raise RuntimeError('no price data')
         session = last.mode().iloc[0]                      # the session most stocks have as their last bar
+        # 6 Nov 2026: the nightly batch download kept missing the session that had just closed (B20 of 5 Nov was the
+        # 4 Nov breadth: 73.96 vs S5TW 63.94). If so, fetch the S&P 500 one ticker at a time (no end date).
+        from StockScanner.scanner import expected_session, _history_each
+        exp_day = expected_session()
+        if session < exp_day:
+            probe = _history_each(['SPY'], 45, print).get('SPY')
+            if probe is not None and len(probe) and probe.index.max() >= exp_day:
+                print(f'  B20: batch data ends {session.date()}; fetching {len(tickers)} tickers one by one for {exp_day.date()}')
+                data = _history_each(tickers, 45, print)
+                last = pd.Series({t: df.index.max() for t, df in data.items() if len(df)})
+                session = last.mode().iloc[0]
+            else:
+                print(f'  [WARN] B20: Yahoo has no {exp_day.date()} bar yet; B20 is from {session.date()}')
         above = valid = 0
         for t, df in data.items():
             c = df['Close'].dropna()
