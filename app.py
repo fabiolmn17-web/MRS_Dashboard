@@ -1610,9 +1610,10 @@ if _scan_df is not None and len(_scan_df) > 0:
     _hv = pd.to_numeric(_v['heat_score'], errors='coerce') if 'heat_score' in _v.columns else pd.Series(0, index=_v.index)
     if _scan in ('L_dip', 'S_dip'):
         _lg = _scan == 'L_dip'
-        _ve, _vs = pd.to_numeric(_v['ext200_atr'], errors='coerce'), pd.to_numeric(_v['sma200_slope21'], errors='coerce')
-        _vo = (pd.to_numeric(_v['off_lo252'], errors='coerce') if _lg
-               else pd.to_numeric(_v['pct_52w'], errors='coerce') * 100)
+        _vn = lambda c: (pd.to_numeric(_v[c], errors='coerce') if c in _v.columns    # scans before the new columns
+                         else pd.Series(np.nan, index=_v.index))
+        _ve, _vs = _vn('ext200_atr'), _vn('sma200_slope21')
+        _vo = _vn('off_lo252') if _lg else _vn('pct_52w') * 100
         _v = _v.assign(_dip='Dip 200d' if _lg else 'Rip 200d',
                        _dip_t=[f'Close {e:+.1f} ATR from the 200-day SMA; 200-day {s:+.1f}% in 21 sessions; '
                                f'{o:+.0f}% from the 52-week {"low" if _lg else "high"}' for e, s, o in zip(_ve, _vs, _vo)],
