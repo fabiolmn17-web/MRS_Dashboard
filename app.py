@@ -1448,6 +1448,35 @@ if _scan_df is not None and len(_scan_df) > 0:
     _liq = (_av.isna() | (_av >= 500_000)) & (_adr >= 3)
     _n_mom_all, _n_short_all = int(_m_long.sum()), int(_m_short.sum())
     _m_long, _m_short = _m_long & _liq, _m_short & _liq
+    # 7 Nov 2026 (b): the optional filters (squeeze, earnings, 200-day slope) act on every scan AND on the counts on
+    # the buttons. They are read from the session (the widgets below), so a change shows at once in the counts.
+    _has_s200 = 'sma200_slope21' in _sd.columns and _sd['sma200_slope21'].notna().any()
+    _STEEP_OPTS = {'Any': None, '≥ 2% a month': 2.0, '≥ 4% a month': 4.0, '≥ 6% a month': 6.0}
+
+    def _fmask(side):
+        m = pd.Series(True, index=_sd.index)
+        sq = st.session_state.get('ms_sqz', 'Any')
+        if sq == 'In a squeeze (any level)':
+            m &= _sd['_sq']
+        elif sq == 'Mid or High compression':
+            m &= _sd['_sqz_lvl'].isin(['Mid', 'High'])
+        elif sq == 'High compression only':
+            m &= _sd['_sqz_lvl'] == 'High'
+        elif sq == 'Squeeze started today':
+            m &= _sd['_sqz_start']
+        elif sq == 'Squeeze fired today':
+            m &= _sd['_sqz_fired']
+        if st.session_state.get('ms_earn') and 'next_earnings' in _sd.columns:
+            dd = (pd.to_datetime(_sd['next_earnings'], errors='coerce') - pd.Timestamp.today().normalize()).dt.days
+            m &= ~dd.between(0, 7)
+        th = _STEEP_OPTS.get(st.session_state.get('ms_steep2', 'Any'))
+        if th and _has_s200:
+            s2 = _num('sma200_slope21')
+            m &= (s2 >= th) if side == 'long' else (s2 <= -th)
+        return m
+
+    _fl, _fs = _fmask('long'), _fmask('short')
+    _m_long, _m_short = _m_long & _fl, _m_short & _fs
     _BASES = ['Cup w/ handle', 'Flat base', 'VCP', 'Tight area']
     _bt, _bst = _txt('base_type'), _txt('base_state')
     _q_lb = _m_long & _bt.isin(_BASES) & _bst.isin(['In base', 'Near pivot', 'Broke out today'])
@@ -1465,8 +1494,8 @@ if _scan_df is not None and len(_scan_df) > 0:
     _q_sb = _m_short & _sbt.isin(_BASES) & _sbs.isin(['In base', 'Near breakdown', 'Broke down today'])
     _q_sr = _m_short & (_rls != '')
     _heat = _num('heat_score').where(_liq)
-    _hot_idx = _heat.dropna().sort_values(ascending=False).index[:50]
-    _cold_idx = _heat.dropna().sort_values(ascending=True).index[:50]
+    _hot_idx = _heat.where(_fl).dropna().sort_values(ascending=False).index[:50]
+    _cold_idx = _heat.where(_fs).dropna().sort_values(ascending=True).index[:50]
 
     _SCANS = {
         'L_all': ('All', int(_m_long.sum()), 'long',
@@ -1479,7 +1508,7 @@ if _scan_df is not None and len(_scan_df) > 0:
         'L_pb': ('Pullbacks', int(_q_lp.sum()), 'long',
                  'Momentum list stocks down 2% or more over 5 sessions, closing within −1 to +0.5 ATR of a rising '
                  '20- or 50-day SMA (Setup column: PB 20d / PB 50d). Hottest first.'),
-        'L_hot': ('Hot 50', min(50, int(_heat.notna().sum())), 'long',
+        'L_hot': ('Hot 50', len(_hot_idx), 'long',
                   'The 50 highest heat scores across all scanned stocks that pass the liquidity filter (any list).'),
         'S_bases': ('Bases', int(_q_sb.sum()), 'short',
                     'Short list stocks (held RS −1 or lower, below the 200-day, 50 < 200) in a bear base: the same base '
@@ -1488,7 +1517,7 @@ if _scan_df is not None and len(_scan_df) > 0:
         'S_rally': ('Rallies', int(_q_sr.sum()), 'short',
                     'Short list stocks up 2% or more over 5 sessions, closing within −0.5 to +1 ATR of a falling '
                     '20- or 50-day SMA (Setup column: Rally 20d / 50d). Coldest first.'),
-        'S_cold': ('Cold 50', min(50, int(_heat.notna().sum())), 'short',
+        'S_cold': ('Cold 50', len(_cold_idx), 'short',
                    'The 50 lowest heat scores across all scanned stocks that pass the liquidity filter (any list).'),
     }
     _LONG_K, _SHORT_K = ['L_all', 'L_bases', 'L_pb', 'L_hot'], ['S_all', 'S_bases', 'S_rally', 'S_cold']
@@ -1529,12 +1558,11 @@ if _scan_df is not None and len(_scan_df) > 0:
                              help='Beardy Squeeze Pro, daily: Bollinger 2.0 inside Keltner 2.0 / 1.5 / 1.0 = Low / Mid / High '
                                   'compression (black / red / orange dots). Fired = out of the squeeze today after a squeeze yesterday.')
     with _c4:
-        st.markdown('<div style="height:1.75rem;"></div>', unsafe_allow_html=True)
-        _has_s200 = 'sma200_slope21' in _sd.columns and _sd['sma200_slope21'].notna().any()
-        _steep = st.checkbox('Steep 200-day', value=False, key='ms_steep', disabled=not _has_s200,
-                             help='200-day SMA up at least 2% over the last 21 sessions (about 25% or more a year); on the '
-                                  'short scans: down at least 2%. '
-                                  + ('' if _has_s200 else 'Available from the next nightly scan.'))
+        st.selectbox('200-day slope', list(_STEEP_OPTS), key='ms_steep2', disabled=not _has_s200,
+                     help='Steep 200-day: the 200-day SMA up at least this much over the last 21 sessions (long scans), '
+                          'or down at least this much (short scans). For scale: on the liquid momentum list the median '
+                          'is about +5% a month (3 Nov 2026), so 2% removes only ~20%; 4-6% keeps the steepest half or less. '
+                          + ('' if _has_s200 else 'Available from the next nightly scan.'))
     with _c5:
         st.markdown('<div style="height:1.75rem;"></div>', unsafe_allow_html=True)
         _no_earn = st.checkbox('Hide earnings ≤ 7 days', value=False, key='ms_earn')
@@ -1558,23 +1586,7 @@ if _scan_df is not None and len(_scan_df) > 0:
         _v = _sd.loc[_hot_idx]
     else:
         _v = _sd.loc[_cold_idx]
-    _v = _v.assign(_side=_SCANS[_scan][2])
-    if _sq_f == 'In a squeeze (any level)':
-        _v = _v[_v['_sq']]
-    elif _sq_f == 'Mid or High compression':
-        _v = _v[_v['_sqz_lvl'].isin(['Mid', 'High'])]
-    elif _sq_f == 'High compression only':
-        _v = _v[_v['_sqz_lvl'] == 'High']
-    elif _sq_f == 'Squeeze started today':
-        _v = _v[_v['_sqz_start']]
-    elif _sq_f == 'Squeeze fired today':
-        _v = _v[_v['_sqz_fired']]
-    if _no_earn and 'next_earnings' in _v.columns:
-        _dd = (pd.to_datetime(_v['next_earnings'], errors='coerce') - pd.Timestamp.today().normalize()).dt.days
-        _v = _v[~_dd.between(0, 7)]
-    if _steep and _has_s200:                            # 7 Nov 2026: steep 200-day (>= +2% / <= -2% over 21 sessions)
-        _s2 = pd.to_numeric(_v['sma200_slope21'], errors='coerce')
-        _v = _v[_s2 >= 2] if _SCANS[_scan][2] == 'long' else _v[_s2 <= -2]
+    _v = _v.assign(_side=_SCANS[_scan][2])            # squeeze / earnings / 200-day slope: already in the masks
     _hv = pd.to_numeric(_v['heat_score'], errors='coerce') if 'heat_score' in _v.columns else pd.Series(0, index=_v.index)
     if _scan == 'L_bases':
         _rk = _v['base_state'].map({'Broke out today': 3, 'Near pivot': 2, 'In base': 1}).fillna(0)
