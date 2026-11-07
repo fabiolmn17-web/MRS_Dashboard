@@ -110,6 +110,10 @@ def short_base_cell(r):
 
 def setup_cell(r):
     """7 Nov 2026: pullback to a rising 20 / 50-day SMA (long) or rally to a falling one (short), from momentum.py."""
+    dp = _s(r.get('_dip'))
+    if dp:                                   # 7 Nov 2026 (c): Deep dip / Deep rip scans
+        col = TEAL if r.get('_side') != 'short' else ORANGE
+        return f'<span title="{_e(_s(r.get("_dip_t")))}">{chip(dp, col, True)}</span>', 3
     s_ = _s(r.get('pb_setup')) if r.get('_side') != 'short' else _s(r.get('rally_setup'))
     if not s_ or s_ == 'None':
         return '<span style="color:#6e675f;">—</span>', 0

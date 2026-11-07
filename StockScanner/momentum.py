@@ -26,8 +26,11 @@ Used by scanner.py. Same definitions as the dashboard and the Epistruct studies:
   Descriptive definitions (the indicator's pullback colour, mirrored for shorts), not tested signals.
   ADR% = 100 x (mean of high / low over the last 20 sessions - 1), as TradingView's ADR%; avg_vol50 = mean volume of
   the last 50 sessions. The dashboard scans keep only stocks with avg_vol50 >= 500K and ADR% >= 3 (7 Nov 2026).
-  sma200_slope21 = % change of the 200-day SMA over 21 sessions; dashboard filter "Steep 200-day": >= +2% (long),
-  <= -2% (short).
+  sma200_slope21 = % change of the 200-day SMA over 21 sessions.
+  7 Nov 2026 (c): Deep dip / Deep rip scans (dashboard): ext200_atr = (close - SMA200) / ATR(14);
+  off_lo252 = % of the close above the lowest close of the last 252 sessions (52-week low).
+  Deep dip (long, any list): 200-day rising >= the chosen slope, close within +-1 ATR of it, close >= 25% above
+  the 52-week low. Deep rip (short): the mirror (falling 200-day, close >= 25% below the 52-week high, pct_52w).
 """
 import logging
 import sys
@@ -53,7 +56,7 @@ FIELDS = ['held_score', 'held_label', 'held_trend', 'days_in_label', 'pending_la
           'above_sma200', 'sma50_above_sma200', 'ext_atr', 'ext_zone', 'sma50_slope5', 'mom_zone',
           'ret_5d', 'pullback', 'pct_52w', 'mom_list',
           'ext20_atr', 'sma20_slope5', 'short_list', 'pb_setup', 'rally_setup', 'adr_pct', 'avg_vol50',
-          'sma200_slope21']
+          'sma200_slope21', 'ext200_atr', 'off_lo252']
 
 
 def _atr_wilder(df: pd.DataFrame, n: int = 14) -> pd.Series:
@@ -148,6 +151,8 @@ def momentum_fields(df: Optional[pd.DataFrame], spy_df: Optional[pd.DataFrame]) 
         out.update({'ext20_atr': e20, 'sma20_slope5': sl20})
         out['sma200_slope21'] = (float((sma200.iloc[-1] / sma200.iloc[-22] - 1) * 100)
                                  if len(c) >= 221 and sma200.iloc[-22] > 0 else np.nan)
+        out['ext200_atr'] = (p - s200) / a if (not np.isnan(s200)) and a and a > 0 else np.nan
+        out['off_lo252'] = (p / float(c.iloc[-252:].min()) - 1) * 100
         hl = (d['High'] / d['Low']).iloc[-20:]
         out['adr_pct'] = float((hl.mean() - 1) * 100) if len(hl) == 20 else np.nan
         if 'Volume' in df.columns:

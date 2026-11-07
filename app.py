@@ -1448,10 +1448,11 @@ if _scan_df is not None and len(_scan_df) > 0:
     _liq = (_av.isna() | (_av >= 500_000)) & (_adr >= 3)
     _n_mom_all, _n_short_all = int(_m_long.sum()), int(_m_short.sum())
     _m_long, _m_short = _m_long & _liq, _m_short & _liq
-    # 7 Nov 2026 (b): the optional filters (squeeze, earnings, 200-day slope) act on every scan AND on the counts on
-    # the buttons. They are read from the session (the widgets below), so a change shows at once in the counts.
-    _has_s200 = 'sma200_slope21' in _sd.columns and _sd['sma200_slope21'].notna().any()
-    _STEEP_OPTS = {'Any': None, '≥ 2% a month': 2.0, '≥ 4% a month': 4.0, '≥ 6% a month': 6.0}
+    # 7 Nov 2026 (b): the optional filters (squeeze, earnings) act on every scan AND on the counts on the buttons.
+    # They are read from the session (the widgets below), so a change shows at once in the counts.
+    # 7 Nov 2026 (c): the 200-day slope is no longer a global filter: it belongs to the Deep dip / Deep rip scans.
+    _has_dip = 'ext200_atr' in _sd.columns and _sd['ext200_atr'].notna().any()
+    _DIP_SLOPE = {'Rising (any slope)': 0.0, '≥ 2% a month': 2.0, '≥ 4% a month': 4.0, '≥ 6% a month': 6.0}
 
     def _fmask(side):
         m = pd.Series(True, index=_sd.index)
@@ -1469,10 +1470,6 @@ if _scan_df is not None and len(_scan_df) > 0:
         if st.session_state.get('ms_earn') and 'next_earnings' in _sd.columns:
             dd = (pd.to_datetime(_sd['next_earnings'], errors='coerce') - pd.Timestamp.today().normalize()).dt.days
             m &= ~dd.between(0, 7)
-        th = _STEEP_OPTS.get(st.session_state.get('ms_steep2', 'Any'))
-        if th and _has_s200:
-            s2 = _num('sma200_slope21')
-            m &= (s2 >= th) if side == 'long' else (s2 <= -th)
         return m
 
     _fl, _fs = _fmask('long'), _fmask('short')
@@ -1493,6 +1490,16 @@ if _scan_df is not None and len(_scan_df) > 0:
     _sbt, _sbs = _txt('sb_type'), _txt('sb_state')
     _q_sb = _m_short & _sbt.isin(_BASES) & _sbs.isin(['In base', 'Near breakdown', 'Broke down today'])
     _q_sr = _m_short & (_rls != '')
+    # 7 Nov 2026 (c): Deep dip = any scanned stock (liquid) whose close is within +-1 ATR of a 200-day SMA rising at
+    # least the chosen slope over 21 sessions, and >= 25% above its 52-week low. Deep rip = the mirror (falling
+    # 200-day, >= 25% below the 52-week high).
+    _s2, _e200 = _num('sma200_slope21'), _num('ext200_atr')
+    _dsl = _DIP_SLOPE.get(st.session_state.get('ms_dipslope', '≥ 2% a month'), 2.0)
+    _near200 = _e200.between(-1, 1)
+    _q_ld = _liq & _fl & _near200 & ((_s2 >= _dsl) if _dsl > 0 else (_s2 > 0))
+    _q_sd = _liq & _fs & _near200 & ((_s2 <= -_dsl) if _dsl > 0 else (_s2 < 0))
+    _q_ld &= _num('off_lo252') >= 25
+    _q_sd &= _num('pct_52w') <= -0.25
     _heat = _num('heat_score').where(_liq)
     _hot_idx = _heat.where(_fl).dropna().sort_values(ascending=False).index[:50]
     _cold_idx = _heat.where(_fs).dropna().sort_values(ascending=True).index[:50]
@@ -1508,6 +1515,9 @@ if _scan_df is not None and len(_scan_df) > 0:
         'L_pb': ('Pullbacks', int(_q_lp.sum()), 'long',
                  'Momentum list stocks down 2% or more over 5 sessions, closing within −1 to +0.5 ATR of a rising '
                  '20- or 50-day SMA (Setup column: PB 20d / PB 50d). Hottest first.'),
+        'L_dip': ('Deep dip', int(_q_ld.sum()), 'long',
+                  'Any scanned stock (not only the momentum list) closing within ±1 ATR of a RISING 200-day SMA: up at '
+                  'least the chosen slope over 21 sessions, and at least 25% above its 52-week low. Steepest 200-day first.'),
         'L_hot': ('Hot 50', len(_hot_idx), 'long',
                   'The 50 highest heat scores across all scanned stocks that pass the liquidity filter (any list).'),
         'S_bases': ('Bases', int(_q_sb.sum()), 'short',
@@ -1517,10 +1527,13 @@ if _scan_df is not None and len(_scan_df) > 0:
         'S_rally': ('Rallies', int(_q_sr.sum()), 'short',
                     'Short list stocks up 2% or more over 5 sessions, closing within −0.5 to +1 ATR of a falling '
                     '20- or 50-day SMA (Setup column: Rally 20d / 50d). Coldest first.'),
+        'S_dip': ('Deep rip', int(_q_sd.sum()), 'short',
+                  'Any scanned stock closing within ±1 ATR of a FALLING 200-day SMA: down at least the chosen slope over '
+                  '21 sessions, and at least 25% below its 52-week high. Steepest decline first.'),
         'S_cold': ('Cold 50', len(_cold_idx), 'short',
                    'The 50 lowest heat scores across all scanned stocks that pass the liquidity filter (any list).'),
     }
-    _LONG_K, _SHORT_K = ['L_all', 'L_bases', 'L_pb', 'L_hot'], ['S_all', 'S_bases', 'S_rally', 'S_cold']
+    _LONG_K, _SHORT_K = ['L_all', 'L_bases', 'L_pb', 'L_dip', 'L_hot'], ['S_all', 'S_bases', 'S_rally', 'S_dip', 'S_cold']
     if st.session_state.get('ms_scan') not in _SCANS:
         st.session_state['ms_scan'] = 'L_all'
     _fmt_scan = lambda k: _SCANS[k][0] if k in ('L_hot', 'S_cold') else f'{_SCANS[k][0]}  {_SCANS[k][1]}'
@@ -1537,7 +1550,7 @@ if _scan_df is not None and len(_scan_df) > 0:
     _cur = st.session_state['ms_scan']
     st.session_state['ms_pick_long'] = _cur if _cur in _LONG_K else None
     st.session_state['ms_pick_short'] = _cur if _cur in _SHORT_K else None
-    _c1, _c2, _c3, _c4, _c5 = st.columns([1.6, 1.6, 1.0, 0.8, 0.8])
+    _c1, _c2, _c3, _c5 = st.columns([1.8, 1.8, 1.0, 0.8])
     if hasattr(st, 'pills'):
         with _c1:
             st.pills('Long  ·  momentum list', _LONG_K, format_func=_fmt_scan, selection_mode='single',
@@ -1557,15 +1570,21 @@ if _scan_df is not None and len(_scan_df) > 0:
         _sq_f = st.selectbox('Squeeze', _SQ_OPTS, index=0, key='ms_sqz',
                              help='Beardy Squeeze Pro, daily: Bollinger 2.0 inside Keltner 2.0 / 1.5 / 1.0 = Low / Mid / High '
                                   'compression (black / red / orange dots). Fired = out of the squeeze today after a squeeze yesterday.')
-    with _c4:
-        st.selectbox('200-day slope', list(_STEEP_OPTS), key='ms_steep2', disabled=not _has_s200,
-                     help='Steep 200-day: the 200-day SMA up at least this much over the last 21 sessions (long scans), '
-                          'or down at least this much (short scans). For scale: on the liquid momentum list the median '
-                          'is about +5% a month (3 Nov 2026), so 2% removes only ~20%; 4-6% keeps the steepest half or less. '
-                          + ('' if _has_s200 else 'Available from the next nightly scan.'))
     with _c5:
         st.markdown('<div style="height:1.75rem;"></div>', unsafe_allow_html=True)
         _no_earn = st.checkbox('Hide earnings ≤ 7 days', value=False, key='ms_earn')
+    if _scan in ('L_dip', 'S_dip'):                   # 7 Nov 2026 (c): settings of the Deep dip / rip scans
+        _d1, _d3 = st.columns([1.0, 3.4])
+        with _d1:
+            st.selectbox('200-day slope (21 sessions)', list(_DIP_SLOPE), index=1, key='ms_dipslope',
+                         help='How steep the 200-day SMA must be: up at least this much over the last 21 sessions '
+                              '(Deep dip) or down at least this much (Deep rip). Median on the liquid momentum list is '
+                              'about +5% a month (3 Nov 2026).')
+        if not _has_dip:
+            with _d3:
+                st.markdown('<div style="height:1.9rem;"></div><span style="font-size:0.75rem;color:#e3b48e;">'
+                            'The distance to the 200-day arrives with the next nightly scan: until then this list is '
+                            'empty.</span>', unsafe_allow_html=True)
     st.markdown(f'<div style="font-size:0.72rem;color:#a89f95;margin:-4px 0 8px 0;">'
                 f'<b style="color:{"#85cac5" if _SCANS[_scan][2] == "long" else "#f4a062"};">'
                 f'{"LONG" if _SCANS[_scan][2] == "long" else "SHORT"} · {_SCANS[_scan][0]}</b> — '
@@ -1579,7 +1598,8 @@ if _scan_df is not None and len(_scan_df) > 0:
                    ' <span style="color:#e3b48e;">20-day pullbacks arrive with the next nightly scan (50-day only for now).</span>')
                 + '</div>', unsafe_allow_html=True)
 
-    _mask = {'L_all': _m_long, 'S_all': _m_short, 'L_bases': _q_lb, 'L_pb': _q_lp, 'S_bases': _q_sb, 'S_rally': _q_sr}
+    _mask = {'L_all': _m_long, 'S_all': _m_short, 'L_bases': _q_lb, 'L_pb': _q_lp, 'S_bases': _q_sb, 'S_rally': _q_sr,
+             'L_dip': _q_ld, 'S_dip': _q_sd}
     if _scan in _mask:
         _v = _sd[_mask[_scan]]
     elif _scan == 'L_hot':
@@ -1588,7 +1608,16 @@ if _scan_df is not None and len(_scan_df) > 0:
         _v = _sd.loc[_cold_idx]
     _v = _v.assign(_side=_SCANS[_scan][2])            # squeeze / earnings / 200-day slope: already in the masks
     _hv = pd.to_numeric(_v['heat_score'], errors='coerce') if 'heat_score' in _v.columns else pd.Series(0, index=_v.index)
-    if _scan == 'L_bases':
+    if _scan in ('L_dip', 'S_dip'):
+        _lg = _scan == 'L_dip'
+        _ve, _vs = pd.to_numeric(_v['ext200_atr'], errors='coerce'), pd.to_numeric(_v['sma200_slope21'], errors='coerce')
+        _vo = (pd.to_numeric(_v['off_lo252'], errors='coerce') if _lg
+               else pd.to_numeric(_v['pct_52w'], errors='coerce') * 100)
+        _v = _v.assign(_dip='Dip 200d' if _lg else 'Rip 200d',
+                       _dip_t=[f'Close {e:+.1f} ATR from the 200-day SMA; 200-day {s:+.1f}% in 21 sessions; '
+                               f'{o:+.0f}% from the 52-week {"low" if _lg else "high"}' for e, s, o in zip(_ve, _vs, _vo)],
+                       _k=_vs).sort_values('_k', ascending=not _lg, na_position='last')
+    elif _scan == 'L_bases':
         _rk = _v['base_state'].map({'Broke out today': 3, 'Near pivot': 2, 'In base': 1}).fillna(0)
         _v = _v.assign(_k=_rk * 1000 + pd.to_numeric(_v['base_dist_pct'], errors='coerce').fillna(-9) * 100) \
                .sort_values('_k', ascending=False)
