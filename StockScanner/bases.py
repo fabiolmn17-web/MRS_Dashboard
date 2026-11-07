@@ -41,6 +41,12 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+# 7 Nov 2026: short side. detect_short() runs the same rules on inverted prices (K / price: highs become lows), so a
+# flat base / tight area / VCP / cup with handle in the inverted series is the same shape upside down under a support
+# pivot low (bear base). Percent thresholds carry over approximately (a 20% decline = a 25% rise in K / price).
+# States: In base, Near breakdown (close at most 5% above the pivot low), Broke down today, Broke down Nd ago.
+SHORT_FIELDS = ['sb_type', 'sb_state', 'sb_pivot', 'sb_dist_pct', 'sb_depth', 'sb_weeks', 'sb_days_since']
+
 NEAR_PIVOT = 0.05            # near pivot: close at most 5% below
 BO_VOL_OK = 1.4              # breakout volume >= 1.4x the 50-day average
 RECENT = 4                   # "broke out N sessions ago", N = 1..4
@@ -355,4 +361,33 @@ def detect(df: pd.DataFrame, rs_rating: Optional[float] = None) -> dict:
         vcp_contractions=' · '.join(f"{x[2] * 100:.0f}%" for x in base['vcp']) if base.get('vcp') else None,
         vcp_points=';'.join(f"{ds(a_)},{h[a_]:.2f},{ds(b_)},{l[b_]:.2f}" for a_, b_, _ in base['vcp'])
         if base.get('vcp') else None)
+    return out
+
+
+def detect_short(df: pd.DataFrame, rs_rating: Optional[float] = None) -> dict:
+    """Bear bases (7 Nov 2026): the long rules on inverted prices. Returns SHORT_FIELDS; pivot and distance in real
+    prices (sb_dist_pct > 0 = close above the pivot low). High tight flags are not mirrored."""
+    out = {k: None for k in SHORT_FIELDS}
+    if df is None or len(df) < 30 or not {'High', 'Low', 'Close'} <= set(df.columns):
+        return out
+    d = df.dropna(subset=['High', 'Low', 'Close'])
+    d = d[(d['Low'] > 0) & (d['Close'] > 0) & (d['High'] > 0)]
+    if len(d) < 30:
+        return out
+    K = float(d['Close'].median()) ** 2                 # keeps the inverted prices near the real ones
+    inv = pd.DataFrame({'High': K / d['Low'], 'Low': K / d['High'], 'Close': K / d['Close']}, index=d.index)
+    if 'Volume' in d.columns:
+        inv['Volume'] = d['Volume']
+    r = detect(inv, None if rs_rating is None or pd.isna(rs_rating) else 100 - float(rs_rating))
+    t = r.get('base_type')
+    if not t or t == 'High tight flag':
+        return out
+    st_ = str(r.get('base_state') or '')
+    st_ = (st_.replace('Broke out', 'Broke down').replace('Near pivot', 'Near breakdown'))
+    piv = r.get('base_pivot')
+    real_piv = K / float(piv) if piv else None
+    close = float(d['Close'].iloc[-1])
+    out.update(sb_type=t, sb_state=st_, sb_pivot=round(real_piv, 2) if real_piv else None,
+               sb_dist_pct=(close / real_piv - 1) if real_piv else None, sb_depth=r.get('base_depth'),
+               sb_weeks=r.get('base_weeks'), sb_days_since=r.get('base_days_since_bo'))
     return out

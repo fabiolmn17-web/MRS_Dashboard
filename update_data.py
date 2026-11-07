@@ -41,10 +41,14 @@ def is_trading_day(dt: pd.Timestamp) -> bool:
 
 
 def main():
-    today_date = pd.Timestamp(datetime.date.today()).normalize()
-    print(f'\n=== MRS Daily Update — {today_date.date()} ===\n')
+    # 7 Nov 2026: the session this run belongs to, in New York time (auto_fetch._session_date). The scheduled
+    # 21:30 UTC run often starts after 00:00 UTC; on Fridays the runner's UTC date was already Saturday, so the guard
+    # below skipped the run and the Friday session never got a row (6 Nov 2026). A manual run on a weekend now
+    # fills the last Friday.
+    today_date = auto_fetch._session_date()
+    print(f'\n=== MRS Daily Update — session {today_date.date()} (runner date {datetime.date.today()}) ===\n')
 
-    # ── Guard: skip non-trading days ─────────────────────────────────────────
+    # ── Guard: skip non-trading sessions (holidays) ──────────────────────────
     if not is_trading_day(today_date):
         print(f'  {today_date.date()} is not a NYSE trading day — nothing to do.')
         print('\n=== Skipped ===')

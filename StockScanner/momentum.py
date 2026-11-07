@@ -17,6 +17,13 @@ Used by scanner.py. Same definitions as the dashboard and the Epistruct studies:
 
   The odds behind these zones were measured on SPY and QQQ (index ETFs), not on single stocks: on a stock
   they describe the state, not tested probabilities.
+
+  7 Nov 2026 (scanner v3, long + short scans):
+  Short list (mirror of the momentum list): held score <= -1.0 AND close < SMA200 AND SMA50 < SMA200.
+  Pullback (long):  5-day return <= -2% AND close within -1 to +0.5 ATR of a RISING SMA (20-day: its 5-bar slope > 0;
+                    50-day: its 5-bar slope > 0, momentum Building / Persistent / Fading). 50-day first if both.
+  Rally (short):    5-day return >= +2% AND close within -0.5 to +1 ATR of a FALLING SMA (5-bar slope < 0). 50 first.
+  Descriptive definitions (the indicator's pullback colour, mirrored for shorts), not tested signals.
 """
 import logging
 import sys
@@ -40,7 +47,8 @@ PB_BINS = ['None', 'Dip', 'Pullback', 'Sharp pullback']
 
 FIELDS = ['held_score', 'held_label', 'held_trend', 'days_in_label', 'pending_label', 'pending_days', 'tag_1m',
           'above_sma200', 'sma50_above_sma200', 'ext_atr', 'ext_zone', 'sma50_slope5', 'mom_zone',
-          'ret_5d', 'pullback', 'pct_52w', 'mom_list']
+          'ret_5d', 'pullback', 'pct_52w', 'mom_list',
+          'ext20_atr', 'sma20_slope5', 'short_list', 'pb_setup', 'rally_setup']
 
 
 def _atr_wilder(df: pd.DataFrame, n: int = 14) -> pd.Series:
@@ -88,7 +96,8 @@ def momentum_fields(df: Optional[pd.DataFrame], spy_df: Optional[pd.DataFrame]) 
     """All momentum / trend / Ext-Mom fields for one stock. NaN / '' where history is too short."""
     out = {k: np.nan for k in FIELDS}
     out.update({'held_label': '', 'held_trend': '', 'pending_label': '', 'tag_1m': '', 'ext_zone': '',
-                'mom_zone': '', 'pullback': '', 'mom_list': False, 'above_sma200': False, 'sma50_above_sma200': False})
+                'mom_zone': '', 'pullback': '', 'mom_list': False, 'above_sma200': False, 'sma50_above_sma200': False,
+                'short_list': False, 'pb_setup': '', 'rally_setup': ''})
     if df is None or spy_df is None or df.empty or 'Close' not in df.columns:
         return out
     d = df[['High', 'Low', 'Close']].dropna()
@@ -123,6 +132,26 @@ def momentum_fields(df: Optional[pd.DataFrame], spy_df: Optional[pd.DataFrame]) 
         })
         hs = out['held_score']
         out['mom_list'] = bool((not pd.isna(hs)) and hs >= 1.0 and above200 and golden)
+        # 7 Nov 2026: short list, 20-day SMA, pullback / rally setups
+        below200 = (not np.isnan(s200)) and p < s200
+        death = (not np.isnan(s200)) and s50 < s200
+        out['short_list'] = bool((not pd.isna(hs)) and hs <= -1.0 and below200 and death)
+        sma20 = c.rolling(20).mean()
+        s20 = float(sma20.iloc[-1])
+        sl20 = float((sma20.iloc[-1] / sma20.iloc[-6] - 1) * 100) if len(c) > 25 else np.nan
+        e20 = (p - s20) / a if a and a > 0 else np.nan
+        out.update({'ext20_atr': e20, 'sma20_slope5': sl20})
+        ok = lambda v: v is not None and not np.isnan(v)
+        if ok(r5) and r5 <= -2:
+            if ok(ext) and -1 <= ext <= 0.5 and ok(sl) and sl > 0:
+                out['pb_setup'] = 'Pullback to 50-day'
+            elif ok(e20) and -1 <= e20 <= 0.5 and ok(sl20) and sl20 > 0:
+                out['pb_setup'] = 'Pullback to 20-day'
+        if ok(r5) and r5 >= 2:
+            if ok(ext) and -0.5 <= ext <= 1 and ok(sl) and sl < 0:
+                out['rally_setup'] = 'Rally to 50-day'
+            elif ok(e20) and -0.5 <= e20 <= 1 and ok(sl20) and sl20 < 0:
+                out['rally_setup'] = 'Rally to 20-day'
     except Exception as e:  # never break the scan on one ticker
         logger.warning(f'momentum fields error: {e}')
     return out

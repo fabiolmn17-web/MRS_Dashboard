@@ -1423,129 +1423,116 @@ if _scan_df is not None and len(_scan_df) > 0:
                    'universe download did not work in the nightly run, so the lists are shorter than usual. Check the '
                    '"CAN SLIM Scanner" run on GitHub (Actions tab).')
 
-    st.markdown(_scan_counts_html(_sd), unsafe_allow_html=True)
     _scan_lookup(_sd, _sec_label, _sec_score, _leader_hold)
-    _industry_groups_panel(_sd)
 
-    _LIST_OPTS = ['Momentum list', 'Momentum list that also meets CAN SLIM', 'CAN SLIM strict', 'CAN SLIM relaxed',
-                  'All scanned stocks']
-    _EXT_OPTS = {'Any extension': None,
-                 'Close to the 50-day SMA (−1 to +0.5 ATR)': ['Just below', 'Near'],
-                 'Above (+0.5 to +5 ATR)': ['Above'],
-                 'Far above (above +5 ATR)': ['Far above'],
-                 'Below the 50-day SMA (−1 ATR or lower)': ['Below', 'Deep below']}
-    _f1, _f2, _f3 = st.columns([1.3, 1.4, 1.6])
-    with _f1:
-        _lmode = st.selectbox('List', _LIST_OPTS, index=0 if _has_mom else 2, key='ms_list')
-    with _f2:
-        _emode = st.selectbox('Extension vs the 50-day SMA', list(_EXT_OPTS.keys()), index=0, key='ms_ext')
-    with _f3:
-        _mz_sel = st.multiselect('50-day SMA momentum', ['Persistent', 'Building', 'Fading', 'Falling', 'Weak'],
-                                 default=[], key='ms_mom', placeholder='Any momentum zone')
-    _g1, _g2, _g3, _g4, _g5, _g6 = st.columns([1.3, 1.1, 1.1, 0.9, 1.3, 1.0])
-    with _g1:
-        _sects = sorted({YF_TO_SECTOR.get(str(s), str(s)) for s in _sd['sector'].dropna() if str(s)})
-        _sect_f = st.selectbox('Sector', ['All sectors'] + _sects, index=0, key='ms_sector')
-    with _g2:
-        _lead_sec = st.checkbox('Leading sectors only', value=False, key='ms_leadsec', help='Sector RS score +1 or higher (held label).')
-    with _g3:
-        _IND_OPTS = ['Any', 'Industry leader', 'Leader in a leading industry', 'In a leading industry (any stock)']
-        _ind_f = st.selectbox('Industry', _IND_OPTS, index=0, key='ms_indlead',
-                              help='Industry = NASDAQ industry group of the scanned stocks (groups under 5 names merged). '
-                                   'Leader: top 20% of its group by RS rating (at least the top 3), held RS score ≥ +1.0, '
-                                   'above the 200-day and within 25% of the 52-week high. Leading industry: the group '
-                                   'without the stock is held +1.5 with RS 1M not negative, or +0.5 with 3M stronger than 6M (same '
-                                   'rule as the Leaders-to-buy list). Descriptive, untested. Older scans without industry '
-                                   'groups: falls back to "top-10 holding of a leader industry ETF".')
-    with _g4:
-        _atr_f = st.checkbox('ATR compressed', value=False, key='ms_atr')
-    with _g5:
-        _SQ_OPTS = ['Any', 'In a squeeze (any level)', 'Mid or High compression', 'High compression only',
-                    'Squeeze started today', 'Squeeze fired today'] if _has_sqz else ['Any', 'In a squeeze (any level)']
+    # ── 7 Nov 2026: SCANNER v3. Six fixed scans inside the momentum framework, mirrored for shorts:
+    #    long  = momentum list (held RS >= +1, above the 200-day, 50 > 200): actionable bases, pullbacks, Hot 50
+    #    short = short list (held RS <= -1, below the 200-day, 50 < 200): bear bases, rallies, Cold 50
+    #    plus two filters: squeeze and earnings within 7 days. Same definitions in StockScanner (momentum.py, bases.py).
+    _num = lambda c: pd.to_numeric(_sd[c], errors='coerce') if c in _sd.columns else pd.Series(np.nan, index=_sd.index)
+    _txt = lambda c: _sd[c].fillna('').astype(str) if c in _sd.columns else pd.Series('', index=_sd.index)
+    _m_long = _sd['_mom']
+    if 'short_list' in _sd.columns:
+        _m_short = _bool('short_list')
+    else:                                               # scans before 7 Nov 2026: the same rule from the columns
+        _m_short = (_num('held_score') <= -1.0) & ~_bool('above_sma200') & ~_bool('sma50_above_sma200')
+    _BASES = ['Cup w/ handle', 'Flat base', 'VCP', 'Tight area']
+    _bt, _bst = _txt('base_type'), _txt('base_state')
+    _q_lb = _m_long & _bt.isin(_BASES) & _bst.isin(['In base', 'Near pivot', 'Broke out today'])
+    _r5, _e50, _sl50 = _num('ret_5d'), _num('ext_atr'), _num('sma50_slope5')
+    if 'pb_setup' in _sd.columns:
+        _pbs, _rls = _txt('pb_setup'), _txt('rally_setup')
+    else:                                               # older scans: 50-day only (no 20-day SMA stored yet)
+        _pbs = pd.Series(np.where((_r5 <= -2) & _e50.between(-1, 0.5) & (_sl50 > 0), 'Pullback to 50-day', ''),
+                         index=_sd.index)
+        _rls = pd.Series(np.where((_r5 >= 2) & _e50.between(-0.5, 1) & (_sl50 < 0), 'Rally to 50-day', ''),
+                         index=_sd.index)
+        _sd['pb_setup'], _sd['rally_setup'] = _pbs, _rls
+    _q_lp = _m_long & (_pbs != '')
+    _sbt, _sbs = _txt('sb_type'), _txt('sb_state')
+    _q_sb = _m_short & _sbt.isin(_BASES) & _sbs.isin(['In base', 'Near breakdown', 'Broke down today'])
+    _q_sr = _m_short & (_rls != '')
+    _heat = _num('heat_score')
+    _hot_idx = _heat.dropna().sort_values(ascending=False).index[:50]
+    _cold_idx = _heat.dropna().sort_values(ascending=True).index[:50]
+
+    _SCANS = {
+        'L_bases': ('Bases', int(_q_lb.sum()), 'long',
+                    'Momentum list stocks in a cup with handle, flat base, VCP or tight area that is still actionable: '
+                    'in the base, within 5% below the pivot, or broke out today. Closest to the pivot first.'),
+        'L_pb': ('Pullbacks', int(_q_lp.sum()), 'long',
+                 'Momentum list stocks down 2% or more over 5 sessions, closing within −1 to +0.5 ATR of a rising '
+                 '20- or 50-day SMA (Setup column: PB 20d / PB 50d). Hottest first.'),
+        'L_hot': ('Hot 50', min(50, int(_heat.notna().sum())), 'long',
+                  'The 50 highest heat scores across all scanned stocks (any list).'),
+        'S_bases': ('Bases', int(_q_sb.sum()), 'short',
+                    'Short list stocks (held RS −1 or lower, below the 200-day, 50 < 200) in a bear base: the same base '
+                    'rules upside down, under a pivot low. Still actionable: in the base, within 5% above the breakdown '
+                    'level, or broke down today. Closest to the level first.'),
+        'S_rally': ('Rallies', int(_q_sr.sum()), 'short',
+                    'Short list stocks up 2% or more over 5 sessions, closing within −0.5 to +1 ATR of a falling '
+                    '20- or 50-day SMA (Setup column: Rally 20d / 50d). Coldest first.'),
+        'S_cold': ('Cold 50', min(50, int(_heat.notna().sum())), 'short',
+                   'The 50 lowest heat scores across all scanned stocks (any list).'),
+    }
+    _LONG_K, _SHORT_K = ['L_bases', 'L_pb', 'L_hot'], ['S_bases', 'S_rally', 'S_cold']
+    if st.session_state.get('ms_scan') not in _SCANS:
+        st.session_state['ms_scan'] = 'L_bases'
+    _fmt_scan = lambda k: _SCANS[k][0] if k in ('L_hot', 'S_cold') else f'{_SCANS[k][0]}  {_SCANS[k][1]}'
+
+    def _pick(side):
+        v = st.session_state.get('ms_pick_' + side)
+        if v:
+            st.session_state['ms_scan'] = v
+            st.session_state['ms_pick_' + ('short' if side == 'long' else 'long')] = None
+        else:                                           # clicking the active one again keeps it selected
+            st.session_state['ms_pick_' + side] = st.session_state['ms_scan'] if st.session_state['ms_scan'] in \
+                (_LONG_K if side == 'long' else _SHORT_K) else None
+
+    _cur = st.session_state['ms_scan']
+    st.session_state['ms_pick_long'] = _cur if _cur in _LONG_K else None
+    st.session_state['ms_pick_short'] = _cur if _cur in _SHORT_K else None
+    _c1, _c2, _c3, _c4 = st.columns([1.35, 1.35, 1.2, 0.9])
+    if hasattr(st, 'pills'):
+        with _c1:
+            st.pills('Long  ·  momentum list', _LONG_K, format_func=_fmt_scan, selection_mode='single',
+                     key='ms_pick_long', on_change=_pick, args=('long',))
+        with _c2:
+            st.pills('Short  ·  short list', _SHORT_K, format_func=_fmt_scan, selection_mode='single',
+                     key='ms_pick_short', on_change=_pick, args=('short',))
+    else:                                               # older Streamlit
+        with _c1:
+            st.session_state['ms_scan'] = st.radio('Scan', _LONG_K + _SHORT_K, format_func=lambda k: (
+                'Long · ' if k in _LONG_K else 'Short · ') + _fmt_scan(k), horizontal=True,
+                index=(_LONG_K + _SHORT_K).index(_cur))
+    _scan = st.session_state['ms_scan']
+    _SQ_OPTS = ['Any', 'In a squeeze (any level)', 'Mid or High compression', 'High compression only',
+                'Squeeze started today', 'Squeeze fired today'] if _has_sqz else ['Any', 'In a squeeze (any level)']
+    with _c3:
         _sq_f = st.selectbox('Squeeze', _SQ_OPTS, index=0, key='ms_sqz',
                              help='Beardy Squeeze Pro, daily: Bollinger 2.0 inside Keltner 2.0 / 1.5 / 1.0 = Low / Mid / High '
                                   'compression (black / red / orange dots). Fired = out of the squeeze today after a squeeze yesterday.')
-    with _g6:
+    with _c4:
+        st.markdown('<div style="height:1.75rem;"></div>', unsafe_allow_html=True)
         _no_earn = st.checkbox('Hide earnings ≤ 7 days', value=False, key='ms_earn')
-    # breakouts and bases (StockScanner/bases.py, 3 Nov 2026)
-    _has_base = 'base_type' in _sd.columns
-    _BASE_OPTS = {'Any': None, 'Any base': 'any', 'Cup with handle': 'Cup w/ handle', 'VCP (Minervini)': 'VCP',
-                  'Flat base': 'Flat base', 'Tight area': 'Tight area', 'High tight flag': 'High tight flag'}
-    _BO_OPTS = ['Any', 'Near pivot (≤ 5% below)', 'Broke out today (base pivot)', 'Broke out in the last 5 sessions',
-                'Near pivot or broke out (≤ 5 sessions)', 'Pivot high (10/10) breakout today',
-                '21-day high breakout today', '52-week high breakout today', '21-day or 52-week breakout today']
-    _h1, _h2, _h3, _h4, _h5 = st.columns([1.1, 1.5, 1.0, 1.4, 1.1])
-    with _h1:
-        _bt_f = st.selectbox('Base pattern', list(_BASE_OPTS), index=0, key='ms_base', disabled=not _has_base,
-                             help='Rule-based, nightly (v2, 4 Nov 2026). Pivots = 10/10 swing highs, as in TradingView '
-                                  '"Pivot Points High Low". Flat base: starts AT the most recent 10/10 pivot high that no '
-                                  'close has cleared, ≥ 25 sessions, ≤ 15% deep; pivot = that high. Tight area: the same '
-                                  'but 10–24 sessions and ≤ 8% deep. Both need ≥ 20% advance into the pivot. VCP '
-                                  '(Minervini): trend template passed, ≥ 2 contractions each ≤ 85% of the one before, the '
-                                  'first 10–35%, the last ≤ 10%, volume drying up in the last one; pivot = high of the '
-                                  'last contraction. Cup with handle (O\'Neil): prior uptrend ≥ 30%, cup 7–65 weeks, '
-                                  '12–33% deep, handle ≤ 12% in the upper half; pivot = handle high + $0.10. High tight '
-                                  'flag: ≥ +100% in 4–8 weeks, then a 10–25% pullback. Descriptive, untested.')
-    with _h2:
-        _bs_f = st.selectbox('Pivot / breakout', _BO_OPTS, index=0, key='ms_bostate', disabled=not _has_base,
-                             help='Near pivot = close at most 5% below the base pivot. Broke out = closed above it '
-                                  '(today, or 1–4 sessions ago and still above). Pivot high (10/10) = today\'s close above '
-                                  'the most recent 10/10 swing high not yet cleared by a close (any stock, base or not). '
-                                  '21-day / 52-week = today\'s close above the highest high of the prior 21 / 252 sessions.')
-    with _h3:
-        _bv_f = st.checkbox('Breakout volume ≥ 1.4×', value=False, key='ms_bovol', disabled=not _has_base,
-                            help='The breakout day\'s volume at least 1.4× its 50-day average (O\'Neil: +40–50%). '
-                                 'Base breakouts: the breakout day; pivot high / 21-day / 52-week: today.')
-    with _h4:
-        _tt_f = st.checkbox('Trend template (Minervini) ✓', value=False, key='ms_tt',
-                            disabled=not (_has_base and 'tt_pass' in _sd.columns),
-                            help='All 8: close > 150- and 200-day; 150 > 200; 200-day rising over a month; 50 > 150 and '
-                                 '200; close > 50-day; ≥ 30% above the 52-week low; within 25% of the 52-week high; '
-                                 'RS rating ≥ 70.')
+    st.markdown(f'<div style="font-size:0.72rem;color:#a89f95;margin:-4px 0 8px 0;">'
+                f'<b style="color:{"#85cac5" if _SCANS[_scan][2] == "long" else "#f4a062"};">'
+                f'{"LONG" if _SCANS[_scan][2] == "long" else "SHORT"} · {_SCANS[_scan][0]}</b> — '
+                f'{_html_mod.escape(_SCANS[_scan][3])}'
+                + ('' if 'short_list' in _sd.columns or _SCANS[_scan][2] == 'long' or _scan == 'S_cold' else
+                   ' <span style="color:#e3b48e;">Bear bases and 20-day rallies arrive with the next nightly scan.</span>')
+                + ('' if 'pb_setup' in _scan_df.columns or _scan != 'L_pb' else
+                   ' <span style="color:#e3b48e;">20-day pullbacks arrive with the next nightly scan (50-day only for now).</span>')
+                + '</div>', unsafe_allow_html=True)
 
-    with _h5:
-        _HEAT_OPTS = {'Any': None, 'Hot (80+)': 80, 'Warm or hotter (65+)': 65, 'Neutral or hotter (45+)': 45}
-        _heat_f = st.selectbox('Heat score', list(_HEAT_OPTS), index=0, key='ms_heat',
-                               help='Heat score 1-100 (descriptive, untested): RS rating 25, RS label + trend tag 15, '
-                                    'industry (group state without the stock + leader inside it) 20, sector 5, distance '
-                                    'from the 52-week high 15, trend (200-day, 50 > 200, SMA50 momentum) 20. No '
-                                    'penalty for extension. The market regime is not in the score: read the momentum '
-                                    'light next to it. Weights follow the evidence; see heat_score.py.')
-
-    _v = _sd
-    if _lmode == 'Momentum list':
-        _v = _v[_v['_mom']]
-    elif _lmode == 'Momentum list that also meets CAN SLIM':
-        _v = _v[_v['_mom'] & _v['pass_mode'].notna()]
-    elif _lmode == 'CAN SLIM strict':
-        _v = _v[_v['pass_mode'] == 'STRICT']
-    elif _lmode == 'CAN SLIM relaxed':                 # 3 Nov 2026: relaxed or better (strict names included)
-        _v = _v[_v['pass_mode'].isin(['STRICT', 'RELAXED'])]
-    if _EXT_OPTS[_emode] is not None and 'ext_zone' in _v.columns:
-        _v = _v[_v['ext_zone'].isin(_EXT_OPTS[_emode])]
-    if _mz_sel and 'mom_zone' in _v.columns:
-        _v = _v[_v['mom_zone'].isin(_mz_sel)]
-    _v_sect = _v['sector'].astype(str).map(lambda s: YF_TO_SECTOR.get(s, s))
-    if _sect_f != 'All sectors':
-        _v = _v[_v_sect == _sect_f]
-        _v_sect = _v_sect[_v.index]
-    if _lead_sec:
-        _v = _v[_v_sect.map(lambda s: (_sec_score.get(s) or -9) >= 1.0)]
-    if _ind_f != 'Any':
-        if 'ind_role' in _v.columns and _v['ind_role'].notna().any():
-            _role = _v['ind_role'].fillna('').astype(str)
-            if _ind_f == 'Industry leader':
-                _v = _v[_role.str.startswith('Leader')]
-            elif _ind_f == 'Leader in a leading industry':
-                _v = _v[_role == 'Leader · leading industry']
-            else:
-                _v = _v[_v['ind_leading'].astype(str).str.lower() == 'true']
-        else:
-            _v = _v[_v['ticker'].astype(str).isin(_leader_hold.keys())]
-    if _HEAT_OPTS[_heat_f] is not None and 'heat_score' in _v.columns:
-        _v = _v[pd.to_numeric(_v['heat_score'], errors='coerce') >= _HEAT_OPTS[_heat_f]]
-    if _atr_f:
-        _v = _v[_v['_atr']]
+    _mask = {'L_bases': _q_lb, 'L_pb': _q_lp, 'S_bases': _q_sb, 'S_rally': _q_sr}
+    if _scan in _mask:
+        _v = _sd[_mask[_scan]]
+    elif _scan == 'L_hot':
+        _v = _sd.loc[_hot_idx]
+    else:
+        _v = _sd.loc[_cold_idx]
+    _v = _v.assign(_side=_SCANS[_scan][2])
     if _sq_f == 'In a squeeze (any level)':
         _v = _v[_v['_sq']]
     elif _sq_f == 'Mid or High compression':
@@ -1559,50 +1546,19 @@ if _scan_df is not None and len(_scan_df) > 0:
     if _no_earn and 'next_earnings' in _v.columns:
         _dd = (pd.to_datetime(_v['next_earnings'], errors='coerce') - pd.Timestamp.today().normalize()).dt.days
         _v = _v[~_dd.between(0, 7)]
-    _sort_pivot = False
-    if _has_base:
-        _tb = lambda c_: _v[c_].astype(str).str.lower().eq('true')
-        _bst = _v['base_state'].fillna('').astype(str)
-        _btype = _v['base_type'].fillna('').astype(str)
-        if _BASE_OPTS[_bt_f] == 'any':
-            _v = _v[_btype != '']
-        elif _BASE_OPTS[_bt_f]:
-            _v = _v[_btype == _BASE_OPTS[_bt_f]]
-        _bst = _bst[_v.index]
-        _broke = _bst.str.startswith('Broke out')
-        if _bs_f.startswith('Near pivot ('):
-            _v, _sort_pivot = _v[_bst == 'Near pivot'], True
-        elif _bs_f == 'Broke out today (base pivot)':
-            _v = _v[_bst == 'Broke out today']
-        elif _bs_f == 'Broke out in the last 5 sessions':
-            _v = _v[_broke]
-        elif _bs_f.startswith('Near pivot or'):
-            _v, _sort_pivot = _v[_broke | (_bst == 'Near pivot')], True
-        elif _bs_f == 'Pivot high (10/10) breakout today':
-            _v = _v[_tb('piv_bo')] if 'piv_bo' in _v.columns else _v.iloc[0:0]
-        elif _bs_f == '21-day high breakout today':
-            _v = _v[_tb('bo21')]
-        elif _bs_f == '52-week high breakout today':
-            _v = _v[_tb('bo52')]
-        elif _bs_f == '21-day or 52-week breakout today':
-            _v = _v[_tb('bo21') | _tb('bo52')]
-        if _tt_f and 'tt_pass' in _v.columns:
-            _v = _v[_tb('tt_pass')]
-        if _bv_f:
-            _bst2 = _v['base_state'].fillna('').astype(str)
-            _vol = pd.to_numeric(_v['vol_ratio'], errors='coerce')
-            _keep = _vol >= 1.4
-            if _bs_f in ('Broke out today (base pivot)', 'Broke out in the last 5 sessions') or _bs_f.startswith('Near pivot or'):
-                _b2 = _bst2.str.startswith('Broke out')
-                _keep = (pd.to_numeric(_v['base_bo_vol'], errors='coerce') >= 1.4) & _b2
-                if _bs_f.startswith('Near pivot or'):
-                    _keep = _keep | ~_b2               # near-pivot names have no breakout volume yet: kept
-            _v = _v[_keep]
-    if _sort_pivot:                                    # closest to the pivot (and broken out) first
-        _v = _v.assign(_pd=pd.to_numeric(_v['base_dist_pct'], errors='coerce')).sort_values('_pd', ascending=False)
+    _hv = pd.to_numeric(_v['heat_score'], errors='coerce') if 'heat_score' in _v.columns else pd.Series(0, index=_v.index)
+    if _scan == 'L_bases':
+        _rk = _v['base_state'].map({'Broke out today': 3, 'Near pivot': 2, 'In base': 1}).fillna(0)
+        _v = _v.assign(_k=_rk * 1000 + pd.to_numeric(_v['base_dist_pct'], errors='coerce').fillna(-9) * 100) \
+               .sort_values('_k', ascending=False)
+    elif _scan == 'S_bases':
+        _rk = _v['sb_state'].map({'Broke down today': 3, 'Near breakdown': 2, 'In base': 1}).fillna(0)
+        _v = _v.assign(_k=_rk * 1000 - pd.to_numeric(_v['sb_dist_pct'], errors='coerce').fillna(9) * 100) \
+               .sort_values('_k', ascending=False)
+    elif _scan in ('S_rally', 'S_cold'):
+        _v = _v.assign(_k=_hv).sort_values('_k', ascending=True, na_position='last')
     else:
-        _sk = [c for c in ('heat_score', 'held_score', 'rs_3m') if c in _v.columns]
-        _v = _v.sort_values(_sk, ascending=[False] * len(_sk), na_position='last')
+        _v = _v.assign(_k=_hv).sort_values('_k', ascending=False, na_position='last')
 
     if _v.empty:
         st.info('No stocks match the selected filters.')
@@ -1621,7 +1577,9 @@ if _scan_df is not None and len(_scan_df) > 0:
             'Above ≤ +5, Far above beyond (Above is a trend state, not a reversal warning: in the 28 Oct study the left tail '
             'did not grow with extension in stocks). Momentum = 50-day SMA slope over 5 sessions: Weak ≤ −0.5%, Falling ≤ 0, '
             'Building ≤ +0.5 (Fading if it came down from above +0.5 in the last 11 sessions), Persistent above. '
-            '5-day: dip ≤ −2%, pullback ≤ −3%, sharp ≤ −4%. Earnings in orange = within 7 days. '
+            '5-day: dip ≤ −2%, pullback ≤ −3%, sharp ≤ −4%. Setup: PB 20d / 50d = pullback to a rising SMA (long), '
+            'Rally 20d / 50d = rally to a falling SMA (short). Base / pivot on the short scans = bear base (↓) and '
+            'the breakdown level. Earnings in orange = within 7 days. '
             'Squeeze = Beardy Squeeze Pro on daily bars: Bollinger (20, 2.0) inside Keltner (SMA 20 ± k × average true range 20), '
             'High k = 1.0, Mid 1.5, Low 2.0; days = consecutive sessions in a squeeze; Fired ↑/↓ = out of the squeeze today, '
             'by momentum sign; the square is the momentum colour (aqua &gt; 0 rising, blue &gt; 0 falling, red &lt; 0 falling, yellow &lt; 0 rising). '
@@ -1629,6 +1587,7 @@ if _scan_df is not None and len(_scan_df) > 0:
             'Ext·Mom table under the chart shows the selected stock\'s own history (up to 10 years) and a pooled stock panel, '
             'like the TradingView indicator. Where to start the chart work, not a buy signal.'
             '</div>', unsafe_allow_html=True)
+    _industry_groups_panel(_sd)
 else:
     st.info('No scanner results yet. The scanner runs nightly at 10 PM UTC (Mon–Fri) via GitHub Actions.')
 

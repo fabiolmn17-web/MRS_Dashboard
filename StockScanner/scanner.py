@@ -295,6 +295,11 @@ def run_scan(
                 bse = bases.detect(df, row.get('rs_rating'))
             except Exception as e:
                 logger.debug(f'{ticker}: bases error {e}')
+            if mom.get('short_list'):              # 7 Nov 2026: bear bases (mirrored rules), short list only
+                try:
+                    bse.update(bases.detect_short(df, row.get('rs_rating')))
+                except Exception as e:
+                    logger.debug(f'{ticker}: short bases error {e}')
 
         # Determine overall pass mode
         passes_strict  = fund.get('passes_strict',  False)
@@ -369,6 +374,7 @@ def run_scan(
             'tech_fail_reason':   row['tech_fail_reason'],
             # Breakouts and bases (bases.py)
             **{k: bse.get(k) for k in bases.FIELDS},
+            **{k: bse.get(k) for k in bases.SHORT_FIELDS},
             # Momentum & trend (momentum.py)
             **{k: mom.get(k) for k in momentum.FIELDS},
             'next_earnings':      mt.get('next_earnings', ''),

@@ -81,15 +81,48 @@ def squeeze_cell(r):
 
 HEAD = [('Ticker', 'l'), ('Heat', 'c'), ('Sector', 'l'), ('Close', ''), ('% 52W Hi', ''), ('RS label (held)', 'l'),
         ('RS 3M', ''), ('RS 1M', ''), ('RS rtg', ''), ('Ext vs SMA50', ''), ('Momentum', 'c'), ('5-day', ''), ('CAN SLIM', 'c'),
-        ('EPS QoQ', ''), ('ATR', 'c'), ('Squeeze', 'c'), ('Base / pivot', 'l'), ('Breakout', 'c'), ('Earnings', ''),
+        ('EPS QoQ', ''), ('Setup', 'l'), ('Squeeze', 'c'), ('Base / pivot', 'l'), ('Breakout', 'c'), ('Earnings', ''),
         ('Industry (rank · state)', 'l')]
 
 BASE_ABBR = {'Cup w/ handle': 'Cup·H', 'Flat base': 'Flat', 'High tight flag': 'HTF', 'VCP': 'VCP',
              'Tight area': 'Tight'}
 
 
+def short_base_cell(r):
+    """7 Nov 2026: bear base (bases.detect_short): pattern under a pivot LOW; distance = close vs that low."""
+    bt = _s(r.get('sb_type'))
+    if not bt or bt == 'None':
+        return '<span style="color:#6e675f;">—</span>', -1
+    st_ = _s(r.get('sb_state'))
+    pv, dist = r.get('sb_pivot'), r.get('sb_dist_pct')
+    broke = st_.startswith('Broke down')
+    col = ORANGE if broke else COPPER if st_ == 'Near breakdown' else DIM
+    txt = _e(st_.replace('Broke down ', 'down ')) if broke else ('' if _nan(dist) else f'{float(dist) * 100:+.1f}%')
+    pv_txt = '' if _nan(pv) else f' <span class="sub">to {float(pv):,.2f}</span>'
+    w = r.get('sb_weeks')
+    wk = '' if _nan(w) else f' <span class="sub">{float(w):.0f}w</span>'
+    rank = {'Broke down today': 4}.get(st_, 3 if broke else 2 if st_ == 'Near breakdown' else 1)
+    sk = rank * 1000 - (0 if _nan(dist) else float(dist) * 100)
+    title = _e(f"Bear {bt.lower()} (mirrored rules): breakdown level {pv}")
+    return (f'<span title="{title}">{chip(BASE_ABBR.get(bt, bt) + " ↓", col, broke or st_ == "Near breakdown")}{wk} '
+            f'<span style="color:{col};">{txt}</span>{pv_txt}</span>'), sk
+
+
+def setup_cell(r):
+    """7 Nov 2026: pullback to a rising 20 / 50-day SMA (long) or rally to a falling one (short), from momentum.py."""
+    s_ = _s(r.get('pb_setup')) if r.get('_side') != 'short' else _s(r.get('rally_setup'))
+    if not s_ or s_ == 'None':
+        return '<span style="color:#6e675f;">—</span>', 0
+    is50 = '50' in s_
+    col = TEAL if r.get('_side') != 'short' else ORANGE
+    lab = ('PB ' if s_.startswith('Pullback') else 'Rally ') + ('50d' if is50 else '20d')
+    return chip(lab, col, is50), (2 if is50 else 1)
+
+
 def base_cell(r):
     """(html, sort key) for the Base / pivot column (bases.py fields; '—' for older CSVs)."""
+    if r.get('_side') == 'short':
+        return short_base_cell(r)
     bt = _s(r.get('base_type'))
     if not bt or bt == 'None':
         return '<span style="color:#6e675f;">—</span>', -1
@@ -274,7 +307,8 @@ def _row(r, today, sec_label, sec_score, leader_hold, yf_to_sector, clickable=Fa
     low_html = (' <span class="sub" title="Growth from a loss or a near-zero base a year ago (or above +300%): not '
                 'counted for CAN SLIM" style="color:#e3b48e;">low base</span>') if low else ''
     h += f'<td class="num" data-s="{_sv(eps)}" style="color:{DIM if low else _col(eps)};">{_pct(eps, 0)}{low_html}</td>'
-    h += f'<td class="c" data-s="{int(atr_c)}" style="color:{"#e8dccb" if atr_c else "#6e675f"};">{"●" if atr_c else "—"}</td>'
+    su_html, su_sort = setup_cell(r)                # 7 Nov 2026: replaces the ATR-compression column
+    h += f'<td class="l" data-s="{su_sort}">{su_html}</td>'
     h += f'<td class="c" data-s="{sq_sort}">{sq_html}</td>'
     b_html, b_sort = base_cell(r)
     h += f'<td class="l" data-s="{b_sort}">{b_html}</td>'
