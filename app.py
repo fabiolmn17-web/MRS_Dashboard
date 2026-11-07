@@ -1457,6 +1457,10 @@ if _scan_df is not None and len(_scan_df) > 0:
     _cold_idx = _heat.dropna().sort_values(ascending=True).index[:50]
 
     _SCANS = {
+        'L_all': ('All', int(_m_long.sum()), 'long',
+                  'Every stock on the momentum list (held RS +1 or higher, above the 200-day, 50 > 200). Hottest first.'),
+        'S_all': ('All', int(_m_short.sum()), 'short',
+                  'Every stock on the short list (held RS −1 or lower, below the 200-day, 50 < 200). Coldest first.'),
         'L_bases': ('Bases', int(_q_lb.sum()), 'long',
                     'Momentum list stocks in a cup with handle, flat base, VCP or tight area that is still actionable: '
                     'in the base, within 5% below the pivot, or broke out today. Closest to the pivot first.'),
@@ -1475,9 +1479,9 @@ if _scan_df is not None and len(_scan_df) > 0:
         'S_cold': ('Cold 50', min(50, int(_heat.notna().sum())), 'short',
                    'The 50 lowest heat scores across all scanned stocks (any list).'),
     }
-    _LONG_K, _SHORT_K = ['L_bases', 'L_pb', 'L_hot'], ['S_bases', 'S_rally', 'S_cold']
+    _LONG_K, _SHORT_K = ['L_all', 'L_bases', 'L_pb', 'L_hot'], ['S_all', 'S_bases', 'S_rally', 'S_cold']
     if st.session_state.get('ms_scan') not in _SCANS:
-        st.session_state['ms_scan'] = 'L_bases'
+        st.session_state['ms_scan'] = 'L_all'
     _fmt_scan = lambda k: _SCANS[k][0] if k in ('L_hot', 'S_cold') else f'{_SCANS[k][0]}  {_SCANS[k][1]}'
 
     def _pick(side):
@@ -1492,7 +1496,7 @@ if _scan_df is not None and len(_scan_df) > 0:
     _cur = st.session_state['ms_scan']
     st.session_state['ms_pick_long'] = _cur if _cur in _LONG_K else None
     st.session_state['ms_pick_short'] = _cur if _cur in _SHORT_K else None
-    _c1, _c2, _c3, _c4 = st.columns([1.35, 1.35, 1.2, 0.9])
+    _c1, _c2, _c3, _c4 = st.columns([1.6, 1.6, 1.1, 0.9])
     if hasattr(st, 'pills'):
         with _c1:
             st.pills('Long  ·  momentum list', _LONG_K, format_func=_fmt_scan, selection_mode='single',
@@ -1525,7 +1529,7 @@ if _scan_df is not None and len(_scan_df) > 0:
                    ' <span style="color:#e3b48e;">20-day pullbacks arrive with the next nightly scan (50-day only for now).</span>')
                 + '</div>', unsafe_allow_html=True)
 
-    _mask = {'L_bases': _q_lb, 'L_pb': _q_lp, 'S_bases': _q_sb, 'S_rally': _q_sr}
+    _mask = {'L_all': _m_long, 'S_all': _m_short, 'L_bases': _q_lb, 'L_pb': _q_lp, 'S_bases': _q_sb, 'S_rally': _q_sr}
     if _scan in _mask:
         _v = _sd[_mask[_scan]]
     elif _scan == 'L_hot':
@@ -1555,7 +1559,7 @@ if _scan_df is not None and len(_scan_df) > 0:
         _rk = _v['sb_state'].map({'Broke down today': 3, 'Near breakdown': 2, 'In base': 1}).fillna(0)
         _v = _v.assign(_k=_rk * 1000 - pd.to_numeric(_v['sb_dist_pct'], errors='coerce').fillna(9) * 100) \
                .sort_values('_k', ascending=False)
-    elif _scan in ('S_rally', 'S_cold'):
+    elif _scan in ('S_rally', 'S_cold', 'S_all'):
         _v = _v.assign(_k=_hv).sort_values('_k', ascending=True, na_position='last')
     else:
         _v = _v.assign(_k=_hv).sort_values('_k', ascending=False, na_position='last')
@@ -1563,13 +1567,13 @@ if _scan_df is not None and len(_scan_df) > 0:
     if _v.empty:
         st.info('No stocks match the selected filters.')
     else:
-        _shown = _v.head(300)
+        _shown = _v.head(600)                          # 7 Nov 2026: whole momentum / short list (~450)
         _scan_table_and_chart(scan_view.build_html(_shown, _sec_label, _sec_score, _leader_hold, YF_TO_SECTOR,
                                                    clickable=True),
                               list(_shown['ticker'].astype(str)), min(760, 64 + 32 * len(_shown)))
         st.markdown(
             '<div style="font-size:0.70rem;color:#9b958f;line-height:1.55;">'
-            f'{len(_v)} stocks{" (first 300 shown)" if len(_v) > 300 else ""}. Click a header to sort. '
+            f'{len(_v)} stocks{" (first 600 shown)" if len(_v) > 600 else ""}. Click a header to sort. '
             'Momentum list = held RS score +1 or higher (beats SPY on 1Y / 6M / 3M, label held 3 sessions) AND close above the '
             '200-day SMA AND 50-day above 200-day. CAN SLIM = STRICT ≥ 25% EPS and revenue growth, RELAXED ≥ 20% / 15% '
             '(fundamentals are fetched only for stocks above their 50-day SMA, within 20% of the 52-week high). '
