@@ -24,6 +24,10 @@ Used by scanner.py. Same definitions as the dashboard and the Epistruct studies:
                     50-day: its 5-bar slope > 0, momentum Building / Persistent / Fading). 50-day first if both.
   Rally (short):    5-day return >= +2% AND close within -0.5 to +1 ATR of a FALLING SMA (5-bar slope < 0). 50 first.
   Descriptive definitions (the indicator's pullback colour, mirrored for shorts), not tested signals.
+  ADR% = 100 x (mean of high / low over the last 20 sessions - 1), as TradingView's ADR%; avg_vol50 = mean volume of
+  the last 50 sessions. The dashboard scans keep only stocks with avg_vol50 >= 500K and ADR% >= 3 (7 Nov 2026).
+  sma200_slope21 = % change of the 200-day SMA over 21 sessions; dashboard filter "Steep 200-day": >= +2% (long),
+  <= -2% (short).
 """
 import logging
 import sys
@@ -48,7 +52,8 @@ PB_BINS = ['None', 'Dip', 'Pullback', 'Sharp pullback']
 FIELDS = ['held_score', 'held_label', 'held_trend', 'days_in_label', 'pending_label', 'pending_days', 'tag_1m',
           'above_sma200', 'sma50_above_sma200', 'ext_atr', 'ext_zone', 'sma50_slope5', 'mom_zone',
           'ret_5d', 'pullback', 'pct_52w', 'mom_list',
-          'ext20_atr', 'sma20_slope5', 'short_list', 'pb_setup', 'rally_setup']
+          'ext20_atr', 'sma20_slope5', 'short_list', 'pb_setup', 'rally_setup', 'adr_pct', 'avg_vol50',
+          'sma200_slope21']
 
 
 def _atr_wilder(df: pd.DataFrame, n: int = 14) -> pd.Series:
@@ -141,6 +146,13 @@ def momentum_fields(df: Optional[pd.DataFrame], spy_df: Optional[pd.DataFrame]) 
         sl20 = float((sma20.iloc[-1] / sma20.iloc[-6] - 1) * 100) if len(c) > 25 else np.nan
         e20 = (p - s20) / a if a and a > 0 else np.nan
         out.update({'ext20_atr': e20, 'sma20_slope5': sl20})
+        out['sma200_slope21'] = (float((sma200.iloc[-1] / sma200.iloc[-22] - 1) * 100)
+                                 if len(c) >= 221 and sma200.iloc[-22] > 0 else np.nan)
+        hl = (d['High'] / d['Low']).iloc[-20:]
+        out['adr_pct'] = float((hl.mean() - 1) * 100) if len(hl) == 20 else np.nan
+        if 'Volume' in df.columns:
+            vv = df['Volume'].dropna().iloc[-50:]
+            out['avg_vol50'] = float(vv.mean()) if len(vv) >= 20 else np.nan
         ok = lambda v: v is not None and not np.isnan(v)
         if ok(r5) and r5 <= -2:
             if ok(ext) and -1 <= ext <= 0.5 and ok(sl) and sl > 0:

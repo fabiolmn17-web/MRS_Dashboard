@@ -1436,6 +1436,18 @@ if _scan_df is not None and len(_scan_df) > 0:
         _m_short = _bool('short_list')
     else:                                               # scans before 7 Nov 2026: the same rule from the columns
         _m_short = (_num('held_score') <= -1.0) & ~_bool('above_sma200') & ~_bool('sma50_above_sma200')
+    # 7 Nov 2026: every scan keeps only liquid, volatile names: 50-day average volume >= 500K and ADR% >= 3
+    #    (StockScanner/momentum.py). Scans before 7 Nov 2026: volume from avg_volume_50d where known (only the
+    #    fundamentals subset; unknown passes), ADR% approximated by ATR(14) % of price.
+    if 'adr_pct' in _sd.columns:
+        _adr, _av = _num('adr_pct'), _num('avg_vol50')
+        _liq_note = ''
+    else:
+        _adr, _av = _num('atr_pct') * 100, _num('avg_volume_50d')
+        _liq_note = ' Until the next nightly scan ADR% is approximated by ATR% and volume is known for part of the list only.'
+    _liq = (_av.isna() | (_av >= 500_000)) & (_adr >= 3)
+    _n_mom_all, _n_short_all = int(_m_long.sum()), int(_m_short.sum())
+    _m_long, _m_short = _m_long & _liq, _m_short & _liq
     _BASES = ['Cup w/ handle', 'Flat base', 'VCP', 'Tight area']
     _bt, _bst = _txt('base_type'), _txt('base_state')
     _q_lb = _m_long & _bt.isin(_BASES) & _bst.isin(['In base', 'Near pivot', 'Broke out today'])
@@ -1452,7 +1464,7 @@ if _scan_df is not None and len(_scan_df) > 0:
     _sbt, _sbs = _txt('sb_type'), _txt('sb_state')
     _q_sb = _m_short & _sbt.isin(_BASES) & _sbs.isin(['In base', 'Near breakdown', 'Broke down today'])
     _q_sr = _m_short & (_rls != '')
-    _heat = _num('heat_score')
+    _heat = _num('heat_score').where(_liq)
     _hot_idx = _heat.dropna().sort_values(ascending=False).index[:50]
     _cold_idx = _heat.dropna().sort_values(ascending=True).index[:50]
 
@@ -1468,7 +1480,7 @@ if _scan_df is not None and len(_scan_df) > 0:
                  'Momentum list stocks down 2% or more over 5 sessions, closing within −1 to +0.5 ATR of a rising '
                  '20- or 50-day SMA (Setup column: PB 20d / PB 50d). Hottest first.'),
         'L_hot': ('Hot 50', min(50, int(_heat.notna().sum())), 'long',
-                  'The 50 highest heat scores across all scanned stocks (any list).'),
+                  'The 50 highest heat scores across all scanned stocks that pass the liquidity filter (any list).'),
         'S_bases': ('Bases', int(_q_sb.sum()), 'short',
                     'Short list stocks (held RS −1 or lower, below the 200-day, 50 < 200) in a bear base: the same base '
                     'rules upside down, under a pivot low. Still actionable: in the base, within 5% above the breakdown '
@@ -1477,7 +1489,7 @@ if _scan_df is not None and len(_scan_df) > 0:
                     'Short list stocks up 2% or more over 5 sessions, closing within −0.5 to +1 ATR of a falling '
                     '20- or 50-day SMA (Setup column: Rally 20d / 50d). Coldest first.'),
         'S_cold': ('Cold 50', min(50, int(_heat.notna().sum())), 'short',
-                   'The 50 lowest heat scores across all scanned stocks (any list).'),
+                   'The 50 lowest heat scores across all scanned stocks that pass the liquidity filter (any list).'),
     }
     _LONG_K, _SHORT_K = ['L_all', 'L_bases', 'L_pb', 'L_hot'], ['S_all', 'S_bases', 'S_rally', 'S_cold']
     if st.session_state.get('ms_scan') not in _SCANS:
@@ -1496,7 +1508,7 @@ if _scan_df is not None and len(_scan_df) > 0:
     _cur = st.session_state['ms_scan']
     st.session_state['ms_pick_long'] = _cur if _cur in _LONG_K else None
     st.session_state['ms_pick_short'] = _cur if _cur in _SHORT_K else None
-    _c1, _c2, _c3, _c4 = st.columns([1.6, 1.6, 1.1, 0.9])
+    _c1, _c2, _c3, _c4, _c5 = st.columns([1.6, 1.6, 1.0, 0.8, 0.8])
     if hasattr(st, 'pills'):
         with _c1:
             st.pills('Long  ·  momentum list', _LONG_K, format_func=_fmt_scan, selection_mode='single',
@@ -1518,11 +1530,21 @@ if _scan_df is not None and len(_scan_df) > 0:
                                   'compression (black / red / orange dots). Fired = out of the squeeze today after a squeeze yesterday.')
     with _c4:
         st.markdown('<div style="height:1.75rem;"></div>', unsafe_allow_html=True)
+        _has_s200 = 'sma200_slope21' in _sd.columns and _sd['sma200_slope21'].notna().any()
+        _steep = st.checkbox('Steep 200-day', value=False, key='ms_steep', disabled=not _has_s200,
+                             help='200-day SMA up at least 2% over the last 21 sessions (about 25% or more a year); on the '
+                                  'short scans: down at least 2%. '
+                                  + ('' if _has_s200 else 'Available from the next nightly scan.'))
+    with _c5:
+        st.markdown('<div style="height:1.75rem;"></div>', unsafe_allow_html=True)
         _no_earn = st.checkbox('Hide earnings ≤ 7 days', value=False, key='ms_earn')
     st.markdown(f'<div style="font-size:0.72rem;color:#a89f95;margin:-4px 0 8px 0;">'
                 f'<b style="color:{"#85cac5" if _SCANS[_scan][2] == "long" else "#f4a062"};">'
                 f'{"LONG" if _SCANS[_scan][2] == "long" else "SHORT"} · {_SCANS[_scan][0]}</b> — '
                 f'{_html_mod.escape(_SCANS[_scan][3])}'
+                f' <span style="color:#6e675f;">Liquidity: 50-day volume ≥ 500K and ADR% ≥ 3 on every scan '
+                f'(momentum list {int(_m_long.sum())} of {_n_mom_all}, short list {int(_m_short.sum())} of {_n_short_all}).'
+                f'{_liq_note}</span>'
                 + ('' if 'short_list' in _sd.columns or _SCANS[_scan][2] == 'long' or _scan == 'S_cold' else
                    ' <span style="color:#e3b48e;">Bear bases and 20-day rallies arrive with the next nightly scan.</span>')
                 + ('' if 'pb_setup' in _scan_df.columns or _scan != 'L_pb' else
@@ -1550,6 +1572,9 @@ if _scan_df is not None and len(_scan_df) > 0:
     if _no_earn and 'next_earnings' in _v.columns:
         _dd = (pd.to_datetime(_v['next_earnings'], errors='coerce') - pd.Timestamp.today().normalize()).dt.days
         _v = _v[~_dd.between(0, 7)]
+    if _steep and _has_s200:                            # 7 Nov 2026: steep 200-day (>= +2% / <= -2% over 21 sessions)
+        _s2 = pd.to_numeric(_v['sma200_slope21'], errors='coerce')
+        _v = _v[_s2 >= 2] if _SCANS[_scan][2] == 'long' else _v[_s2 <= -2]
     _hv = pd.to_numeric(_v['heat_score'], errors='coerce') if 'heat_score' in _v.columns else pd.Series(0, index=_v.index)
     if _scan == 'L_bases':
         _rk = _v['base_state'].map({'Broke out today': 3, 'Near pivot': 2, 'In base': 1}).fillna(0)
