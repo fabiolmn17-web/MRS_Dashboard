@@ -1497,7 +1497,7 @@ if _scan_df is not None and len(_scan_df) > 0:
     _q_sb = _m_short & _sbt.isin(_BASES) & _sbs.isin(['In base', 'Near breakdown', 'Broke down today'])
     _q_sr = _m_short & (_rls != '')
     # 8 Nov 2026: Deep dip = a live trigger on the 200 or 250 SMA (Deep_Dip study rules): the 20 closes before all above
-    # the SMA, then an undercut (low below, close back above) or a reclaim after 1-3 closes below, in the last 3
+    # the SMA, then an undercut (low below, close back above) or a reclaim after 1-5 closes below, in the last 3
     # sessions, with no close back below and the stop (trigger low - 1 ATR(10)) not hit. 'Watch' = 20 closes above
     # and now within 1 ATR above the SMA (no trigger yet). Deep rip = the mirror. Plus the 21-session slope of the
     # trigger SMA (select) and >= 25% above the 52-week low (long) / below the 52-week high (short).
@@ -1527,7 +1527,7 @@ if _scan_df is not None and len(_scan_df) > 0:
                   ('Watch: any scanned stock whose last 20 closes were above the 200 or 250 SMA and that now closes within '
                    '1 ATR above it: no trigger yet. Closest first.') if _dwatch else
                   ('Triggers in the last 3 sessions (Deep Dip study rules): the 20 closes before all above the 200 or 250 '
-                   'SMA, then an UNDERCUT (low below, close back above) or a RECLAIM after 1-3 closes below. Still live: '
+                   'SMA, then an UNDERCUT (low below, close back above) or a RECLAIM after 1-5 closes below (the study used 1-3; 5 gives a wider list). Still live: '
                    'no close back below since and the stop (trigger-day low − 1 ATR(10)) not hit. Any scanned stock, '
                    '≥ 25% above the 52-week low. Setup column: trigger, days ago, stop and 1R %, trigger-day RVOL, ↑21 = '
                    'back above the 21 EMA. Newest first. Evidence (stocks 2009-26): about +0.1R over a random entry in '
@@ -1544,7 +1544,7 @@ if _scan_df is not None and len(_scan_df) > 0:
         'S_dip': ('Deep rip', int(_q_sd.sum()), 'short',
                   ('Watch: last 20 closes below the 200 or 250 SMA, now within 1 ATR below it.') if _dwatch else
                   ('Mirror of Deep dip: 20 closes below the 200 or 250 SMA, then a poke above and close back below, or a '
-                   'close back below after 1-3 closes above, in the last 3 sessions; stop = trigger-day high + 1 ATR. '
+                   'close back below after 1-5 closes above, in the last 3 sessions; stop = trigger-day high + 1 ATR. '
                    '≥ 25% below the 52-week high. Caution: in the study the short mirror LOST money on stocks in every '
                    'MRS band, worst in a bear market (−0.40R with a 2R target).')),
         'S_cold': ('Cold 50', len(_cold_idx), 'short',

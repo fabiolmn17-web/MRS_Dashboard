@@ -104,10 +104,11 @@ def pullback_bin(r5: float) -> str:
 
 
 
-def deep_dip_fields(df: pd.DataFrame, side: str = 'long', n_above: int = 20, max_below: int = 3, max_days: int = 3) -> dict:
+def deep_dip_fields(df: pd.DataFrame, side: str = 'long', n_above: int = 20, max_below: int = 5, max_days: int = 3) -> dict:
     """8 Nov 2026 (Deep_Dip study, v1-v3). Long ('dd_'): the 20 closes before were all above the 200 or 250 SMA, then
       UNDERCUT  = low below the SMA, close back above (prior close above), or
-      RECLAIM   = 1-3 closes below the SMA, then a close back above.
+      RECLAIM   = 1-5 closes below the SMA, then a close back above (8 Nov 2026: 5, was 3 in the study; wider net,
+                  Fabio screens by hand).
     A trigger in the last max_days sessions stays listed while every close since is still above that SMA and the
     stop (trigger-day low - 1 ATR(10)) has not been hit. If both SMAs trigger on the same bar: '200+250'.
     entry = trigger close; risk_pct = (entry - stop) / entry; rvol = trigger-day volume / mean of the 10 before;
