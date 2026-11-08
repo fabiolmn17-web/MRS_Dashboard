@@ -85,7 +85,42 @@ HEAD = [('Ticker', 'l'), ('Heat', 'c'), ('Sector', 'l'), ('Close', ''), ('% 52W 
         ('Industry (rank · state)', 'l')]
 
 BASE_ABBR = {'Cup w/ handle': 'Cup·H', 'Flat base': 'Flat', 'High tight flag': 'HTF', 'VCP': 'VCP',
-             'Tight area': 'Tight'}
+             'Tight area': 'Tight', 'Double bottom': 'DB', 'Base-on-base': 'BoB', 'Ascending base': 'Asc',
+             'IPO base': 'IPO'}
+# bases v3 (8 Nov 2026): short labels for the IBD fault chips (full text in the tooltip)
+FAULT_ABBR = [('wedging handle', 'wedge'), ('V: straight up', 'V'), ('left side', 'long left'), ('late stage', 'late'),
+              ('light-volume', 'light vol'), ('distribution', 'distrib'), ('wide and loose', 'loose'),
+              ('deeper than the market', 'too deep')]
+
+
+def _truthy(v):
+    return str(v).strip().lower() in ('true', '1', '1.0')
+
+
+def quality_html(r):
+    """bases v3: 'Q k/7' chip (teal 5+, copper 3-4, grey 0-2) and orange fault chips; tooltips carry the detail.
+    '' for scans before 8 Nov 2026."""
+    q, qm = r.get('base_q'), r.get('base_q_max')
+    if _nan(q) or _nan(qm):
+        return ''
+    q, qm = int(float(q)), int(float(qm))
+    col = TEAL if q >= 5 else COPPER if q >= 3 else DIM
+    detail = _s(r.get('base_q_detail'))
+    out = f' <span title="{_e("IBD model-book checks (descriptive, untested): " + detail)}">{chip(f"Q {q}/{qm}", col, q >= 5)}</span>'
+    fl = [f for f in _s(r.get('base_faults')).split('; ') if f and f != 'None']
+    for f in fl[:2]:
+        ab = next((a for k, a in FAULT_ABBR if k in f), f)
+        out += f' <span title="{_e("Fault (IBD): " + f)}">{chip(ab, ORANGE, False)}</span>'
+    if len(fl) > 2:
+        out += f' <span class="sub" title="{_e("; ".join(fl))}">+{len(fl) - 2}</span>'
+    if _truthy(r.get('base_bo_ftd')):
+        out += (' <span title="Breakout within 20 sessions after a follow-through day on SPY (IBD timing)">'
+                + chip('FTD', TEAL, True) + '</span>')
+    if _truthy(r.get('db_sk3')):
+        lv = r.get('db_sk3_level')
+        out += (f' <span title="{_e("Shakeout+3: the close cleared 10% above the double-bottom shakeout low " + ("" if _nan(lv) else f"({float(lv):,.2f})") + " in the last 3 sessions")}">'
+                + chip('SK+3', TEAL, True) + '</span>')
+    return out
 
 
 def short_base_cell(r):
@@ -163,10 +198,14 @@ def base_cell(r):
     broke = st_.startswith('Broke out')
     col = TEAL if broke else COPPER if st_ == 'Near pivot' else DIM
     q = r.get('base_quality')
-    stars = '' if _nan(q) else ' <span class="sub" title="Quality: volume dry-up, tight closes, RS rating ≥ 80">' + \
-        '★' * int(float(q)) + '☆' * (3 - int(float(q))) + '</span>'
+    stars = quality_html(r)
+    if not stars:                                   # scans before bases v3 (8 Nov 2026): the old 0-3 stars
+        stars = '' if _nan(q) else ' <span class="sub" title="Quality: volume dry-up, tight closes, RS rating ≥ 80">' + \
+            '★' * int(float(q)) + '☆' * (3 - int(float(q))) + '</span>'
     if broke:
         bv = r.get('base_bo_vol')
+        if _truthy(r.get('base_bo_light')):        # v3: a light-volume breakout reads grey (IBD: don't buy it)
+            col = DIM
         vtxt = '' if _nan(bv) else (f' <span style="color:{TEAL if float(bv) >= 1.4 else DIM};">'
                                     f'{float(bv):.1f}× vol</span>')
         txt = f'{_e(st_.replace("Broke out ", "out "))}{vtxt}'
@@ -273,7 +312,9 @@ def _row(r, today, sec_label, sec_score, leader_hold, yf_to_sector, clickable=Fa
     lab = _s(r.get('held_label')).title()
     days = r.get('days_in_label')
     tag = _s(r.get('tag_1m'))
-    tag_html = chip(tag, ORANGE if tag == '1M ↓' else TEAL, True) if tag else ''
+    if tag == '1M ↓':                               # dropped 8 Nov 2026 (audit v2: Null); older scans may carry it
+        tag = ''
+    tag_html = chip(tag, TEAL, True) if tag else ''
     pend = _s(r.get('pending_label'))
     pend_html = f' <span style="color:#e3b48e;font-size:0.66rem;">→ {_e(pend.title())}</span>' if pend else ''
     rs_html = (f'<b style="color:{_score_col(hs)};">{"" if _nan(hs) else f"{float(hs):+.1f}"} {_e(lab)}</b>'
@@ -312,7 +353,8 @@ def _row(r, today, sec_label, sec_score, leader_hold, yf_to_sector, clickable=Fa
     else:
         hn_, hc_ = heat_score.band(float(hs_))
         h += (f'<td class="c" data-s="{float(hs_)}" title="Heat score {int(float(hs_))}/100 ({hn_}): RS rating, RS label '
-              f'and trend tag, industry (group state + leader), sector, 52-week high, trend. Descriptive, untested.">'
+              f'and trend tag, industry (group state + leader), sector, 52-week high, trend. Describes leadership, not a return '
+              f'forecast: 2009–26, top-quartile heat earned the same as the universe (±0.3 pp a month). Descriptive.">'
               f'<span style="display:inline-block;min-width:30px;border-radius:3px;padding:0 5px;font-family:IBM Plex Mono,'
               f'monospace;font-weight:700;color:#121212;background:{hc_};">{int(float(hs_))}</span></td>')
     h += (f'<td class="l" data-s="{_e(sect)}"><span style="color:{_score_col(ssc)};">{_e(sect)}</span>'

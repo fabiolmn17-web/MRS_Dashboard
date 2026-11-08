@@ -104,7 +104,9 @@ def pullback_bin(r5: float) -> str:
 
 
 
-def deep_dip_fields(df: pd.DataFrame, side: str = 'long', n_above: int = 20, max_below: int = 5, max_days: int = 3) -> dict:
+def deep_dip_fields(df: pd.DataFrame, side: str = 'long', n_above: int = 20, max_below: int = 5, max_days: int = 1) -> dict:
+    # max_days 3 -> 1 on 8 Nov 2026 (audit v2, studies/_framework/audit/deep_dip): entering 0/1/2/3 sessions after the
+    # trigger gave +0.09 / +0.06 / +0.00 / -0.03R over random in the same band (stocks; ETFs decay the same way).
     """8 Nov 2026 (Deep_Dip study, v1-v3). Long ('dd_'): the 20 closes before were all above the 200 or 250 SMA, then
       UNDERCUT  = low below the SMA, close back above (prior close above), or
       RECLAIM   = 1-5 closes below the SMA, then a close back above (8 Nov 2026: 5, was 3 in the study; wider net,

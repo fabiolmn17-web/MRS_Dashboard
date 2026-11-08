@@ -15,6 +15,9 @@ Desk lines built on studies/mrs_risk_control (steps 1-4) and studies/model_portf
                   Cost per month and its percentile since 2008; state sentence from step 3. Descriptive.
   Vol guide       invested share for a 10% volatility target on 21-session realised SPY vol, cap 60%. Descriptive.
 
+Labels and texts follow the MRS evidence audit v2 (8 Nov 2026, studies/_framework/audit/mrs_risk_control): REBOUND
+WINDOW and EASE OFF Tested; effective bets Tested; vol guide Provisional; today's cell and insurance cost Descriptive.
+
 All functions take plain DataFrames / Series so the nightly update (forward log) and the app share one implementation.
 """
 import html as _html
@@ -209,10 +212,19 @@ CSS = (
     '</style>')
 
 
+_EV_TIP = {'Tested': 'Formally tested (clustered bootstrap, p ≤ 0.005 or pre-registered, consistent across subperiods)',
+           'Provisional': 'Large enough to matter and consistent across checks, not yet statistically certain: act at '
+                          'reduced size and track it',
+           'Descriptive': 'Historical regularity: context, not a rule',
+           'Watch': 'Not tested: an early warning worth watching'}
+
+
 def _ev(kind):
-    c = {'Tested': COPPER, 'Descriptive': MUTED, 'Watch': '#f8d6b4'}[kind]
-    bg = 'rgba(227,180,142,0.14)' if kind == 'Tested' else 'rgba(0,0,0,0)'
-    return f'<span class="ev" style="color:{c};border-color:{c};background:{bg};">{kind.upper()}</span>'
+    c = {'Tested': COPPER, 'Provisional': COPPER, 'Descriptive': MUTED, 'Watch': '#f8d6b4'}[kind]
+    bg = {'Tested': 'rgba(227,180,142,0.14)', 'Provisional': 'rgba(227,180,142,0.06)'}.get(kind, 'rgba(0,0,0,0)')
+    bs = 'dashed' if kind in ('Provisional', 'Watch') else 'solid'
+    return (f'<span class="ev" title="{_EV_TIP[kind]}" style="color:{c};border-color:{c};background:{bg};'
+            f'border-style:{bs};">{kind.upper()}</span>')
 
 
 def _ord(n: int) -> str:
@@ -312,16 +324,17 @@ def _atr_gauge(ext_atr: float, lo=-3.0, hi=3.0) -> str:
 
 PEDAL_NAME = {'PRESS': 'REBOUND WINDOW', 'NORMAL': 'NORMAL', 'EASE OFF': 'EASE OFF'}   # 'PRESS' kept as the log key
 PEDAL_TXT = {
-    'PRESS': ('Wide upside, not more exposure.',
+    'PRESS': ('Wide both ways, not more exposure.',
               '<b>Take long A-setups at a level that holds, at your normal planned risk. No extra exposure without a setup; '
-              'every stop stands.</b><div class="sub" style="margin-top:5px;">From day 1 of a sell-off like this: SPY +5% or '
-              'more within 20 sessions in 27% of episodes (all days 12%), more than the VIX implies. Further drop of 3% in 40%, '
-              '7% in 17%. Waiting for a mechanical support signal (back above −1 ATR, a higher low, VIX falling) did not cut '
-              'the further drop and gave up about half of that upside. High-beta industries did not rebound harder.</div>',
+              'every stop stands.</b><div class="sub" style="margin-top:5px;">Wide both ways, more than the VIX implies: SPY rose '
+              '5%+ within 20 sessions on 31% of these days (17% at the same VIX level) but also dropped 7%+ on 27% (14%). '
+              'Average return about the same. Waiting for a mechanical support signal (back above −1 ATR, a higher low, VIX '
+              'falling) gave up about half of the upside (Provisional).</div>',
               'Tested'),
     'EASE OFF': ('Worst balance of upside vs downside.',
-                 'Fast drops of 7% or more in 1 of 3 cases; industries move together (5 positions ≈ 1.5 bets). '
-                 '<b>Fewer positions, partials sooner.</b> Protection has roughly paid for itself here.', 'Tested'),
+                 'Fast drops of 7% or more in 1 of 3 cases (all days 1 in 8), more than the VIX alone implies; industries '
+                 'move together (5 positions ≈ 1.5 bets). <b>Fewer positions, partials sooner.</b> Puts have roughly broken '
+                 'even here (10% OTM 1.2×, ATM 0.9× their cost), but on too few crashes to rely on.', 'Tested'),
     'NORMAL': ('No edge from the state in either direction.',
                'Normal process: <b>A-setups, normal planned risk, your rules.</b>', None),
 }
@@ -330,15 +343,18 @@ PEDAL_COL = {'PRESS': TEAL, 'NORMAL': '#cfc6bb', 'EASE OFF': ORANGE}
 
 def insurance_sentence(bandg: str, trend: str, inverted: bool) -> str:
     if bandg == 'RISK-OFF' and trend == 'down':
-        s = '<b>Protection has roughly paid for itself here</b> (0.9–1.2× its cost at expiry).'
+        s = ('<b>Puts have roughly broken even here</b> (10% OTM 1.2×, ATM 0.9× their cost at expiry), but on too few '
+             'crashes to rely on.')
     elif bandg == 'RISK-OFF':
-        s = ('<b>Protection is expensive for what it has paid.</b> In this state puts returned only 5–23% of their cost '
-             '(most episodes ended in a rebound). Avoid new protection unless a specific position needs it.')
+        s = ('<b>Protection is expensive for what it has paid.</b> In this state puts returned 5% (10% OTM) to 23% (ATM) '
+             'of their cost, vs about a third elsewhere (most episodes ended in a rebound). One crash from this state would '
+             'change that. Avoid new protection unless a specific position needs it.')
     else:
-        s = ('<b>Protection is cheap.</b> If you want insurance, this is when to buy it: 3 months out, within your ≤1% NLV '
-             'hedge budget, roll after 1–2 months.')
+        s = ('<b>Protection is cheapest here</b> (about 0.3% of SPY a month). It has not paid better here than elsewhere: '
+             'buy it as crash insurance within your ≤1% NLV budget, 3 months out, roll after 1–2 months.')
     if inverted:
-        s += ' <span style="color:#f8d6b4;">VIX curve inverted: VXX has paid only in this state (+10% a month on average).</span>'
+        s += (' <span style="color:#f8d6b4;">VIX curve inverted: VXX has paid only in this state (+10% over 21 sessions '
+              'on average, though the median month still lost 2%). Outside it, it has lost about 5% a month.</span>')
     return s
 
 
@@ -379,7 +395,7 @@ def panel_html(snap: dict) -> str:
         flag = snap['trend'] == 'down' or snap['inverted']
         nc = TEAL if snap['neff'] >= 2.3 else (ORANGE if snap['neff'] < 1.6 else INK)
         cp = corr_pctile(snap['rho'])
-        h += (f'<div class="tile"><div class="lab">Effective bets {_ev("Descriptive")}</div>'
+        h += (f'<div class="tile"><div class="lab">Effective bets {_ev("Tested")}</div>'
               f'<div style="display:flex;align-items:baseline;gap:8px;"><span class="big num" style="color:{nc};">{snap["neff"]:.1f}</span>'
               f'<span class="sub">independent bets in 5 positions</span></div>{_dots(snap["neff"])}'
               f'<div class="sub">How much industries move together (63-day): <b class="num" style="color:{INK};">{snap["rho"]:.2f}</b>, '
@@ -409,15 +425,15 @@ def panel_html(snap: dict) -> str:
     inv = snap['invested']
     if _fin(inv) and _fin(snap['rv']):
         h += (f'<details class="vg"><summary class="lab" style="display:list-item;cursor:pointer;">Book volatility guide '
-              f'· {inv * 100:.0f}% invested {_ev("Descriptive")}</summary>'
+              f'· {inv * 100:.0f}% invested {_ev("Provisional")}</summary>'
               f'<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:8px;">'
               f'<div class="trk" style="flex:0 0 260px;">'
               f'<div style="position:absolute;left:0;top:0;bottom:0;width:{inv * 100:.0f}%;background:{TEAL_M};border-radius:3px;"></div>'
               f'<div title="cap 60%" style="position:absolute;left:60%;top:-4px;bottom:-4px;width:3px;background:{COPPER};"></div></div>'
               f'<span class="sub">SPY realized volatility (21 days) <b class="num" style="color:{INK};">{snap["rv"] * 100:.1f}%</b>. '
               f'A 10% volatility target would hold <b class="num" style="color:{INK};">{inv * 100:.0f}% invested</b> (cap 60%, copper line). '
-              f'Reviewed weekly. In the 2008–2026 replay, weekly volatility scaling had a 10–13 pp smaller max drawdown at a '
-              f'similar or better Sharpe than holding the same average exposure.</span></div></details>')
+              f'Reviewed weekly. In the 2008–2026 replay, weekly volatility scaling cut the max drawdown by about 12 pp '
+              f'(−19.5% vs −31.2%) at a similar or better Sharpe than holding the same average exposure.</span></div></details>')
     h += '</div>'
     return h.replace('\n', ' ')
 

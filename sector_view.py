@@ -138,9 +138,8 @@ def _txt(v):
 
 def chip_1m(tag: str) -> str:
     """RS 1M early-warning chip (shown, not scored)."""
-    if tag == '1M ↓':
-        return ('<span class="chip" style="color:#f4a062;background:rgba(244,160,98,0.18);border-color:#f4a062;"'
-                ' title="Structural leader whose RS 1M is negative: the last month is lagging SPY">1M ↓</span>')
+    if tag == '1M ↓':                       # dropped 8 Nov 2026 (audit v2: Null); older CSVs may still carry it
+        return ''
     if tag == '1M ↑':
         return ('<span class="chip" style="color:#85cac5;background:rgba(133,202,197,0.18);border-color:#85cac5;"'
                 ' title="Outperforming name whose RS 1M is positive: the last month is leading SPY">1M ↑</span>')
@@ -264,7 +263,8 @@ def build_drilldown_html(sec_df: pd.DataFrame, ind_df, hold_df, sort_col: str, s
             'Score = sign-based composite of RS 1Y / 6M / 3M (range -1.5 to +1.5); RS 1M (21 sessions, same formula) is shown but not scored. '
             'Label hold: the label (and trend) change only after the new reading has held 3 sessions in a row; '
             'Nd = sessions in the current label, "→ X k/3" = a change in progress. '
-            '1M ↓ = structural leader with negative RS 1M; 1M ↑ = outperforming name with positive RS 1M (early warning, not scored). '
+            '1M ↑ = outperforming name with positive RS 1M (watch only, not scored; the 1M ↓ warning was dropped on 8 Nov 2026: '
+            'leaders with a negative RS 1M did not do worse). '
             'Sector rows: live, cached hourly. ')
     if have_ind:
         note += (f'Industry rows (industry ETFs, same formula) and top 10 holdings: nightly'

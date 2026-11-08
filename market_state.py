@@ -3,11 +3,13 @@ market_state.py — "Market state" banner, momentum light and "Leaders to buy" s
 =======================================================================================
 Turns the 25 Oct 2026 studies into desk lines. Every line carries an evidence tag:
 
-  Tested       formal test in the Epistruct battery (non-overlapping samples, bootstrap;
-               Report v7.0 for the risk dial, studies/momentum_rs_persistence for momentum)
-  Descriptive  a historical regularity that did NOT pass multiple-testing correction
-               (studies/industry_by_mrs_band) — context, not a rule
-  Watch        not tested; shown because it is cheap to watch (RS 1M early warning)
+  Tested       formal test, framework v2 (clustered bootstrap, p <= 0.005 or pre-registered, consistent across
+               subperiods)
+  Provisional  large enough to matter and consistent across checks, not yet statistically certain: act at
+               reduced size and track it (framework v2, 8 Nov 2026)
+  Descriptive  a historical regularity, context, not a rule
+  Watch        not tested; cheap to watch
+Labels and numbers follow the MRS evidence audit v2 (studies/_framework/audit/*, 8 Nov 2026).
 
 Nothing here is a buy signal on its own. The shortlist says where to look first for longs.
 """
@@ -22,7 +24,10 @@ COPPER, COPPER_L, INK, MUTED, DIM = '#e3b48e', '#f8d6b4', '#f3ece2', '#a89f95', 
 
 EVIDENCE = {
     'Tested':      (COPPER, 'rgba(227,180,142,0.14)', 'solid',
-                    'Formally tested (non-overlapping samples, bootstrap)'),
+                    'Formally tested (clustered bootstrap, p ≤ 0.005 or pre-registered, consistent across subperiods)'),
+    'Provisional': (COPPER, 'rgba(227,180,142,0.06)', 'dashed',
+                    'Large enough to matter and consistent across checks, not yet statistically certain: act at '
+                    'reduced size and track it'),
     'Descriptive': (MUTED, 'rgba(0,0,0,0)', 'solid',
                     'Historical regularity, did not pass multiple-testing correction: context, not a rule'),
     'Watch':       (COPPER_L, 'rgba(0,0,0,0)', 'dashed',
@@ -33,12 +38,20 @@ BAND_ACTION = {
     'RISK-ON':       '<b>Small swings both ways.</b> Normal size. Big runs are rare: take profits at your targets.',
     'MILD RISK-ON':  '<b>Fairly calm.</b> Normal size.',
     'NEUTRAL':       '<b>Average swings.</b> Normal size.',
-    'MILD RISK-OFF': '<b>Swings widening both ways.</b> Your stop stays where the setup is wrong; if it is hit, you are out.',
+    'MILD RISK-OFF': ('<b>Swings about as wide as NEUTRAL;</b> the widening comes in RISK-OFF. Your stop stays where '
+                      'the setup is wrong.'),
     'RISK-OFF':      ('<b>Widest swings, up and down.</b> No extra room for the stop: it sits where the setup is wrong, '
                       'and if it is hit you are out. Time the entry well and the upside is large: let winners run. '
                       '<b>Not a sell signal.</b>'),
 }
-REGIME_SUB = 'The MRS tells you how wide the next weeks can be, not which way.'
+REGIME_SUB = ('The MRS tells you how wide the next weeks can be, not which way: RISK-OFF has not had a worse '
+              'average return than RISK-ON.')
+
+
+def band_ev(band: str) -> str:
+    """Evidence tag of the band-width line (audit v2, 8 Nov 2026): RISK-OFF vs RISK-ON width is Tested; the middle
+    bands (MILD RISK-OFF = NEUTRAL) are Descriptive."""
+    return 'Tested' if band in ('RISK-OFF', 'RISK-ON') else 'Descriptive'
 
 
 def sq_plain(desc: str) -> str:
@@ -129,11 +142,19 @@ def light_html(light: dict) -> str:
 def light_detail(light: dict) -> str:
     r12 = light.get('spy_12m')
     r12_txt = '' if _nan(r12) else f'SPY 12-month {_pct(r12)}. '
+    # audit v2 (8 Nov 2026, studies/_framework/audit/momentum_rs_persistence + heat_score_backtest): leaders matched
+    # SPY; in CAUTION the leader-minus-laggard gap shrinks because laggards rebound. "Leaders reverse hard": not found.
     if light['on']:
-        return (f'{r12_txt}{light["why"]}: relative-strength leaders have tended to keep leading. '
-                'Normal size on leaders.')
-    return (f'{r12_txt}{light["why"]}: momentum-crash state, leaders can reverse hard. '
-            'Smaller size and faster exits on leaders (not a ban).')
+        return (f'{r12_txt}{light["why"]}: normal momentum backdrop. Leaders have matched SPY (−0.1 pp a month) and '
+                'beaten laggards by about +0.4 pp (not significant). Normal size.')
+    return (f'{r12_txt}{light["why"]}: momentum-crash state. Leaders lose their edge over laggards because laggards '
+            'rebound (+0.6 pp vs SPY a month); leaders have not lagged SPY. Don\'t short laggards; size leaders by the '
+            'swing-size line.')
+
+
+def light_ev(light: dict) -> str:
+    """CAUTION is Provisional (risk rule); ON is Descriptive (audit v2, 8 Nov 2026)."""
+    return 'Descriptive' if light['on'] else 'Provisional'
 
 
 def swing_line(band: str, bp: pd.DataFrame, h: int = 20) -> str:
@@ -150,31 +171,38 @@ def swing_line(band: str, bp: pd.DataFrame, h: int = 20) -> str:
 
 
 def rotation_line(band: str) -> str:
+    # audit v2 (8 Nov 2026, studies/_framework/audit/industry_by_mrs_band): RISK-OFF / RISK-ON metals Provisional;
+    # "stronger in the deep state" not supported; sector leadership by band shrinks to 0 (informative null).
     if band == 'RISK-ON':
-        return (f'Commodities &amp; metals ({COMMODITY}) have lagged SPY in RISK-ON: beat SPY in 38% of 20-session '
-                'windows vs 46% otherwise. A long there needs its own reason.')
+        return (f'Commodities &amp; metals ({COMMODITY}) lagged SPY in RISK-ON: −1.3 pp at 20 sessions, −3.5 pp at 60. '
+                'A long there needs its own reason.')
     if band == 'RISK-OFF':
-        return ('Defensives have given no edge in RISK-OFF (about +0.1 pp vs SPY at 20 sessions). '
-                f'Commodities &amp; metals ({COMMODITY}) tended to rebound harder (+0.7 pp, beat SPY 51% vs 46%).')
+        return ('Defensives have given no edge in RISK-OFF (−0.2 pp vs SPY at 20 sessions). '
+                f'Commodities &amp; metals ({COMMODITY}) have beaten SPY: +0.6 pp at 20 sessions, +2 to +3 pp at 60–90 '
+                '(beat SPY 54% vs 44%). Wide tails both ways; deep RISK-OFF no different.')
     return ('Middle bands flip almost daily (median episode 1 session): do not rotate on a band change. '
-            'Sector leadership by band is not reliable in any band.')
+            'Sector leadership by band shows no reliable pattern.')
+
+
+def rotation_ev(band: str) -> str:
+    return 'Provisional' if band in ('RISK-OFF', 'RISK-ON') else 'Descriptive'
 
 
 def banner_html(light: dict, band: str, band_col: str, bp: pd.DataFrame, short: pd.DataFrame) -> str:
     h = CSS + '<div class="ms"><div class="k">Market state · what to do with it</div>'
     h += (f'<div class="ln"><div class="h">Momentum</div><div class="t">{light_html(light)} '
-          f'<span class="sub">&nbsp;{_e(light_detail(light))}</span></div>{ev("Tested")}</div>')
+          f'<span class="sub">&nbsp;{_e(light_detail(light))}</span></div>{ev(light_ev(light))}</div>')
     h += (f'<div class="ln"><div class="h">Swing size</div><div class="t"><b style="color:{band_col};">{_e(band)}</b> · '
-          f'{swing_line(band, bp)}</div>{ev("Tested")}</div>')
+          f'{swing_line(band, bp)}</div>{ev(band_ev(band))}</div>')
     h += (f'<div class="ln"><div class="h">Rotation</div><div class="t">{rotation_line(band)}</div>'
-          f'{ev("Descriptive")}</div>')
+          f'{ev(rotation_ev(band))}</div>')
     if short is not None and len(short):
         names = ', '.join(f'<b>{_e(r["Industry"])}</b> <span class="sub">({_e(r["ETF"])})</span>'
                           for _, r in short.head(4).iterrows())
         more = f' <span class="sub">+{len(short) - 4} more</span>' if len(short) > 4 else ''
         h += (f'<div class="ln"><div class="h">Leaders</div><div class="t">{len(short)} industr'
               f'{"y" if len(short) == 1 else "ies"} on the buy-leaders list: {names}{more}. '
-              f'<span class="sub">See "Leaders to buy" in the sector section.</span></div>{ev("Tested")}</div>')
+              f'<span class="sub">See "Leaders to buy" in the sector section.</span></div>{ev("Descriptive")}</div>')
     else:
         h += ('<div class="ln"><div class="h">Leaders</div><div class="t"><span class="sub">No industry passes the '
               'leaders filter today.</span></div></div>')
@@ -219,14 +247,14 @@ def _how(summary: str, body: str) -> str:
 def leaders_html(short: pd.DataFrame, light: dict, hold_df: pd.DataFrame = None, as_of: str = None,
                  dropped: pd.DataFrame = None) -> str:
     h = CSS + '<div class="ld"><div class="hdr"><span class="ttl">Leaders to buy — industries first</span>'
-    h += light_html(light) + ev('Tested') + '</div>'
+    h += light_html(light) + ev(light_ev(light)) + '</div>'
     h += (f'<div class="note" style="font-size:0.80rem;color:#e8dccb;margin:-2px 0 4px 0;">{_e(light_detail(light))}</div>'
           '<div class="note" style="font-size:0.80rem;color:#e8dccb;margin:0 0 8px 0;">Where to look first for longs, '
-          'not a basket to hold. Industry leaders keep a small edge vs SPY, but holding them as a group did not beat '
-          'SPY in our 2008–2026 replay.</div>')
+          'not an edge: structural leaders have matched SPY (−0.1 pp a month) and beaten laggards by +0.4 pp a month '
+          '(not significant). Holding them as a group did not beat SPY in the 2008–2026 replay.</div>')
     if short is None or len(short) == 0:
         h += ('<div class="note" style="font-size:0.78rem;">No industry ETF passes the filter today '
-              '(structural leader with RS 1M not negative, or outperforming and improving).</div></div>')
+              '(structural leader, or outperforming with 3M stronger than 6M).</div></div>')
         return h.replace('\n', ' ')
     h += '<table><thead><tr>'
     for lbl, cls in [('Industry', 'l'), ('ETF', 'l'), ('Sector', 'l'), ('Label', 'l'), ('Days in label', ''),
@@ -272,12 +300,14 @@ def leaders_html(short: pd.DataFrame, light: dict, hold_df: pd.DataFrame = None,
     h += '</tbody></table>'
     h += _how('How this list is built and what is tested',
               'Industry ETFs, held labels (a label changes only after 3 sessions in a row at the new value). On the list: '
-              'structural leader (+1.5) whose RS 1M is not negative, or outperforming (+0.5) with 3M stronger than 6M (1Y+, 6M−, 3M+). '
-              'Sorted by RS 3M. Sector rows are context only (sectors showed no momentum since 2008). '
-              f'{ev("Tested")} industry leaders kept a small edge vs SPY (+0.4 / +0.8 / +1.5 pp at 1 / 3 / 6 months); '
-              'within outperforming, 3M stronger than 6M beat SPY 55% vs 48% of months for 3M weaker than 6M. The edge came from Momentum ON '
-              'periods (+0.8 pp vs −1.9 pp at 1 month when SPY was below its 12-month level, mostly 2008–09). '
-              f'{ev("Watch")} the RS 1M filter itself is not tested. {ev("Descriptive")} Strong holdings = top-10 '
+              'structural leader (+1.5), or outperforming (+0.5) with 3M stronger than 6M (1Y+, 6M−, 3M+). '
+              'Sorted by RS 3M. Sector rows are context only (sectors showed no reliable momentum since 2008). '
+              f'{ev("Descriptive")} Leaders vs SPY: −0.1 pp a month (beat SPY in 50% of months). Leaders minus laggards: '
+              '+0.4 / +0.8 / +1.5 pp at 1 / 3 / 6 months, not significant in the v2 audit (8 Nov 2026). Rule B, 3M stronger '
+              'than 6M: +0.5 pp a month vs 3M weaker, not significant and sensitive to the window. '
+              f'{ev("Provisional")} In Momentum CAUTION the leader-minus-laggard gap shrinks because laggards rebound. '
+              'The RS 1M filter was dropped on 8 Nov 2026: leaders with a negative RS 1M did 0.6 pp a month better, not '
+              f'worse. {ev("Descriptive")} Strong holdings = top-10 '
               'holdings with RS score ≥ +1 within 10% of the 52-week closing high, by RS 3M: where to start the chart '
               'work, not a buy list.' + (f' Industry data as of {_e(as_of)}.' if as_of else ''))
     h += '</div>'
@@ -300,9 +330,25 @@ def chip(txt: str, col: str, filled: bool = False, title: str = '') -> str:
 
 
 # ── decision strip: score, regime, what changed, what to do ───────────────────────
+def _deep_badge(deep: str, cut: float) -> str:
+    """DEEP badge next to the band (8 Nov 2026). An overlay on the five bands, not a sixth band: the Tested line
+    is estimated on the five bands, the deep state is exploratory (see the Deep state row)."""
+    if deep not in ('DEEP RISK-OFF', 'DEEP RISK-ON'):
+        return ''
+    col = '#f4a062' if deep == 'DEEP RISK-OFF' else '#85cac5'
+    side = '≤ P10' if deep == 'DEEP RISK-OFF' else '≥ P90'
+    cut_txt = '' if _nan(cut) else f' = {cut:+.2f}'
+    tip = (f'{deep}: score {side} of its own history{cut_txt}. An overlay on the band, not a separate band. '
+           + ('Provisional rule for cutting risk: wider both ways, not a bottom call (see the Deep state row).'
+              if deep == 'DEEP RISK-OFF' else 'Descriptive (see the Deep state row).'))
+    return ('<span style="display:inline-block;vertical-align:middle;margin-left:8px;">'
+            + chip('DEEP', col, True, tip).replace('font-size:0.68rem', 'font-size:0.72rem') + '</span>')
+
+
 def decision_strip_html(mrs: float, band: str, band_col: str, sessions: int, pct_txt: str, sq_lbl: str, sq_col: str,
                         sq_desc: str, light: dict, bp: pd.DataFrame, short: pd.DataFrame, levels: dict,
-                        changes: list, deep_line: str = '', fresh: str = '', show_stats: bool = True) -> str:
+                        changes: list, deep_line: str = '', fresh: str = '', show_stats: bool = True,
+                        deep: str = '', deep_cut: float = float('nan'), show_sq: bool = True) -> str:
     """show_stats=False when the Risk today panel is on: it shows the same odds for today's exact state."""
     h = CSS + (
         '<style>'
@@ -319,17 +365,18 @@ def decision_strip_html(mrs: float, band: str, band_col: str, sessions: int, pct
         '@media (max-width:760px){.ds .top{grid-template-columns:1fr 1fr;}.ds .lv{text-align:left;}}'
         '</style>')
     h += '<div class="ds"><div class="k" style="font-size:0.68rem;letter-spacing:0.12em;text-transform:uppercase;color:#e3b48e;font-weight:700;margin-bottom:8px;">Today · what to do with it</div>'
-    h += '<div class="top">'
+    h += '<div class="top">' if show_sq else '<div class="top" style="grid-template-columns:auto 1fr auto;">'
     h += f'<div><div class="lab">MRS score</div><div class="big" style="color:{band_col};">{mrs:+.2f}</div><div class="sm">{_e(pct_txt)}</div></div>'
     _side = 'below' if mrs < 0 else 'above'
     _tip = (f'The score has been {_side} zero for {sessions} session(s) in a row. This is not the time in the band: the band '
             f'changes on the session the score crosses a threshold. See \'Band confirming\' for the 3-session hold.')
     h += (f'<div><div class="lab" title="{_e(_tip)}">Regime · {_side} zero {sessions} session{"s" if sessions != 1 else ""}'
-          f' <span style="cursor:help;">ⓘ</span></div><div class="reg" style="color:{band_col};">{_e(band)}</div>'
+          f' <span style="cursor:help;">ⓘ</span></div><div class="reg" style="color:{band_col};">{_e(band)}{_deep_badge(deep, deep_cut)}</div>'
           f'<div class="sm" style="color:#e8dccb;margin-top:4px;max-width:250px;">{REGIME_SUB}</div></div>')
-    h += (f'<div><div class="lab">Signal quality</div>{chip(sq_lbl, sq_col, True, sq_desc)}'
-          f'<div class="sm" style="margin-top:5px;" title="{_e(sq_desc)}">{_e(sq_plain(sq_desc))} '
-          f'<span style="color:#6e675f;cursor:help;">ⓘ</span></div></div>')
+    if show_sq:   # 8 Nov 2026: off on the dashboard (untested; shown in the Why tab instead)
+        h += (f'<div><div class="lab">Signal quality</div>{chip(sq_lbl, sq_col, True, sq_desc)}'
+              f'<div class="sm" style="margin-top:5px;" title="{_e(sq_desc)}">{_e(sq_plain(sq_desc))} '
+              f'<span style="color:#6e675f;cursor:help;">ⓘ</span></div></div>')
     h += ('<div class="lv">' + '<br>'.join(f'<span style="color:#a89f95;">{_e(k)}</span> {_e(v)}' for k, v in levels.items()) + '</div>')
     h += '</div>'
     if changes:
@@ -348,10 +395,11 @@ def decision_strip_html(mrs: float, band: str, band_col: str, sessions: int, pct
         except Exception:
             stats = ''
     h += (f'<div class="ln"><div class="h">What to do</div><div class="t" style="font-size:0.90rem;">'
-          f'{BAND_ACTION.get(band, "")}{stats}</div>{ev("Tested")}</div>')
-    h += f'<div class="ln"><div class="h">Rotation</div><div class="t">{rotation_line(band)}</div>{ev("Descriptive")}</div>'
+          f'{BAND_ACTION.get(band, "")}{stats}</div>{ev(band_ev(band))}</div>')
+    h += f'<div class="ln"><div class="h">Rotation</div><div class="t">{rotation_line(band)}</div>{ev(rotation_ev(band))}</div>'
     if deep_line:
-        h += f'<div class="ln"><div class="h">Deep state</div><div class="t">{deep_line}</div>{ev("Descriptive")}</div>'
+        _dk = 'Provisional' if deep == 'DEEP RISK-OFF' else 'Descriptive'
+        h += f'<div class="ln"><div class="h">Deep state</div><div class="t">{deep_line}</div>{ev(_dk)}</div>'
     h += '</div>'
     if fresh:
         h += f'<div class="fresh">{fresh}</div>'
@@ -435,7 +483,7 @@ def _rs_bar(v, lim: float = 0.20) -> str:
 
 def avoid_html(lag: pd.DataFrame, hold_df: pd.DataFrame = None) -> str:
     h = CSS + ('<div class="ld" style="margin-top:14px;"><div class="hdr"><span class="ttl" style="color:#f4a062;">'
-               'Avoid: laggards — don\'t buy them for a catch-up</span>' + ev('Tested') + '</div>')
+               'Avoid: laggards — don\'t buy them for a catch-up outside RISK-OFF</span>' + ev('Tested') + '</div>')
     if lag is None or len(lag) == 0:
         h += '<div class="note" style="font-size:0.78rem;">No industry passes the laggard filter today.</div></div>'
         return h.replace('\n', ' ')
@@ -460,13 +508,17 @@ def avoid_html(lag: pd.DataFrame, hold_df: pd.DataFrame = None) -> str:
         h += f'<td class="l">{_weak_holdings(hold_df, r["ETF"])}</td>'
         h += '</tr>'
     h += '</tbody></table>'
-    h += ('<div class="note" style="font-size:0.80rem;color:#f3ece2;margin-top:6px;"><b>Use: don\'t buy these for a '
-          'rebound. Short only with your own setup at a level, with a tight stop.</b></div>')
+    h += ('<div class="note" style="font-size:0.80rem;color:#f3ece2;margin-top:6px;"><b>Use: outside RISK-OFF these '
+          'industries lagged SPY by about 1 pp a month: don\'t buy them for a catch-up. In RISK-OFF they rebounded with the '
+          'market (+0.7 pp vs SPY a month) and outright shorts lost 2.7% a month, with a ≥5% squeeze in 56% of months: '
+          'no shorts from this list in RISK-OFF; elsewhere only with your own setup and a tight stop.</b></div>')
     h += _how('How this list is built and what is tested',
               'Industry ETFs, held labels. On the list: structural laggard (−1.5) whose RS 1M is not positive, or '
               'underperforming (−0.5) with 3M weaker than 6M (1Y−, 6M+, 3M−). Sorted weakest RS 3M first. Weakest holdings = top-10 holdings with RS '
-              f'score ≤ −1, by RS 3M. {ev("Tested")} Laggards keep lagging SPY slightly, but shorting them has had no '
-              'edge: no better than shorting any industry. Outright shorts lost money on average, most in RISK-OFF '
-              '(−2.3% a month; a ≥5% squeeze in 55% of months).')
+              f'score ≤ −1, by RS 3M. {ev("Tested")} In RISK-OFF the list beat SPY by +0.7 pp a month vs −1.0 pp in other '
+              'bands (difference +1.7 pp, 95% CI +0.6 to +2.8). Outright shorts in RISK-OFF lost 2.7% a month (CI −4.5 to '
+              '−1.0), with a ≥5% squeeze in 56% of months (every industry: 52%). Not beta-adjusted. '
+              f'{ev("Provisional")} Across all bands laggards lag SPY slightly (0.3 pp a month, 1.0 pp over 3 months; CIs '
+              'include 0). Shorting them vs shorting any industry: no edge shown (audit v2, 8 Nov 2026).')
     h += '</div>'
     return h.replace('\n', ' ')

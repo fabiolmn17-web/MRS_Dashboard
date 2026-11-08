@@ -709,6 +709,22 @@ if _pend:
     _changes.append(f'<span title="{_esc(_all)}">Labels confirming (3 sessions needed): {_shown}'
                     + (f' <span style="color:#a89f95;">+{_more} more ⓘ</span>' if _more > 0 else '') + '</span>')
 
+# bases v3 (8 Nov 2026): IBD market state from the nightly scan (follow-through day on SPY and QQQ), one short item
+try:
+    if _scan_df is not None and len(_scan_df) and 'mkt_state' in _scan_df.columns:
+        _mst = str(_scan_df['mkt_state'].iloc[0])
+        _qst = str(_scan_df['qqq_state'].iloc[0]) if 'qqq_state' in _scan_df.columns else ''
+        if _mst and _mst not in ('nan', 'None'):
+            _mcol = ('#85cac5' if _mst.startswith(('Confirmed', 'Uptrend')) else '#f4a062' if _mst == 'Correction'
+                     else '#e3b48e')
+            _qtxt = '' if _qst in ('', 'nan', 'None') else f' · QQQ {_esc(_qst)}'
+            _changes.append(f'<span title="IBD-style market state from the nightly scan. Correction = SPY 8%+ below its '
+                            f'52-week high; follow-through day (FTD) = day 4+ of a rally attempt, up 1.25%+ on higher '
+                            f'volume (IBD convention, assumed); fails if the rally low is undercut. Descriptive, untested.">'
+                            f'Market (IBD): <b style="color:{_mcol};">SPY {_esc(_mst)}</b>{_qtxt}</span>')
+except Exception:
+    pass
+
 # band change confirming (display only, 5 Nov 2026)
 try:
     _bh = market_state.band_hold([pipeline.regime_label(float(v)) for v in
@@ -745,12 +761,14 @@ if _ind_df is not None and 'last_bar' in _ind_df.columns:
 
 _deep_line = ''
 if _deep == 'DEEP RISK-OFF':
-    _deep_line = (f'DEEP RISK-OFF (score ≤ P10 = {ctx["p10"]:+.2f}). Historically not a bottom signal: over the next '
-                  '10–20 sessions downside ran fatter than usual (10-session drop ≥3% in 29% of episodes vs 11%); the wide '
-                  'upside tended to come later. Exploratory, v3.0 scoring, did not survive multiple-testing correction.')
+    # audit v2, 8 Nov 2026 (studies/_framework/audit/mrs_risk_control): rebuilt on v4.0 with a past-only percentile;
+    # "29% vs 11%" did not reproduce and "upside came later" is Null for trading. Provisional rule for cutting risk.
+    _deep_line = (f'DEEP RISK-OFF (score ≤ P10 = {ctx["p10"]:+.2f}). Wider both ways, not a bottom call: a 10-session '
+                  'drop of 3% or more came on 31% of these days (all days 19%), yet the average 20-session return was '
+                  'higher. Cut risk, don\'t sell on it. v4.0 scoring.')
 elif _deep == 'DEEP RISK-ON':
     _deep_line = (f'DEEP RISK-ON (score ≥ P90 = {ctx["p90"]:+.2f}). Historically a calm path with shallow drawdowns, '
-                  'but no reliable edge in returns. Exploratory, v3.0 scoring.')
+                  'but no reliable edge in returns (inconclusive in the v2 audit).')
 
 def _gl_header() -> dict:
     """Shadow zero gamma (Gamma Live 40d, SPX points) for the header, only when it is for the session shown."""
@@ -769,7 +787,9 @@ st.markdown(market_state.decision_strip_html(
     {'VIX': _f('vix', '{:.2f}'), 'SPX': _f('spx', '{:,.0f}'), 'Zero γ': _f('zero_gamma', '{:,.0f}'),
      **_gl_header()},
     _changes, _deep_line, 'Data as of: ' + ' · '.join(_fresh),
-    show_stats=not st.session_state.get('show_risk_panel', True)), unsafe_allow_html=True)
+    show_stats=not st.session_state.get('show_risk_panel', True),
+    show_sq=False,
+    deep=_deep, deep_cut=(ctx['p10'] if _deep == 'DEEP RISK-OFF' else ctx['p90'])), unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # WHERE TO LOOK: leaders to buy (industries first), rotation, scanner
@@ -1168,7 +1188,7 @@ def _lookup_live(ticker):
     row.update(PatternDetector().compute(h))
     try:                                         # 21-day / 52-week breakouts and the current base (no RS rating here)
         from StockScanner import bases as _bases
-        row.update(_bases.detect(h))
+        row.update(_bases.detect(h, None, spy))              # v3: SPY context (follow-through computed from SPY)
     except Exception:
         pass
     c = h['Close']
@@ -1245,9 +1265,18 @@ def _scan_counts_html(sd):
         ('Lists', [('Momentum', mom, '#85cac5'), ('CAN SLIM strict', pm == 'STRICT', '#85cac5'),
                    ('CAN SLIM relaxed', pm.isin(['STRICT', 'RELAXED']), '#e3b48e'),
                    ('Momentum + CAN SLIM', mom & pm.notna(), '#85cac5')]),
-        ('Bases', [('Cup w/ handle', bt == 'Cup w/ handle', '#85cac5'), ('VCP', bt == 'VCP', '#85cac5'),
+        ('Bases', [('Cup w/ handle', bt == 'Cup w/ handle', '#85cac5'), ('Double bottom', bt == 'Double bottom', '#85cac5'),
+                   ('VCP', bt == 'VCP', '#85cac5'), ('Base-on-base', bt == 'Base-on-base', '#85cac5'),
                    ('Flat base', bt == 'Flat base', '#e8dccb'), ('Tight area', bt == 'Tight area', '#e8dccb'),
+                   ('Ascending', bt == 'Ascending base', '#e8dccb'), ('IPO base', bt == 'IPO base', '#e8dccb'),
                    ('High tight flag', bt == 'High tight flag', '#e3b48e'), ('Trend template ✓', tb('tt_pass'), '#9b958f')]),
+        # bases v3 (8 Nov 2026): IBD model-book quality (descriptive, untested)
+        ('Base quality (IBD)', [('Q 5+ of 7', pd.to_numeric(sd['base_q'], errors='coerce') >= 5
+                                 if 'base_q' in sd.columns else pd.Series(False, index=sd.index), '#85cac5'),
+                                ('No faults', (bt != '') & sd['base_faults'].fillna('').astype(str).isin(['', 'None', 'nan'])
+                                 if 'base_faults' in sd.columns else pd.Series(False, index=sd.index), '#85cac5'),
+                                ('Formed in a correction', tb('base_in_corr'), '#e3b48e'),
+                                ('Breakout ≤ 20d after FTD', tb('base_bo_ftd'), '#85cac5')]),
         ('Pivot', [('Near pivot', bs == 'Near pivot', '#e3b48e'), ('Broke out today', bs == 'Broke out today', '#85cac5'),
                    ('Broke out ≤ 5 sessions', bs.str.startswith('Broke out'), '#85cac5')]),
         ('Heat score', [('Hot 80+', pd.to_numeric(sd['heat_score'], errors='coerce') >= 80
@@ -1458,7 +1487,7 @@ if _scan_df is not None and len(_scan_df) > 0:
     # 8 Nov 2026: Deep dip / Deep rip = TRIGGERS from the nightly scan (momentum.deep_dip_fields), not proximity
     _has_dip = 'dd_trig' in _sd.columns
     _DIP_SLOPE = {'Any slope': None, 'Rising (> 0)': 0.0, '≥ 2% a month': 2.0, '≥ 4% a month': 4.0, '≥ 6% a month': 6.0}
-    _DIP_SHOW = ['Triggers (last 3 sessions)', 'Watch: within 1 ATR of the line']
+    _DIP_SHOW = ['Triggers (today or yesterday)', 'Watch: within 1 ATR of the line']   # 8 Nov 2026: was last 3 (audit v2)
 
     def _fmask(side):
         m = pd.Series(True, index=_sd.index)
@@ -1480,9 +1509,18 @@ if _scan_df is not None and len(_scan_df) > 0:
 
     _fl, _fs = _fmask('long'), _fmask('short')
     _m_long, _m_short = _m_long & _fl, _m_short & _fs
-    _BASES = ['Cup w/ handle', 'Flat base', 'VCP', 'Tight area']
+    _BASES = ['Cup w/ handle', 'Flat base', 'VCP', 'Tight area', 'Double bottom', 'Base-on-base', 'Ascending base',
+              'IPO base']                                  # v3 (8 Nov 2026): IBD patterns added
     _bt, _bst = _txt('base_type'), _txt('base_state')
-    _q_lb = _m_long & _bt.isin(_BASES) & _bst.isin(['In base', 'Near pivot', 'Broke out today'])
+    # bases v3 (8 Nov 2026): pattern / fault / correction filters of the Bases scans (widgets below; read here so the
+    # counts on the scan buttons follow them, like the squeeze and earnings filters)
+    _bpat = st.session_state.get('ms_bpat', 'All patterns')
+    _bpat_m = pd.Series(True, index=_sd.index) if _bpat == 'All patterns' else _bt.eq(_bpat)
+    _bnf = (~(_txt('base_faults').str.len() > 0) | _txt('base_faults').isin(['None', 'nan'])) \
+        if st.session_state.get('ms_bnofault') and 'base_faults' in _sd.columns else pd.Series(True, index=_sd.index)
+    _bcorr = _bool('base_in_corr') if st.session_state.get('ms_bcorr') and 'base_in_corr' in _sd.columns \
+        else pd.Series(True, index=_sd.index)
+    _q_lb = _m_long & _bt.isin(_BASES) & _bst.isin(['In base', 'Near pivot', 'Broke out today']) & _bpat_m & _bnf & _bcorr
     _r5, _e50, _sl50 = _num('ret_5d'), _num('ext_atr'), _num('sma50_slope5')
     if 'pb_setup' in _sd.columns:
         _pbs, _rls = _txt('pb_setup'), _txt('rally_setup')
@@ -1494,7 +1532,8 @@ if _scan_df is not None and len(_scan_df) > 0:
         _sd['pb_setup'], _sd['rally_setup'] = _pbs, _rls
     _q_lp = _m_long & (_pbs != '')
     _sbt, _sbs = _txt('sb_type'), _txt('sb_state')
-    _q_sb = _m_short & _sbt.isin(_BASES) & _sbs.isin(['In base', 'Near breakdown', 'Broke down today'])
+    _q_sb = _m_short & _sbt.isin(_BASES) & _sbs.isin(['In base', 'Near breakdown', 'Broke down today']) & \
+        (pd.Series(True, index=_sd.index) if _bpat == 'All patterns' else _sbt.eq(_bpat))
     _q_sr = _m_short & (_rls != '')
     # 8 Nov 2026: Deep dip = a live trigger on the 200 or 250 SMA (Deep_Dip study rules): the 20 closes before all above
     # the SMA, then an undercut (low below, close back above) or a reclaim after 1-5 closes below, in the last 3
@@ -1506,8 +1545,12 @@ if _scan_df is not None and len(_scan_df) > 0:
     _dsl_l, _dsl_s = _num('dd_slope21'), _num('dr_slope21')
     _sl_ok_l = pd.Series(True, index=_sd.index) if _dsl is None else ((_dsl_l >= _dsl) if _dsl > 0 else (_dsl_l > 0))
     _sl_ok_s = pd.Series(True, index=_sd.index) if _dsl is None else ((_dsl_s <= -_dsl) if _dsl > 0 else (_dsl_s < 0))
-    _q_ld = _liq & _fl & _sl_ok_l & (_num('off_lo252') >= 25) & (_txt('dd_watch' if _dwatch else 'dd_trig') != '')
-    _q_sd = _liq & _fs & _sl_ok_s & (_num('pct_52w') <= -0.25) & (_txt('dr_watch' if _dwatch else 'dr_trig') != '')
+    # 8 Nov 2026 (audit v2, deep_dip): the edge decays with the entry delay (+0.09 / +0.06 / +0.00 / -0.03R at 0-3
+    # sessions), so triggers are listed only today or yesterday; also applied here so older scans (max_days 3) follow.
+    _fresh_l = pd.Series(True, index=_sd.index) if _dwatch else (_num('dd_days') <= 1)
+    _fresh_s = pd.Series(True, index=_sd.index) if _dwatch else (_num('dr_days') <= 1)
+    _q_ld = _liq & _fl & _sl_ok_l & (_num('off_lo252') >= 25) & (_txt('dd_watch' if _dwatch else 'dd_trig') != '') & _fresh_l
+    _q_sd = _liq & _fs & _sl_ok_s & (_num('pct_52w') <= -0.25) & (_txt('dr_watch' if _dwatch else 'dr_trig') != '') & _fresh_s
     _heat = _num('heat_score').where(_liq)
     _hot_idx = _heat.where(_fl).dropna().sort_values(ascending=False).index[:50]
     _cold_idx = _heat.where(_fs).dropna().sort_values(ascending=True).index[:50]
@@ -1518,22 +1561,27 @@ if _scan_df is not None and len(_scan_df) > 0:
         'S_all': ('All', int(_m_short.sum()), 'short',
                   'Every stock on the short list (held RS −1 or lower, below the 200-day, 50 < 200). Coldest first.'),
         'L_bases': ('Bases', int(_q_lb.sum()), 'long',
-                    'Momentum list stocks in a cup with handle, flat base, VCP or tight area that is still actionable: '
-                    'in the base, within 5% below the pivot, or broke out today. Closest to the pivot first.'),
+                    'Momentum list stocks in a base (cup with handle, double bottom, VCP, base-on-base, flat base, tight '
+                    'area, ascending base, IPO base) that is still actionable: in the base, within 5% below the pivot, or '
+                    'broke out today. Sorted by state, then quality Q, then distance to the pivot. Q = IBD model-book checks, orange = faults (descriptive).'),
         'L_pb': ('Pullbacks', int(_q_lp.sum()), 'long',
                  'Momentum list stocks down 2% or more over 5 sessions, closing within −1 to +0.5 ATR of a rising '
                  '20- or 50-day SMA (Setup column: PB 20d / PB 50d). Hottest first.'),
         'L_dip': ('Deep dip', int(_q_ld.sum()), 'long',
                   ('Watch: any scanned stock whose last 20 closes were above the 200 or 250 SMA and that now closes within '
                    '1 ATR above it: no trigger yet. Closest first.') if _dwatch else
-                  ('Triggers in the last 3 sessions (Deep Dip study rules): the 20 closes before all above the 200 or 250 '
+                  ('Triggers today or yesterday (Deep Dip study rules): the 20 closes before all above the 200 or 250 '
                    'SMA, then an UNDERCUT (low below, close back above) or a RECLAIM after 1-5 closes below (the study used 1-3; 5 gives a wider list). Still live: '
                    'no close back below since and the stop (trigger-day low − 1 ATR(10)) not hit. Any scanned stock, '
                    '≥ 25% above the 52-week low. Setup column: trigger, days ago, stop and 1R %, trigger-day RVOL, ↑21 = '
-                   'back above the 21 EMA. Newest first. Evidence (stocks 2009-26): about +0.1R over a random entry in '
-                   'RISK-OFF / MILD RISK-OFF, none in DEEP RISK-OFF; better with RS > +20% vs SPY. Descriptive.')),
+                   'back above the 21 EMA. Newest first. Evidence (stocks 2009-26, Provisional): in MILD RISK-OFF / '
+                   'RISK-OFF the trigger beat a random entry in the same band by +0.09R (95% CI +0.01 to +0.17), but only '
+                   '+0.04R (not reliable) in the liquid names listed here; no reliable edge in other bands, and none when '
+                   'entered 2+ sessions after the trigger. RS > +20% is not confirmed against random entries with the same RS. '
+                   'No short mirror: the Deep rip short lost money in the study (Tested: −0.40R per trade in SPY bear markets).')),
         'L_hot': ('Hot 50', len(_hot_idx), 'long',
-                  'The 50 highest heat scores across all scanned stocks that pass the liquidity filter (any list).'),
+                  'The 50 highest heat scores across all scanned stocks that pass the liquidity filter (any list): where '
+                  'to look for setups. The list itself had no return edge (2009–26). Descriptive.'),
         'S_bases': ('Bases', int(_q_sb.sum()), 'short',
                     'Short list stocks (held RS −1 or lower, below the 200-day, 50 < 200) in a bear base: the same base '
                     'rules upside down, under a pivot low. Still actionable: in the base, within 5% above the breakdown '
@@ -1546,11 +1594,15 @@ if _scan_df is not None and len(_scan_df) > 0:
                   ('Mirror of Deep dip: 20 closes below the 200 or 250 SMA, then a poke above and close back below, or a '
                    'close back below after 1-5 closes above, in the last 3 sessions; stop = trigger-day high + 1 ATR. '
                    '≥ 25% below the 52-week high. Caution: in the study the short mirror LOST money on stocks in every '
-                   'MRS band, worst in a bear market (−0.40R with a 2R target).')),
+                   'MRS band, worst in a bear market (Tested: −0.40R per trade with a 2R target, CI −0.55 to −0.21).')),
         'S_cold': ('Cold 50', len(_cold_idx), 'short',
-                   'The 50 lowest heat scores across all scanned stocks that pass the liquidity filter (any list).'),
+                   'The 50 lowest heat scores across all scanned stocks that pass the liquidity filter (any list). Low '
+                   'heat alone is not a short signal: the coldest names did not lag the universe. Descriptive.'),
     }
-    _LONG_K, _SHORT_K = ['L_all', 'L_bases', 'L_pb', 'L_dip', 'L_hot'], ['S_all', 'S_bases', 'S_rally', 'S_dip', 'S_cold']
+    # 8 Nov 2026: Deep rip (short mirror lost money, Tested) and Cold 50 (coldest names did not lag) removed
+    _LONG_K, _SHORT_K = ['L_all', 'L_bases', 'L_pb', 'L_dip', 'L_hot'], ['S_all', 'S_bases', 'S_rally']
+    for _k_rm in ('S_dip', 'S_cold'):
+        _SCANS.pop(_k_rm, None)
     if st.session_state.get('ms_scan') not in _SCANS:
         st.session_state['ms_scan'] = 'L_all'
     _fmt_scan = lambda k: _SCANS[k][0] if k in ('L_hot', 'S_cold') else f'{_SCANS[k][0]}  {_SCANS[k][1]}'
@@ -1590,17 +1642,36 @@ if _scan_df is not None and len(_scan_df) > 0:
     with _c5:
         st.markdown('<div style="height:1.75rem;"></div>', unsafe_allow_html=True)
         _no_earn = st.checkbox('Hide earnings ≤ 7 days', value=False, key='ms_earn')
+    if _scan in ('L_bases', 'S_bases'):               # bases v3 (8 Nov 2026): IBD model-book filters
+        _b0, _b1, _b2, _b3 = st.columns([1.2, 1.0, 1.3, 1.5])
+        with _b0:
+            st.selectbox('Pattern', ['All patterns'] + _BASES, index=0, key='ms_bpat',
+                         help='One base per stock, in this order: cup with handle, double bottom, VCP, high tight flag, '
+                              'ascending base, flat base / tight area (base-on-base when it sits on the prior base), IPO base.')
+        if _scan == 'L_bases':
+            with _b1:
+                st.markdown('<div style="height:1.75rem;"></div>', unsafe_allow_html=True)
+                st.checkbox('Hide faulty bases', value=False, key='ms_bnofault',
+                            help='IBD faults: wedging handle, V / straight up from the low, wide and loose, left side > 13 '
+                                 'weeks, 3rd+ stage, light-volume breakout, distribution, deeper than 2.5× the market. '
+                                 'Descriptive (O\'Neil\'s hand-picked winners as a model book), untested.')
+            with _b2:
+                st.markdown('<div style="height:1.75rem;"></div>', unsafe_allow_html=True)
+                st.checkbox('Base formed in a market correction', value=False, key='ms_bcorr',
+                            help='SPY fell 8% or more (from its high inside the window) while the base formed. O\'Neil: '
+                                 '80-90% of sound bases form during market corrections.')
     if _scan in ('L_dip', 'S_dip'):                   # 7 Nov 2026 (c): settings of the Deep dip / rip scans
         _d0, _d1, _d3 = st.columns([1.2, 1.0, 2.2])
         with _d0:
             st.selectbox('Show', _DIP_SHOW, index=0, key='ms_dipshow',
-                         help='Triggers = entries that fired in the last 3 sessions and are still live. Watch = names '
+                         help='Triggers = entries that fired today or yesterday and are still live (later entries had no '
+                              'edge in the study). Watch = names '
                               'approaching the 200 / 250 from the trend side, to prepare for the next sessions.')
         with _d1:
             st.selectbox('Slope of the SMA (21 sessions)', list(_DIP_SLOPE), index=1, key='ms_dipslope',
                          help='Slope of the trigger SMA (the 200 when both): up at least this much over 21 sessions '
                               '(Deep dip) or down at least this much (Deep rip). In the stock study the slope made no '
-                              'difference to the results; it is a preference filter.')
+                              'measurable difference (within ±0.04R); it is a preference filter.')
         if not _has_dip:
             with _d3:
                 st.markdown('<div style="height:1.9rem;"></div><span style="font-size:0.75rem;color:#e3b48e;">'
@@ -1641,7 +1712,8 @@ if _scan_df is not None and len(_scan_df) > 0:
                    .sort_values('_k', na_position='last')
     elif _scan == 'L_bases':
         _rk = _v['base_state'].map({'Broke out today': 3, 'Near pivot': 2, 'In base': 1}).fillna(0)
-        _v = _v.assign(_k=_rk * 1000 + pd.to_numeric(_v['base_dist_pct'], errors='coerce').fillna(-9) * 100) \
+        _bq = pd.to_numeric(_v['base_q'], errors='coerce').fillna(0) if 'base_q' in _v.columns else 0   # 8 Nov: quality next
+        _v = _v.assign(_k=_rk * 1000 + _bq * 20 + pd.to_numeric(_v['base_dist_pct'], errors='coerce').fillna(-9) * 100) \
                .sort_values('_k', ascending=False)
     elif _scan == 'S_bases':
         _rk = _v['sb_state'].map({'Broke down today': 3, 'Near breakdown': 2, 'In base': 1}).fillna(0)
@@ -1666,8 +1738,10 @@ if _scan_df is not None and len(_scan_df) > 0:
             '200-day SMA AND 50-day above 200-day. CAN SLIM = STRICT ≥ 25% EPS and revenue growth, RELAXED ≥ 20% / 15% '
             '(fundamentals are fetched only for stocks above their 50-day SMA, within 20% of the 52-week high). '
             'Ext vs SMA50 = (close − SMA50) / ATR(14): Deep below ≤ −3, Below ≤ −1, Just below ≤ 0, Near ≤ +0.5, '
-            'Above ≤ +5, Far above beyond (Above is a trend state, not a reversal warning: in the 28 Oct study the left tail '
-            'did not grow with extension in stocks). Momentum = 50-day SMA slope over 5 sessions: Weak ≤ −0.5%, Falling ≤ 0, '
+            'Above ≤ +5, Far above beyond (Above is a trend state, not a reversal warning: the next month\'s left tail was '
+            'no larger than near the SMA in stocks and ETFs; what changes is the upside, narrower by about 4–5 pp, and the '
+            'stop under the SMA50, which is far away: size down; audit v2, 8 Nov 2026). '
+            'Momentum = 50-day SMA slope over 5 sessions: Weak ≤ −0.5%, Falling ≤ 0, '
             'Building ≤ +0.5 (Fading if it came down from above +0.5 in the last 11 sessions), Persistent above. '
             '5-day: dip ≤ −2%, pullback ≤ −3%, sharp ≤ −4%. Setup: PB 20d / 50d = pullback to a rising SMA (long), '
             'Rally 20d / 50d = rally to a falling SMA (short). Base / pivot on the short scans = bear base (↓) and '
@@ -1679,7 +1753,7 @@ if _scan_df is not None and len(_scan_df) > 0:
             'Ext·Mom table under the chart shows the selected stock\'s own history (up to 10 years) and a pooled stock panel, '
             'like the TradingView indicator. Where to start the chart work, not a buy signal.'
             '</div>', unsafe_allow_html=True)
-    _industry_groups_panel(_sd)
+    pass   # 8 Nov 2026: industry-groups expander removed (duplicate of the sector/industry table); _industry_groups_panel kept
 else:
     st.info('No scanner results yet. The scanner runs nightly at 10 PM UTC (Mon–Fri) via GitHub Actions.')
 
@@ -1768,94 +1842,7 @@ else:
     st.info('Sector data temporarily unavailable.')
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# RISK DIAL (detail, collapsed: its one-line summary is in the decision strip)
-# ══════════════════════════════════════════════════════════════════════════════
-st.divider()
-with st.expander('Risk dial — how far price tends to travel from here (detail)', expanded=False):
-    _bp = _band_profile(hist)
-    st.markdown('<div class="section-header">Risk Dial — how far price tends to travel from here</div>',
-                unsafe_allow_html=True)
-    _rd_left, _rd_right = st.columns([1.15, 1], gap='large')
-
-    with _rd_left:
-        _g_title, _g_text = risk_dial.BAND_GUIDANCE.get(reg, ('', ''))
-        st.markdown(f"""
-        <div class="metric-card" style="border:1px solid #2a2724;">
-          <div style="font-size:1.05rem;font-weight:800;color:{rcol};">{reg} · {_g_title}</div>
-          <div style="font-size:0.84rem;color:#a89f95;margin-top:6px;line-height:1.5;">{_g_text}</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        _rows = []
-        for _h in risk_dial.HORIZONS:
-            _b = _bp[(_bp['band'] == reg) & (_bp['horizon'] == _h)]
-            _a = _bp[(_bp['band'] == 'ALL') & (_bp['horizon'] == _h)]
-            if _b.empty or _a.empty:
-                continue
-            _b, _a = _b.iloc[0], _a.iloc[0]
-            _x = int(round(_b['thresh'] * 100))
-            _rows.append({
-                'Sessions': _h,
-                'Move size': f'±{_x}%',
-                'Large adverse': f"{_b['p_adverse']*100:.0f}%  (all {_a['p_adverse']*100:.0f}%)",
-                'Large favorable': f"{_b['p_favorable']*100:.0f}%  (all {_a['p_favorable']*100:.0f}%)",
-                'Bad-case drawdown': f"{_b['mae_p10']*100:+.1f}%",
-                'Good-case run-up': f"{_b['mfe_p90']*100:+.1f}%",
-            })
-        st.dataframe(pd.DataFrame(_rows), use_container_width=True, hide_index=True)
-        _n_band = int(_bp[(_bp['band'] == reg) & (_bp['horizon'] == 5)]['n'].iloc[0]) if len(_rows) else 0
-        st.markdown(f"""
-        <div style="font-size:0.72rem;color:#9b958f;margin-top:2px;line-height:1.5;">
-        Long entered at today's close, SPY, all {reg} sessions since {ctx['start'].strftime('%b %Y')} (n={_n_band}).
-        Large adverse / favorable = worst drawdown / best gain from entry reaches the move size within the window.
-        Bad-case drawdown = 10th percentile; good-case run-up = 90th percentile. Descriptive — the
-        RISK-OFF vs RISK-ON contrast is confirmed after multiple-testing correction (Report v7.0 §4);
-        the v4.0 weights were checked out of sample in the v8 study.
-        </div>
-        """, unsafe_allow_html=True)
-
-    with _rd_right:
-        _hsel = st.radio('Horizon (sessions)', risk_dial.HORIZONS, index=2, horizontal=True,
-                         key='rd_horizon')
-        _sub = _bp[_bp['horizon'] == _hsel].set_index('band')
-        _bands_present = [b for b in risk_dial.BANDS if b in _sub.index]
-        _labels = [b.replace('MILD ', 'MILD<br>') for b in _bands_present]
-        _fig_rd = go.Figure()
-        if reg in _bands_present:
-            _i = _bands_present.index(reg)
-            _fig_rd.add_vrect(x0=_i - 0.42, x1=_i + 0.42, fillcolor='rgba(227,180,142,0.10)',
-                              line_width=0)
-            _fig_rd.add_annotation(x=_i, y=1.0, yref='paper', text='Today', showarrow=False,
-                                   font=dict(size=10, color='#e3b48e'), yanchor='bottom')
-        for _col, _name, _clr in [('p_adverse', 'Large adverse move', ADV_COLOR),
-                                  ('p_favorable', 'Large favorable move', FAV_COLOR)]:
-            _y = (_sub.loc[_bands_present, _col] * 100).values
-            _fig_rd.add_trace(go.Scatter(
-                x=list(range(len(_bands_present))), y=_y, name=_name, mode='lines+markers',
-                line=dict(color=_clr, width=2), marker=dict(size=9, color=_clr, line=dict(color='#0a0a0a', width=2)),
-                customdata=_bands_present,
-                hovertemplate='<b>%{customdata}</b><br>' + _name + ': %{y:.0f}% of sessions<extra></extra>',
-            ))
-            if 'ALL' in _sub.index:
-                _fig_rd.add_hline(y=float(_sub.loc['ALL', _col]) * 100, line_width=1,
-                                  line_color=_clr, opacity=0.35)
-        _thr = int(round(risk_dial.THRESH[_hsel] * 100))
-        _fig_rd.update_layout(
-            template='plotly_dark+atn', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-            height=270, margin=dict(l=10, r=10, t=24, b=10), hovermode='closest',
-            legend=dict(orientation='h', yanchor='bottom', y=-0.42, x=0, font=dict(size=11, color='#a89f95')),
-            xaxis=dict(tickmode='array', tickvals=list(range(len(_bands_present))), ticktext=_labels,
-                       tickfont=dict(size=10, color='#a89f95'), showgrid=False, range=[-0.5, len(_bands_present) - 0.5]),
-            yaxis=dict(title=dict(text=f'% of sessions, move ≥ {_thr}%', font=dict(size=10, color='#a89f95')),
-                       ticksuffix='%', tickfont=dict(size=10, color='#a89f95'),
-                       gridcolor='rgba(255,255,255,0.06)', rangemode='tozero'),
-        )
-        st.plotly_chart(_fig_rd, use_container_width=True)
-        st.markdown('<div style="font-size:0.72rem;color:#9b958f;">Thin lines: same measure over all sessions. '
-                    'The dial steps through all five bands — read it as how much room and size a trade '
-                    'needs, not which way the market goes.</div>', unsafe_allow_html=True)
-
+# Risk dial expander removed 8 Nov 2026: it repeated the band odds of the decision strip and the Risk today panel.
 
 # ══════════════════════════════════════════════════════════════════════════════
 # WHY THE MODEL SAYS THIS (diagnostics, in tabs)
@@ -2031,39 +2018,14 @@ with _t_comp:
             except:
                 st.markdown('<div class="neutral-row"><span style="color:#a89f95">●</span> Zero Gamma: no data today</div>', unsafe_allow_html=True)
 
-        # ── Recovery Signal (MRS v2.0) ─────────────────────────────────────────────
-        st.markdown('<div class="section-header" style="margin-top:16px;">Recovery Signal</div>',
+        # ── Signal quality (8 Nov 2026: moved here from the decision strip; Recovery Signal removed, untested and
+        #    overlapping REBOUND WINDOW in the Risk today panel. See studies/_framework/MRS_Evidence_Audit_v2.md) ──
+        st.markdown('<div class="section-header" style="margin-top:16px;">Signal quality (breadth confirmation)</div>',
                     unsafe_allow_html=True)
-        recovery = pipeline.compute_recovery_signal(last, hist, last_dt)
-        rec_color = '#' + recovery['color']
-
-        if recovery['active']:
-            rec_cls = 'safe-row'
-            rec_icon = '<span style="color:#85cac5">●</span>'
-            rec_title = f"RECOVERY — {recovery['strength']}"
-        elif recovery['signals'] >= 1:
-            rec_cls = 'neutral-row'
-            rec_icon = '<span style="color:#e3b48e">●</span>'
-            rec_title = f"EARLY SIGNS ({recovery['signals']} signal{'s' if recovery['signals'] > 1 else ''})"
-        else:
-            rec_cls = 'neutral-row'
-            rec_icon = '<span style="color:#a89f95">●</span>'
-            rec_title = 'NO SIGNAL'
-
-        st.markdown(f'''
-        <div class="{rec_cls}">
-          <span style="font-weight:700;color:{rec_color};">{rec_icon} {rec_title}</span><br>
-          <span style="font-size:0.82rem;color:#a89f95;">{recovery["description"]}</span>
-        </div>
-        ''', unsafe_allow_html=True)
-
-        if recovery['components']:
-            comp_list = ' • '.join(recovery['components'])
-            st.markdown(f'''
-            <div style="font-size:0.75rem;color:#9b958f;margin-top:4px;padding-left:8px;">
-              Components: {comp_list}
-            </div>
-            ''', unsafe_allow_html=True)
+        st.markdown(f'<div class="neutral-row"><span style="font-weight:700;color:{sq_col};">● {sq_lbl}</span><br>'
+                    f'<span style="font-size:0.82rem;color:#a89f95;">{_html_mod.escape(str(sq_desc))}</span><br>'
+                    '<span style="font-size:0.72rem;color:#6e675f;">Not tested: whether breadth confirmation changes the '
+                    'band\'s forward odds is an open study. Context only.</span></div>', unsafe_allow_html=True)
 
 with _t_hist:
     # ══════════════════════════════════════════════════════════════════════════════

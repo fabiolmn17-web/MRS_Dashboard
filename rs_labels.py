@@ -153,9 +153,9 @@ def label_info(s: pd.Series, spy: pd.Series, hold: int = HOLD_DAYS) -> Optional[
     tag_1m = ''
     r1 = rs_now['RS 1M']
     if not np.isnan(r1):
-        if score >= 1.5 and r1 < 0:
-            tag_1m = '1M ↓'
-        elif 0.5 <= score < 1.5 and r1 > 0:
+        # audit v2, 8 Nov 2026 (studies/_framework/audit/momentum_rs_persistence): leaders with a negative RS 1M did 0.6 pp a month BETTER (CI -0.2 to +1.4): the RS 1M filter and the "1M ↓" warning are Null and were dropped.
+        # "1M ↑" is kept as Watch only.
+        if 0.5 <= score < 1.5 and r1 > 0:
             tag_1m = '1M ↑'
 
     r1_prev = rh['RS 1M'].iloc[-2] if len(rh) >= 2 else np.nan
@@ -179,9 +179,10 @@ def label_info(s: pd.Series, spy: pd.Series, hold: int = HOLD_DAYS) -> Optional[
 def momentum_light(spy: pd.Series, band: str) -> dict:
     """Momentum ON when SPY is above its close 252 sessions ago and the MRS band is not RISK-OFF.
 
-    Otherwise CAUTION: momentum-crash state (Daniel-Moskowitz). Tested in
-    momentum_rs_persistence: leader-minus-laggard industry spread +0.8 vs -1.9 pp at
-    1 month and +1.8 vs -4.6 pp at 3 months, SPY 12m up vs down (mostly 2008-09).
+    Otherwise CAUTION: momentum-crash state (Daniel-Moskowitz). momentum_rs_persistence: leader-minus-laggard
+    industry spread +0.8 vs -1.9 pp at 1 month, SPY 12m up vs down (mostly 2008-09). Audit v2 (8 Nov 2026):
+    Provisional; the gap is 1.2 pp a month smaller in CAUTION (CI -0.3 to +2.7), driven by laggards rebounding,
+    not by leaders falling. Lookback 6-18 months: plateau 1.0 (no change).
     """
     spy = spy.dropna()
     r12 = float(spy.iloc[-1] / spy.iloc[-252] - 1) if len(spy) >= 252 else np.nan
@@ -202,9 +203,9 @@ def momentum_light(spy: pd.Series, band: str) -> dict:
 
 def _on_list(score, trend, rs1m):
     """Boolean Series: the buy-leaders filter applied to score / trend / RS 1M columns."""
+    # audit v2, 8 Nov 2026 (studies/_framework/audit/momentum_rs_persistence): leaders with a negative RS 1M did 0.6 pp a month BETTER (CI -0.2 to +1.4): the RS 1M filter and the "1M ↓" warning are Null and were dropped.
     score = pd.to_numeric(score, errors='coerce')
-    rs1m = pd.to_numeric(rs1m, errors='coerce')
-    return ((score >= 1.5) & ~(rs1m < 0)) | ((score == 0.5) & (trend == 'IMPROVING'))
+    return (score >= 1.5) | ((score == 0.5) & (trend == 'IMPROVING'))
 
 
 def shortlist_changes(ind: pd.DataFrame):
@@ -221,20 +222,20 @@ def shortlist_changes(ind: pd.DataFrame):
 def leaders_shortlist(ind: pd.DataFrame) -> pd.DataFrame:
     """Industry ETFs to look at first for longs (sectors are context only).
 
-    A  structural leader (held score +1.5) whose RS 1M is not negative       -> Tested (industry momentum, small)
-    B  Outperforming (held +0.5) and IMPROVING (1Y+, 6M-, 3M+)               -> Tested (beat SPY 55% vs 48% at 1 mo)
+    A  structural leader (held score +1.5)                                   -> Descriptive (audit v2: matched SPY)
+    B  Outperforming (held +0.5) and IMPROVING (1Y+, 6M-, 3M+)               -> Descriptive, window-sensitive
+    The RS 1M filter on A was dropped on 8 Nov 2026 (audit v2: Null).
     Laggards are never listed. Sorted by RS 3M.
     """
     if ind is None or len(ind) == 0 or 'Score' not in ind.columns:
         return pd.DataFrame()
     d = ind.copy()
     d['Score'] = pd.to_numeric(d['Score'], errors='coerce')
-    r1 = pd.to_numeric(d.get('RS 1M'), errors='coerce')
-    a = (d['Score'] >= 1.5) & ~(r1 < 0)
+    a = d['Score'] >= 1.5                                         # RS 1M filter dropped 8 Nov 2026 (audit v2)
     shp = d['Shape'] if 'Shape' in d.columns else d['Trend']      # v5.5: the tested 3M-vs-6M state
     b = (d['Score'] == 0.5) & (shp == 'IMPROVING')
     out = d[a | b].copy()
-    out['Why'] = np.where(a[a | b], 'Structural leader, 1M not turning down', 'Outperforming, 3M stronger than 6M')
+    out['Why'] = np.where(a[a | b], 'Structural leader', 'Outperforming, 3M stronger than 6M')
     added, _ = shortlist_changes(ind)
     out['New'] = out['ETF'].isin(added['ETF']) if len(added) else False
     return out.sort_values('RS 3M', ascending=False).reset_index(drop=True)
@@ -245,7 +246,8 @@ def laggards_shortlist(ind: pd.DataFrame) -> pd.DataFrame:
 
     A  structural laggard (held score -1.5) whose RS 1M is not positive
     B  Underperforming (held -0.5) and FADING
-    Tested: laggards keep lagging SPY slightly; shorting them had no edge over shorting any industry.
+    Audit v2 (8 Nov 2026): Tested that outside RISK-OFF they lag SPY (-1.0 pp a month) and that in RISK-OFF they
+    rebound (+0.7 pp) while outright shorts lose 2.7% a month; across all bands the lag is small (Provisional).
     Sorted weakest RS 3M first.
     """
     if ind is None or len(ind) == 0 or 'Score' not in ind.columns:

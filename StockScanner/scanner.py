@@ -103,7 +103,7 @@ def run_scan(
 
     # ── Step 2: Batch price download ──────────────────────────────────────────
     log('\n[2/5] Downloading price history...')
-    all_tickers = tickers + ['SPY']
+    all_tickers = tickers + ['SPY', 'QQQ']          # QQQ: market follow-through state only (bases v3, 8 Nov 2026)
     price_data  = _batch_download(all_tickers, PRICE_DAYS, BATCH_SIZE, log)
 
     # Freshness check (5 Nov 2026): every stock should end on the last completed session
@@ -143,7 +143,15 @@ def run_scan(
         f'{"current" if data_behind == 0 else f"{data_behind} session(s) BEHIND"}); '
         f'{len(lag)} ticker(s) still end before the expected session')
     log(f'  SPY: {len(spy_df)} bars ({spy_df.index[-1].date()} last)')
-    log(f'  Price data fetched for {len(price_data)-1}/{len(tickers)} stocks')
+    log(f'  Price data fetched for {len([t_ for t_ in price_data if t_ not in ("SPY", "QQQ")])}/{len(tickers)} stocks')
+    # bases v3 (8 Nov 2026): IBD market state from SPY and QQQ (follow-through day), once per scan
+    try:
+        ftd_spy = bases.follow_through(spy_df)
+        mkt_cols = bases.market_fields(spy_df, price_data.get('QQQ'))
+        log(f"  Market (IBD): SPY {mkt_cols.get('mkt_state')} · QQQ {mkt_cols.get('qqq_state')}")
+    except Exception as e:
+        ftd_spy, mkt_cols = None, {}
+        log(f'  Market follow-through state failed: {e}')
 
     # Liquidity: drop names whose 50-day average dollar volume is under MIN_DOLLAR_VOLUME (3 Nov 2026)
     dollar_vol = {}
@@ -292,7 +300,7 @@ def run_scan(
         if df is not None:
             pat = pattern_calc.compute(df)
             try:                                  # 21-day / 52-week breakouts and bases (bases.py, 3 Nov 2026)
-                bse = bases.detect(df, row.get('rs_rating'))
+                bse = bases.detect(df, row.get('rs_rating'), spy_df, ftd_spy)     # v3: SPY context + FTD
             except Exception as e:
                 logger.debug(f'{ticker}: bases error {e}')
             if mom.get('short_list'):              # 7 Nov 2026: bear bases (mirrored rules), short list only
@@ -375,6 +383,7 @@ def run_scan(
             # Breakouts and bases (bases.py)
             **{k: bse.get(k) for k in bases.FIELDS},
             **{k: bse.get(k) for k in bases.SHORT_FIELDS},
+            **{k: mkt_cols.get(k) for k in bases.MKT_FIELDS},                  # v3: IBD market state (same every row)
             # Momentum & trend (momentum.py)
             **{k: mom.get(k) for k in momentum.FIELDS},
             'next_earnings':      mt.get('next_earnings', ''),

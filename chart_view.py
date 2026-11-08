@@ -95,6 +95,17 @@ def _add_base(fig, v, b):
         if hs and b.get('handle_low') is not None:
             fig.add_shape(type='rect', xref='x', yref='y', x0=hs, x1=x1, y0=b['handle_low'], y1=pv, layer='below',
                           line=dict(color=BASE_COL, width=1, dash='dot'), fillcolor='rgba(133,202,197,0.10)')
+    if typ == 'Double bottom' and b.get('db_l1_date'):       # v3 (8 Nov 2026): the W, left high -> L1 -> middle -> L2
+        pts = [(b.get('base_left_date'), b.get('base_left')), (b.get('db_l1_date'), b.get('db_l1')),
+               (b.get('db_mid_date'), b.get('db_mid')), (b.get('base_low_date'), lo)]
+        pts = [(clip(d), y) for d, y in pts if d and y is not None and d >= first]
+        if len(pts) >= 2:
+            fig.add_trace(go.Scatter(x=[p[0] for p in pts], y=[p[1] for p in pts], mode='lines+markers',
+                                     line=dict(color=BASE_COL, width=1.3, dash='dot'), marker=dict(size=6, color=BASE_COL),
+                                     name='Double bottom', hoverinfo='skip', showlegend=False))
+        if b.get('db_sk3_level') is not None and x0:            # shakeout+3 level (10% above the shakeout low)
+            fig.add_shape(type='line', xref='x', yref='y', x0=clip(b.get('base_low_date')) or x0, x1=last,
+                          y0=b['db_sk3_level'], y1=b['db_sk3_level'], line=dict(color=BASE_COL, width=1, dash='dot'))
     if typ == 'VCP' and b.get('vcp_points'):                 # contractions: swing high -> low, numbered
         for j, seg in enumerate(str(b['vcp_points']).split(';')):
             try:

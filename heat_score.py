@@ -8,19 +8,23 @@ Component (max points)                          Evidence
 ------------------------------------------------ ------------------------------------------------------------------
 RS rating, cross-sectional (25)                 Literature: cross-sectional stock momentum (Jegadeesh-Titman 12-1).
                                                 Not tested in our program on single stocks.
-Held RS label vs SPY + trend tag (15)           Tested on ETFs (momentum_rs_persistence, 25 Oct 2026): 3-day hold;
+Held RS label vs SPY + trend tag (15)           ETFs (momentum_rs_persistence, 25 Oct 2026; audit v2 8 Nov: Descriptive,
+                                                window-sensitive): 3-day hold;
                                                 among Outperforming, IMPROVING beat SPY 55% vs FADING 48% (1 mo).
                                                 v5.5: the trend tag is now the label's direction (up / down in the
                                                 last 21 sessions); the 55 / 48 split was measured on the 3M-vs-6M state.
-Industry: group state + leader inside it (20)   Tested, small: industry momentum (+0.4 / +0.8 / +1.5 pp at 1/3/6 mo,
+Industry: group state + leader inside it (20)   Audit v2 (8 Nov 2026): Descriptive. Leaders minus laggards (+0.4 / +0.8 / +1.5 pp at 1/3/6 mo,
                                                 TS sign p 0.02). Leader-in-group rank: untested (industry_groups.py).
-Sector state (5)                                Tested: sectors showed NO momentum, so context only (low weight).
+Sector state (5)                                Sectors showed no reliable momentum (audit v2: near null), so context only.
 52-week high proximity (15)                     Literature: George-Hwang (2004) 52-week-high momentum. Untested here.
 Trend: 200-day, 50 > 200, SMA50 momentum (20)   Practitioner rules (O'Neil / Minervini trend template). Untested here.
 Extension above the SMA50 (0, no penalty)       stretched_label_v0 (28 Oct 2026): in stocks the left tail did NOT grow
                                                 with extension, so no penalty.
-Market regime (not in the score)                Tested: momentum reverses in the crash state (SPY 12m down / MRS
-                                                RISK-OFF). Shown next to the score as the momentum light, not mixed in.
+Market regime (not in the score)                Provisional (audit v2, 8 Nov 2026): in the crash state (SPY 12m down / MRS
+                                                RISK-OFF) leaders lose their edge over laggards because laggards rebound.
+                                                Shown next to the score as the momentum light, not mixed in.
+Audit v2 (8 Nov 2026, studies/_framework/audit/heat_score_backtest): the score describes leadership; top-quartile heat
+earned the same as the universe (±0.3 pp a month). No cut-off changes (every neighbour is also ~0).
 
 compute(row, sec_score) -> dict(score, parts=[(name, points, max, text)], missing=[...])
 Missing inputs score 0 and are listed; the score is not rescaled (a live lookup without an RS rating reads lower).
@@ -150,10 +154,10 @@ def breakdown_html(res, light_on=None):
     h = (f'<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:4px;">'
          f'<span style="font-family:IBM Plex Mono,monospace;font-size:1.5rem;font-weight:700;color:{col};">{s}</span>'
          f'<span style="color:{col};font-weight:600;">{name}</span>'
-         f'<span style="color:#6e675f;font-size:0.68rem;">heat score / 100 · descriptive, untested</span></div>')
+         f'<span style="color:#6e675f;font-size:0.68rem;">heat score / 100 · describes leadership, not a return forecast · descriptive</span></div>')
     if light_on is not None:
         h += (f'<div style="font-size:0.70rem;color:{"#85cac5" if light_on else "#f4a062"};margin-bottom:4px;">'
-              f'Momentum light {"ON" if light_on else "CAUTION: leaders can reverse hard in this state"}</div>')
+              f'Momentum light {"ON" if light_on else "CAUTION: leaders lose their edge over laggards (laggards rebound)"}</div>')
     for nm, p, mx, txt in res['parts']:
         w = 0 if not mx else int(round(100 * p / mx))
         h += (f'<div style="display:flex;align-items:center;gap:6px;font-size:0.70rem;line-height:1.5;">'
