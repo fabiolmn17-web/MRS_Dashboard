@@ -1711,12 +1711,12 @@ if _scan_df is not None and len(_scan_df) > 0:
             _v = _v.assign(_dd_mode='trig', _k=_vn(f'{_p}_days') * 1000 - _vn(f'{_p}_rvol').fillna(0)) \
                    .sort_values('_k', na_position='last')
     elif _scan == 'L_bases':
-        _rk = _v['base_state'].map({'Broke out today': 3, 'Near pivot': 2, 'In base': 1}).fillna(0)
+        _rk = pd.to_numeric(_v['base_state'].map({'Broke out today': 3, 'Near pivot': 2, 'In base': 1}), errors='coerce').fillna(0)   # 8 Nov: numeric even when the filters leave 0 rows (empty str dtype)
         _bq = pd.to_numeric(_v['base_q'], errors='coerce').fillna(0) if 'base_q' in _v.columns else 0   # 8 Nov: quality next
         _v = _v.assign(_k=_rk * 1000 + _bq * 20 + pd.to_numeric(_v['base_dist_pct'], errors='coerce').fillna(-9) * 100) \
                .sort_values('_k', ascending=False)
     elif _scan == 'S_bases':
-        _rk = _v['sb_state'].map({'Broke down today': 3, 'Near breakdown': 2, 'In base': 1}).fillna(0)
+        _rk = pd.to_numeric(_v['sb_state'].map({'Broke down today': 3, 'Near breakdown': 2, 'In base': 1}), errors='coerce').fillna(0)
         _v = _v.assign(_k=_rk * 1000 - pd.to_numeric(_v['sb_dist_pct'], errors='coerce').fillna(9) * 100) \
                .sort_values('_k', ascending=False)
     elif _scan in ('S_rally', 'S_cold', 'S_all'):
