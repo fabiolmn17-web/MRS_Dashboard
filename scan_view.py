@@ -110,8 +110,36 @@ def short_base_cell(r):
 
 def setup_cell(r):
     """7 Nov 2026: pullback to a rising 20 / 50-day SMA (long) or rally to a falling one (short), from momentum.py."""
+    mode = _s(r.get('_dd_mode'))
+    if mode:                                 # 8 Nov 2026: Deep dip / Deep rip triggers and watch list
+        sh = r.get('_side') == 'short'
+        pre = 'dr' if sh else 'dd'
+        col = ORANGE if sh else TEAL
+        if mode == 'watch':
+            w, xa = _s(r.get(f'{pre}_watch')), r.get(f'{pre}_watch_atr')
+            if not w:
+                return '<span style="color:#6e675f;">—</span>', 0
+            d = '' if _nan(xa) else f' <span class="sub">{float(xa):.1f} ATR</span>'
+            return f'<span title="{_e(w + " SMA: no trigger yet")}">{chip(w.replace("Near ", "≈"), col, False)}{d}</span>', 1
+        tg = _s(r.get(f'{pre}_trig'))
+        if not tg:
+            return '<span style="color:#6e675f;">—</span>', 0
+        k, sma, days = r.get(f'{pre}_k'), _s(r.get(f'{pre}_sma')), r.get(f'{pre}_days')
+        stop, risk, rv = r.get(f'{pre}_stop'), r.get(f'{pre}_risk_pct'), r.get(f'{pre}_rvol')
+        ab = (not sh and r.get('ema21_above') in (True, 'True', 1)) or (sh and r.get('ema21_above') in (False, 'False', 0))
+        short_t = {'Undercut': 'UC', 'Reclaim': 'RC', 'Overcut': 'OC', 'Lost reclaim': 'LR'}.get(tg, tg)
+        lab = f'{short_t} {sma}' + ('' if _nan(k) or int(float(k)) == 0 else f' ·{int(float(k))}')
+        dtxt = '' if _nan(days) else ('today' if int(float(days)) == 0 else f'{int(float(days))}d ago')
+        sub = ' '.join(x for x in [dtxt, '' if _nan(stop) else f'stop {float(stop):,.2f}',
+                                    '' if _nan(risk) else f'({float(risk):.1f}%)',
+                                    '' if _nan(rv) else f'RVOL {float(rv):.1f}×', ('↓21' if sh else '↑21') if ab else ''] if x)
+        title = (f'{tg} of the {sma} SMA' + ('' if _nan(k) or int(float(k)) == 0 else f' after {int(float(k))} close(s) beyond')
+                 + f', {dtxt}. Entry ref = trigger close {r.get(f"{pre}_entry")}; stop = trigger-day '
+                 + ('high + 1 ATR(10)' if sh else 'low − 1 ATR(10)') + '.')
+        rank = 10 - (0 if _nan(days) else int(float(days)))
+        return f'<span title="{_e(title)}">{chip(lab, col, True)} <span class="sub">{_e(sub)}</span></span>', rank
     dp = _s(r.get('_dip'))
-    if dp:                                   # 7 Nov 2026 (c): Deep dip / Deep rip scans
+    if dp:                                   # 7 Nov 2026 (c): Deep dip / Deep rip scans (old proximity version)
         col = TEAL if r.get('_side') != 'short' else ORANGE
         return f'<span title="{_e(_s(r.get("_dip_t")))}">{chip(dp, col, True)}</span>', 3
     s_ = _s(r.get('pb_setup')) if r.get('_side') != 'short' else _s(r.get('rally_setup'))

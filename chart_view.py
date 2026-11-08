@@ -3,7 +3,8 @@ chart_view.py — daily candle chart for the scanner's side panel
 ================================================================
 One ticker at a time, fetched on demand (yfinance, per-ticker history like the rest of the app) and cached.
 Shows the last ~12 months of daily candles with:
-  SMA 50 and SMA 200 (computed on the full 2-year history, so the 200-day line starts at the left edge)
+  EMA 10 (thin) and EMA 21, SMA 200 and SMA 250 dashed, as Fabio's TradingView ribbon (8 Nov 2026; the SMA 50 line
+  was replaced). Computed on the full 2-year history, so the long lines start at the left edge
   52-week high  = highest high of the last 252 sessions (including today)
   21-day high   = highest high of the 21 sessions BEFORE today (the pivot a breakout has to clear; 20 until 3 Nov 2026)
   Volume pane   (4 Nov 2026) daily volume bars (teal up / orange down day) and the 50-day average, under the price
@@ -140,8 +141,10 @@ def _add_pivots(fig, h, v):
 def figure(h: pd.DataFrame, ticker: str, height: int = 520, base: dict = None) -> go.Figure:
     """base: bases.detect(h) output to draw (computed here when None; pass {} to draw none)."""
     c = h['Close']
-    s50 = c.rolling(50).mean()
+    e10 = c.ewm(span=10, adjust=False).mean()
+    e21 = c.ewm(span=21, adjust=False).mean()
     s200 = c.rolling(200).mean()
+    s250 = c.rolling(250).mean()
     v = h.iloc[-BARS:]
     x = v.index.strftime('%Y-%m-%d')          # category axis: no gaps on weekends and holidays
     lv = levels(h)
@@ -151,10 +154,14 @@ def figure(h: pd.DataFrame, ticker: str, height: int = 520, base: dict = None) -
         increasing=dict(line=dict(color=UP, width=1), fillcolor=UP),
         decreasing=dict(line=dict(color=DOWN, width=1), fillcolor=DOWN),
         showlegend=False))
-    fig.add_trace(go.Scatter(x=x, y=s50.iloc[-BARS:], name='SMA 50', mode='lines',
+    fig.add_trace(go.Scatter(x=x, y=e10.iloc[-BARS:], name='EMA 10', mode='lines',
+                             line=dict(color='#b9b2a9', width=0.7), hoverinfo='skip'))
+    fig.add_trace(go.Scatter(x=x, y=e21.iloc[-BARS:], name='EMA 21', mode='lines',
                              line=dict(color=SMA50_COL, width=1.3), hoverinfo='skip'))
     fig.add_trace(go.Scatter(x=x, y=s200.iloc[-BARS:], name='SMA 200', mode='lines',
                              line=dict(color=SMA200_COL, width=1.5), hoverinfo='skip'))
+    fig.add_trace(go.Scatter(x=x, y=s250.iloc[-BARS:], name='SMA 250', mode='lines',
+                             line=dict(color=SMA200_COL, width=1.1, dash='dash'), hoverinfo='skip'))
     hi52, hi20 = lv['hi52'], lv['hi20']
     same = (not np.isnan(hi52)) and (not np.isnan(hi20)) and abs(hi52 / hi20 - 1) < 0.003
     lines = [(hi52, HI52_COL, 'dash', '52W & 21D high' if same else '52W high', 'top left')]

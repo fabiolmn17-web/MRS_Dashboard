@@ -86,8 +86,10 @@ SECTOR_MAP = {
 }
 
 @st.cache_data(ttl=3600)
-def load_scanner_results():
-    """Load latest scanner results from StockScanner/output/scan_results.csv."""
+def load_scanner_results(stamp=None):
+    """Load latest scanner results from StockScanner/output/scan_results.csv.
+    7 Nov 2026: `stamp` = the file's size and modification time, so a new nightly scan is read at once
+    (before, the old scan stayed cached for up to an hour after the bot committed a new one)."""
     try:
         csv_path = Path(__file__).parent / 'StockScanner' / 'output' / 'scan_results.csv'
         if not csv_path.exists():
@@ -663,7 +665,9 @@ if _deep in ('DEEP RISK-OFF', 'DEEP RISK-ON'):
 _sec_closes = load_sector_data()
 _sec_df     = build_sector_table(_sec_closes)
 _ind_df, _hold_df = load_industry_data()
-_scan_df, _scan_date = load_scanner_results()
+_scan_p = Path(__file__).parent / 'StockScanner' / 'output' / 'scan_results.csv'
+_scan_df, _scan_date = load_scanner_results(
+    (_scan_p.stat().st_size, _scan_p.stat().st_mtime) if _scan_p.exists() else None)
 _bp = _band_profile(hist)
 _mom_light = rs_labels.momentum_light(hist.sort_values('date').set_index('date')['spy'].astype(float), reg)
 _leaders = rs_labels.leaders_shortlist(_ind_df)
@@ -1451,8 +1455,10 @@ if _scan_df is not None and len(_scan_df) > 0:
     # 7 Nov 2026 (b): the optional filters (squeeze, earnings) act on every scan AND on the counts on the buttons.
     # They are read from the session (the widgets below), so a change shows at once in the counts.
     # 7 Nov 2026 (c): the 200-day slope is no longer a global filter: it belongs to the Deep dip / Deep rip scans.
-    _has_dip = 'ext200_atr' in _sd.columns and _sd['ext200_atr'].notna().any()
-    _DIP_SLOPE = {'Rising (any slope)': 0.0, '≥ 2% a month': 2.0, '≥ 4% a month': 4.0, '≥ 6% a month': 6.0}
+    # 8 Nov 2026: Deep dip / Deep rip = TRIGGERS from the nightly scan (momentum.deep_dip_fields), not proximity
+    _has_dip = 'dd_trig' in _sd.columns
+    _DIP_SLOPE = {'Any slope': None, 'Rising (> 0)': 0.0, '≥ 2% a month': 2.0, '≥ 4% a month': 4.0, '≥ 6% a month': 6.0}
+    _DIP_SHOW = ['Triggers (last 3 sessions)', 'Watch: within 1 ATR of the line']
 
     def _fmask(side):
         m = pd.Series(True, index=_sd.index)
@@ -1490,16 +1496,18 @@ if _scan_df is not None and len(_scan_df) > 0:
     _sbt, _sbs = _txt('sb_type'), _txt('sb_state')
     _q_sb = _m_short & _sbt.isin(_BASES) & _sbs.isin(['In base', 'Near breakdown', 'Broke down today'])
     _q_sr = _m_short & (_rls != '')
-    # 7 Nov 2026 (c): Deep dip = any scanned stock (liquid) whose close is within +-1 ATR of a 200-day SMA rising at
-    # least the chosen slope over 21 sessions, and >= 25% above its 52-week low. Deep rip = the mirror (falling
-    # 200-day, >= 25% below the 52-week high).
-    _s2, _e200 = _num('sma200_slope21'), _num('ext200_atr')
-    _dsl = _DIP_SLOPE.get(st.session_state.get('ms_dipslope', '≥ 2% a month'), 2.0)
-    _near200 = _e200.between(-1, 1)
-    _q_ld = _liq & _fl & _near200 & ((_s2 >= _dsl) if _dsl > 0 else (_s2 > 0))
-    _q_sd = _liq & _fs & _near200 & ((_s2 <= -_dsl) if _dsl > 0 else (_s2 < 0))
-    _q_ld &= _num('off_lo252') >= 25
-    _q_sd &= _num('pct_52w') <= -0.25
+    # 8 Nov 2026: Deep dip = a live trigger on the 200 or 250 SMA (Deep_Dip study rules): the 20 closes before all above
+    # the SMA, then an undercut (low below, close back above) or a reclaim after 1-3 closes below, in the last 3
+    # sessions, with no close back below and the stop (trigger low - 1 ATR(10)) not hit. 'Watch' = 20 closes above
+    # and now within 1 ATR above the SMA (no trigger yet). Deep rip = the mirror. Plus the 21-session slope of the
+    # trigger SMA (select) and >= 25% above the 52-week low (long) / below the 52-week high (short).
+    _dsl = _DIP_SLOPE.get(st.session_state.get('ms_dipslope', 'Rising (> 0)'), 0.0)
+    _dwatch = st.session_state.get('ms_dipshow', _DIP_SHOW[0]) == _DIP_SHOW[1]
+    _dsl_l, _dsl_s = _num('dd_slope21'), _num('dr_slope21')
+    _sl_ok_l = pd.Series(True, index=_sd.index) if _dsl is None else ((_dsl_l >= _dsl) if _dsl > 0 else (_dsl_l > 0))
+    _sl_ok_s = pd.Series(True, index=_sd.index) if _dsl is None else ((_dsl_s <= -_dsl) if _dsl > 0 else (_dsl_s < 0))
+    _q_ld = _liq & _fl & _sl_ok_l & (_num('off_lo252') >= 25) & (_txt('dd_watch' if _dwatch else 'dd_trig') != '')
+    _q_sd = _liq & _fs & _sl_ok_s & (_num('pct_52w') <= -0.25) & (_txt('dr_watch' if _dwatch else 'dr_trig') != '')
     _heat = _num('heat_score').where(_liq)
     _hot_idx = _heat.where(_fl).dropna().sort_values(ascending=False).index[:50]
     _cold_idx = _heat.where(_fs).dropna().sort_values(ascending=True).index[:50]
@@ -1516,8 +1524,14 @@ if _scan_df is not None and len(_scan_df) > 0:
                  'Momentum list stocks down 2% or more over 5 sessions, closing within −1 to +0.5 ATR of a rising '
                  '20- or 50-day SMA (Setup column: PB 20d / PB 50d). Hottest first.'),
         'L_dip': ('Deep dip', int(_q_ld.sum()), 'long',
-                  'Any scanned stock (not only the momentum list) closing within ±1 ATR of a RISING 200-day SMA: up at '
-                  'least the chosen slope over 21 sessions, and at least 25% above its 52-week low. Steepest 200-day first.'),
+                  ('Watch: any scanned stock whose last 20 closes were above the 200 or 250 SMA and that now closes within '
+                   '1 ATR above it: no trigger yet. Closest first.') if _dwatch else
+                  ('Triggers in the last 3 sessions (Deep Dip study rules): the 20 closes before all above the 200 or 250 '
+                   'SMA, then an UNDERCUT (low below, close back above) or a RECLAIM after 1-3 closes below. Still live: '
+                   'no close back below since and the stop (trigger-day low − 1 ATR(10)) not hit. Any scanned stock, '
+                   '≥ 25% above the 52-week low. Setup column: trigger, days ago, stop and 1R %, trigger-day RVOL, ↑21 = '
+                   'back above the 21 EMA. Newest first. Evidence (stocks 2009-26): about +0.1R over a random entry in '
+                   'RISK-OFF / MILD RISK-OFF, none in DEEP RISK-OFF; better with RS > +20% vs SPY. Descriptive.')),
         'L_hot': ('Hot 50', len(_hot_idx), 'long',
                   'The 50 highest heat scores across all scanned stocks that pass the liquidity filter (any list).'),
         'S_bases': ('Bases', int(_q_sb.sum()), 'short',
@@ -1528,8 +1542,11 @@ if _scan_df is not None and len(_scan_df) > 0:
                     'Short list stocks up 2% or more over 5 sessions, closing within −0.5 to +1 ATR of a falling '
                     '20- or 50-day SMA (Setup column: Rally 20d / 50d). Coldest first.'),
         'S_dip': ('Deep rip', int(_q_sd.sum()), 'short',
-                  'Any scanned stock closing within ±1 ATR of a FALLING 200-day SMA: down at least the chosen slope over '
-                  '21 sessions, and at least 25% below its 52-week high. Steepest decline first.'),
+                  ('Watch: last 20 closes below the 200 or 250 SMA, now within 1 ATR below it.') if _dwatch else
+                  ('Mirror of Deep dip: 20 closes below the 200 or 250 SMA, then a poke above and close back below, or a '
+                   'close back below after 1-3 closes above, in the last 3 sessions; stop = trigger-day high + 1 ATR. '
+                   '≥ 25% below the 52-week high. Caution: in the study the short mirror LOST money on stocks in every '
+                   'MRS band, worst in a bear market (−0.40R with a 2R target).')),
         'S_cold': ('Cold 50', len(_cold_idx), 'short',
                    'The 50 lowest heat scores across all scanned stocks that pass the liquidity filter (any list).'),
     }
@@ -1574,17 +1591,21 @@ if _scan_df is not None and len(_scan_df) > 0:
         st.markdown('<div style="height:1.75rem;"></div>', unsafe_allow_html=True)
         _no_earn = st.checkbox('Hide earnings ≤ 7 days', value=False, key='ms_earn')
     if _scan in ('L_dip', 'S_dip'):                   # 7 Nov 2026 (c): settings of the Deep dip / rip scans
-        _d1, _d3 = st.columns([1.0, 3.4])
+        _d0, _d1, _d3 = st.columns([1.2, 1.0, 2.2])
+        with _d0:
+            st.selectbox('Show', _DIP_SHOW, index=0, key='ms_dipshow',
+                         help='Triggers = entries that fired in the last 3 sessions and are still live. Watch = names '
+                              'approaching the 200 / 250 from the trend side, to prepare for the next sessions.')
         with _d1:
-            st.selectbox('200-day slope (21 sessions)', list(_DIP_SLOPE), index=1, key='ms_dipslope',
-                         help='How steep the 200-day SMA must be: up at least this much over the last 21 sessions '
-                              '(Deep dip) or down at least this much (Deep rip). Median on the liquid momentum list is '
-                              'about +5% a month (3 Nov 2026).')
+            st.selectbox('Slope of the SMA (21 sessions)', list(_DIP_SLOPE), index=1, key='ms_dipslope',
+                         help='Slope of the trigger SMA (the 200 when both): up at least this much over 21 sessions '
+                              '(Deep dip) or down at least this much (Deep rip). In the stock study the slope made no '
+                              'difference to the results; it is a preference filter.')
         if not _has_dip:
             with _d3:
                 st.markdown('<div style="height:1.9rem;"></div><span style="font-size:0.75rem;color:#e3b48e;">'
-                            'The distance to the 200-day arrives with the next nightly scan: until then this list is '
-                            'empty.</span>', unsafe_allow_html=True)
+                            'The triggers arrive with the next nightly scan: until then this list is empty.</span>',
+                            unsafe_allow_html=True)
     st.markdown(f'<div style="font-size:0.72rem;color:#a89f95;margin:-4px 0 8px 0;">'
                 f'<b style="color:{"#85cac5" if _SCANS[_scan][2] == "long" else "#f4a062"};">'
                 f'{"LONG" if _SCANS[_scan][2] == "long" else "SHORT"} · {_SCANS[_scan][0]}</b> — '
@@ -1612,12 +1633,12 @@ if _scan_df is not None and len(_scan_df) > 0:
         _lg = _scan == 'L_dip'
         _vn = lambda c: (pd.to_numeric(_v[c], errors='coerce') if c in _v.columns    # scans before the new columns
                          else pd.Series(np.nan, index=_v.index))
-        _ve, _vs = _vn('ext200_atr'), _vn('sma200_slope21')
-        _vo = _vn('off_lo252') if _lg else _vn('pct_52w') * 100
-        _v = _v.assign(_dip='Dip 200d' if _lg else 'Rip 200d',
-                       _dip_t=[f'Close {e:+.1f} ATR from the 200-day SMA; 200-day {s:+.1f}% in 21 sessions; '
-                               f'{o:+.0f}% from the 52-week {"low" if _lg else "high"}' for e, s, o in zip(_ve, _vs, _vo)],
-                       _k=_vs).sort_values('_k', ascending=not _lg, na_position='last')
+        _p = 'dd' if _lg else 'dr'
+        if _dwatch:
+            _v = _v.assign(_dd_mode='watch', _k=_vn(f'{_p}_watch_atr')).sort_values('_k', na_position='last')
+        else:
+            _v = _v.assign(_dd_mode='trig', _k=_vn(f'{_p}_days') * 1000 - _vn(f'{_p}_rvol').fillna(0)) \
+                   .sort_values('_k', na_position='last')
     elif _scan == 'L_bases':
         _rk = _v['base_state'].map({'Broke out today': 3, 'Near pivot': 2, 'In base': 1}).fillna(0)
         _v = _v.assign(_k=_rk * 1000 + pd.to_numeric(_v['base_dist_pct'], errors='coerce').fillna(-9) * 100) \

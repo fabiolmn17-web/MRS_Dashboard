@@ -29,8 +29,7 @@ Used by scanner.py. Same definitions as the dashboard and the Epistruct studies:
   sma200_slope21 = % change of the 200-day SMA over 21 sessions.
   7 Nov 2026 (c): Deep dip / Deep rip scans (dashboard): ext200_atr = (close - SMA200) / ATR(14);
   off_lo252 = % of the close above the lowest close of the last 252 sessions (52-week low).
-  Deep dip (long, any list): 200-day rising >= the chosen slope, close within +-1 ATR of it, close >= 25% above
-  the 52-week low. Deep rip (short): the mirror (falling 200-day, close >= 25% below the 52-week high, pct_52w).
+  8 Nov 2026: Deep dip / Deep rip are TRIGGERS (Deep_Dip study rules), not proximity (deep_dip_fields below).
 """
 import logging
 import sys
@@ -56,7 +55,11 @@ FIELDS = ['held_score', 'held_label', 'held_trend', 'days_in_label', 'pending_la
           'above_sma200', 'sma50_above_sma200', 'ext_atr', 'ext_zone', 'sma50_slope5', 'mom_zone',
           'ret_5d', 'pullback', 'pct_52w', 'mom_list',
           'ext20_atr', 'sma20_slope5', 'short_list', 'pb_setup', 'rally_setup', 'adr_pct', 'avg_vol50',
-          'sma200_slope21', 'ext200_atr', 'off_lo252']
+          'sma200_slope21', 'ext200_atr', 'off_lo252', 'ema21_above', 'ema10_above21']
+# 8 Nov 2026: Deep dip (dd_) / Deep rip (dr_) triggers on the 200 and 250 SMA (TRADING DESK/Studies/Deep_Dip)
+DD_KEYS = ['trig', 'k', 'sma', 'days', 'entry', 'stop', 'risk_pct', 'rvol', 'slope21', 'watch', 'watch_atr']
+DD_FIELDS = [f'{p}_{k}' for p in ('dd', 'dr') for k in DD_KEYS]
+FIELDS += DD_FIELDS
 
 
 def _atr_wilder(df: pd.DataFrame, n: int = 14) -> pd.Series:
@@ -99,6 +102,88 @@ def pullback_bin(r5: float) -> str:
         return ''
     return 'Sharp pullback' if r5 <= -4 else 'Pullback' if r5 <= -3 else 'Dip' if r5 <= -2 else 'None'
 
+
+
+def deep_dip_fields(df: pd.DataFrame, side: str = 'long', n_above: int = 20, max_below: int = 3, max_days: int = 3) -> dict:
+    """8 Nov 2026 (Deep_Dip study, v1-v3). Long ('dd_'): the 20 closes before were all above the 200 or 250 SMA, then
+      UNDERCUT  = low below the SMA, close back above (prior close above), or
+      RECLAIM   = 1-3 closes below the SMA, then a close back above.
+    A trigger in the last max_days sessions stays listed while every close since is still above that SMA and the
+    stop (trigger-day low - 1 ATR(10)) has not been hit. If both SMAs trigger on the same bar: '200+250'.
+    entry = trigger close; risk_pct = (entry - stop) / entry; rvol = trigger-day volume / mean of the 10 before;
+    slope21 = % change of the trigger SMA over 21 sessions (the 200 when both).
+    WATCH (no live trigger): the last 20 closes all above the SMA and the close within 1 ATR above it ('Near 200' /
+    'Near 250' / 'Near 200+250'); watch_atr = (close - SMA) / ATR of the nearer one.
+    Short ('dr_'): the exact mirror (rip up into the SMA from below). Descriptive; see the study for the evidence."""
+    pre = 'dd' if side == 'long' else 'dr'
+    out = {f'{pre}_{k}': (np.nan if k not in ('trig', 'sma', 'watch') else '') for k in DD_KEYS}
+    s = 1 if side == 'long' else -1
+    try:
+        d = df[['High', 'Low', 'Close']].dropna()
+        if len(d) < 250 + n_above + max_below + max_days + 2:
+            return out
+        h, l, c = d['High'].values, d['Low'].values, d['Close'].values
+        vol = df['Volume'].reindex(d.index).values if 'Volume' in df.columns else np.full(len(c), np.nan)
+        a10 = _atr_wilder(d, 10).reindex(d.index).values
+        n = len(c)
+        smas = {L: d['Close'].rolling(L).mean().values for L in (200, 250)}
+        best = None                                   # (days_ago, [L...], type, k)
+        for L, sma in smas.items():
+            x = s * (c - sma)
+            for dago in range(0, max_days + 1):
+                i = n - 1 - dago
+                if not np.isfinite(sma[i]) or x[i] <= 0:
+                    continue
+                typ, k = None, 0
+                if x[i-1] > 0:
+                    pierce = (l[i] < sma[i]) if s > 0 else (h[i] > sma[i])
+                    if pierce and (x[i-n_above:i] > 0).all():
+                        typ = 'Undercut' if s > 0 else 'Overcut'
+                else:
+                    while k <= max_below and x[i-1-k] <= 0:
+                        k += 1
+                    if 1 <= k <= max_below and (x[i-k-n_above:i-k] > 0).all():
+                        typ = 'Reclaim' if s > 0 else 'Lost reclaim'
+                    else:
+                        k = 0
+                if typ is None:
+                    continue
+                stop = (l[i] - a10[i]) if s > 0 else (h[i] + a10[i])
+                later = slice(i + 1, n)
+                if (x[later] <= 0).any() or ((l[later] <= stop).any() if s > 0 else (h[later] >= stop).any()):
+                    continue                          # closed back through the SMA, or stopped out since
+                if best is None or dago < best[0]:
+                    best = (dago, [L], typ, k)
+                elif dago == best[0] and L not in best[1]:
+                    best[1].append(L)
+                break                                 # most recent trigger on this SMA
+        if best is not None:
+            dago, Ls, typ, k = best
+            i = n - 1 - dago
+            stop = (l[i] - a10[i]) if s > 0 else (h[i] + a10[i])
+            Lr = 200 if 200 in Ls else 250
+            sm = smas[Lr]
+            v10 = np.nanmean(vol[i-10:i]) if i >= 10 else np.nan
+            out.update({f'{pre}_trig': typ, f'{pre}_k': k, f'{pre}_sma': '+'.join(str(L) for L in sorted(Ls)),
+                        f'{pre}_days': dago, f'{pre}_entry': float(c[i]), f'{pre}_stop': float(stop),
+                        f'{pre}_risk_pct': float(s * (c[i] - stop) / c[i] * 100),
+                        f'{pre}_rvol': float(vol[i] / v10) if v10 and np.isfinite(v10) and v10 > 0 else np.nan,
+                        f'{pre}_slope21': float((sm[-1] / sm[-22] - 1) * 100)})
+        else:
+            near = []
+            for L, sma in smas.items():
+                x = s * (c - sma)
+                if np.isfinite(sma[-1]) and (x[-n_above:] > 0).all() and x[-1] <= a10[-1]:
+                    near.append((x[-1] / a10[-1], L))
+            if near:
+                near.sort()
+                Ls = sorted(L for _, L in near)
+                sm = smas[near[0][1]]
+                out.update({f'{pre}_watch': 'Near ' + '+'.join(str(L) for L in Ls), f'{pre}_watch_atr': float(near[0][0]),
+                            f'{pre}_slope21': float((sm[-1] / sm[-22] - 1) * 100)})
+    except Exception as e:  # never break the scan on one ticker
+        logger.warning(f'deep dip fields error: {e}')
+    return out
 
 def momentum_fields(df: Optional[pd.DataFrame], spy_df: Optional[pd.DataFrame]) -> dict:
     """All momentum / trend / Ext-Mom fields for one stock. NaN / '' where history is too short."""
@@ -153,6 +238,10 @@ def momentum_fields(df: Optional[pd.DataFrame], spy_df: Optional[pd.DataFrame]) 
                                  if len(c) >= 221 and sma200.iloc[-22] > 0 else np.nan)
         out['ext200_atr'] = (p - s200) / a if (not np.isnan(s200)) and a and a > 0 else np.nan
         out['off_lo252'] = (p / float(c.iloc[-252:].min()) - 1) * 100
+        e21 = c.ewm(span=21, adjust=False).mean(); e10 = c.ewm(span=10, adjust=False).mean()
+        out['ema21_above'] = bool(p > float(e21.iloc[-1]))
+        out['ema10_above21'] = bool(float(e10.iloc[-1]) > float(e21.iloc[-1]))
+        out.update(deep_dip_fields(df, 'long')); out.update(deep_dip_fields(df, 'short'))
         hl = (d['High'] / d['Low']).iloc[-20:]
         out['adr_pct'] = float((hl.mean() - 1) * 100) if len(hl) == 20 else np.nan
         if 'Volume' in df.columns:
