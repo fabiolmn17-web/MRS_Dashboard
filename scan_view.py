@@ -160,6 +160,26 @@ def rvol_cell(r) -> str:
     return (f'<td class="num" data-s="{v}" title="{_e(tip)}" style="color:{col};font-weight:{fw};">{v:.2f}×</td>')
 
 
+def depth_chip(r) -> str:
+    """9 Nov 2026: depth of the sell-off on Deep dip rows = close vs its 50-day SMA in ATR(14) (ext_atr). Teal bold at
+    -3 ATR or deeper (ETF rebound-window study: wider upside than the VIX implies, Provisional), copper -2 to -3,
+    grey shallower. The tooltip carries the evidence and SPY's own stretch."""
+    x = r.get('ext_atr')
+    if _nan(x):
+        return ''
+    x = float(x)
+    col, bold = (TEAL, True) if x <= -3 else (COPPER, True) if x <= -2 else (DIM, False)
+    spy = r.get('_spy_ext')
+    spy_txt = '' if _nan(spy) else (f' SPY now {float(spy):+.1f} ATR vs its 50-day'
+                                    + (' (also stretched).' if float(spy) < -1 else ' (not stretched).'))
+    tip = (f'Depth of the sell-off: the close is {x:+.1f} ATR vs its 50-day SMA. In the 13 Deep dip ETFs (2005-26), '
+           'below -3 ATR the next 20 sessions gained more than 5% in 34% of cases vs 24% at the same VIX level (+10 pp, '
+           'Provisional), mostly when SPY was stretched too (37% vs 26%; on its own 19% vs 14%). -1 to -2 ATR added '
+           'nothing beyond the VIX, and the end-of-month downside was not larger at any depth. Not tested on single '
+           'stocks.' + spy_txt)
+    return f' <span title="{_e(tip)}">{chip(f"{x:+.1f} ATR", col, bold)}</span>'
+
+
 def setup_cell(r):
     """7 Nov 2026: pullback to a rising 20 / 50-day SMA (long) or rally to a falling one (short), from momentum.py."""
     mode = _s(r.get('_dd_mode'))
@@ -172,7 +192,8 @@ def setup_cell(r):
             if not w:
                 return '<span style="color:#6e675f;">—</span>', 0
             d = '' if _nan(xa) else f' <span class="sub">{float(xa):.1f} ATR</span>'
-            return f'<span title="{_e(w + " SMA: no trigger yet")}">{chip(w.replace("Near ", "≈"), col, False)}{d}</span>', 1
+            return (f'<span title="{_e(w + " SMA: no trigger yet")}">{chip(w.replace("Near ", "≈"), col, False)}{d}</span>'
+                    + ('' if sh else depth_chip(r))), 1
         tg = _s(r.get(f'{pre}_trig'))
         if not tg:
             return '<span style="color:#6e675f;">—</span>', 0
@@ -189,7 +210,8 @@ def setup_cell(r):
                  + f', {dtxt}. Entry ref = trigger close {r.get(f"{pre}_entry")}; stop = trigger-day '
                  + ('high + 1 ATR(10)' if sh else 'low − 1 ATR(10)') + '. vol = trigger-day volume ÷ the 10 sessions before.')
         rank = 10 - (0 if _nan(days) else int(float(days)))
-        return f'<span title="{_e(title)}">{chip(lab, col, True)} <span class="sub">{_e(sub)}</span></span>', rank
+        return (f'<span title="{_e(title)}">{chip(lab, col, True)} <span class="sub">{_e(sub)}</span></span>'
+                + ('' if sh else depth_chip(r))), rank
     dp = _s(r.get('_dip'))
     if dp:                                   # 7 Nov 2026 (c): Deep dip / Deep rip scans (old proximity version)
         col = TEAL if r.get('_side') != 'short' else ORANGE

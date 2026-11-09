@@ -802,6 +802,7 @@ if st.session_state.get('show_risk_panel', True):
             _rp_spy, _rp_v3, _rp_cl = load_risk_inputs(_rp_etfs)
         if _rp_spy is not None and len(_rp_spy):
             _rp_snap = risk_panel.build_snapshot(hist, _rp_spy, _rp_v3, _rp_cl, pipeline.regime_label)
+            st.session_state['_spy_ext_atr'] = _rp_snap.get('ext_atr')     # 9 Nov 2026: depth context on Deep dip
             st.markdown(risk_panel.panel_html(_rp_snap), unsafe_allow_html=True)
         else:
             st.caption('Risk today panel: SPY history not available right now.')
@@ -1561,7 +1562,14 @@ if _scan_df is not None and len(_scan_df) > 0:
     # sessions), so triggers are listed only today or yesterday; also applied here so older scans (max_days 3) follow.
     _fresh_l = pd.Series(True, index=_sd.index) if _dwatch else (_num('dd_days') <= 1)
     _fresh_s = pd.Series(True, index=_sd.index) if _dwatch else (_num('dr_days') <= 1)
-    _q_ld = _liq & _fl & _sl_ok_l & (_num('off_lo252') >= 25) & (_txt('dd_watch' if _dwatch else 'dd_trig') != '') & _fresh_l
+    # 9 Nov 2026 (ETF rebound-window study): depth of the sell-off = close vs the 50-day in ATR(14), shown on every row;
+    # optional filter. In the 13 Deep dip ETFs, below -3 ATR the next 20 sessions had a wider upside than the VIX implies
+    # (Provisional); shallower stretches added nothing beyond the VIX. Not tested on single stocks.
+    _DIP_DEPTH = ['Any depth', '2+ ATR below the 50-day', '3+ ATR below the 50-day']
+    _ddep = st.session_state.get('ms_dipdepth', _DIP_DEPTH[0])
+    _dep_ok = (pd.Series(True, index=_sd.index) if _ddep == _DIP_DEPTH[0]
+               else _num('ext_atr') <= (-3 if _ddep == _DIP_DEPTH[2] else -2))
+    _q_ld = _liq & _fl & _sl_ok_l & (_num('off_lo252') >= 25) & (_txt('dd_watch' if _dwatch else 'dd_trig') != '') & _fresh_l & _dep_ok
     _q_sd = _liq & _fs & _sl_ok_s & (_num('pct_52w') <= -0.25) & (_txt('dr_watch' if _dwatch else 'dr_trig') != '') & _fresh_s
     _heat = _num('heat_score').where(_liq)
     _hot_idx = _heat.where(_fl).dropna().sort_values(ascending=False).index[:50]
@@ -1598,7 +1606,10 @@ if _scan_df is not None and len(_scan_df) > 0:
                    'RISK-OFF the trigger beat a random entry in the same band by +0.09R (95% CI +0.01 to +0.17), but only '
                    '+0.04R (not reliable) in the liquid names listed here; no reliable edge in other bands, and none when '
                    'entered 2+ sessions after the trigger. RS > +20% is not confirmed against random entries with the same RS. '
-                   'No short mirror: the Deep rip short lost money in the study (Tested: −0.40R per trade in SPY bear markets).')),
+                   'No short mirror: the Deep rip short lost money in the study (Tested: −0.40R per trade in SPY bear markets). '
+                   'Depth chip = close vs the 50-day in ATR, the depth of the sell-off: teal at −3 ATR or deeper, where '
+                   'the Deep dip ETFs had a wider upside over the next 20 sessions than the VIX implies (34% vs 24% for '
+                   'a 5%+ gain; Provisional, ETFs only).')),
         'L_hot': ('Hot 50', len(_hot_idx), 'long',
                   'The 50 highest heat scores across all scanned stocks that pass the liquidity filter (any list): where '
                   'to look for setups. The list itself had no return edge (2009–26). Descriptive.'),
@@ -1687,6 +1698,14 @@ if _scan_df is not None and len(_scan_df) > 0:
                                  'bases in the model book formed during market corrections.')
     if _scan in ('L_dip', 'S_dip'):                   # 7 Nov 2026 (c): settings of the Deep dip / rip scans
         _d0, _d1, _d3 = st.columns([1.2, 1.0, 2.2])
+        if _scan == 'L_dip':
+            with _d1:
+                st.selectbox('Depth of the sell-off', _DIP_DEPTH, index=0, key='ms_dipdepth',
+                             help='How far the close is below its own 50-day SMA, in ATR(14) (the downside of the '
+                                  'extension). In the 13 Deep dip ETFs (2005-26), below −3 ATR the next 20 sessions '
+                                  'gained more than 5% in 34% of cases against 24% at the same VIX level (+10 pp, both '
+                                  'halves; Provisional), mostly when SPY was stretched too. −1 to −2 ATR added nothing '
+                                  'beyond the VIX. The end-of-month downside was not larger. Not tested on single stocks.')
         with _d0:
             st.selectbox('Show', _DIP_SHOW, index=0, key='ms_dipshow',
                          help='Triggers = entries that fired today or yesterday and are still live (later entries had no '
@@ -1726,6 +1745,7 @@ if _scan_df is not None and len(_scan_df) > 0:
         _vn = lambda c: (pd.to_numeric(_v[c], errors='coerce') if c in _v.columns    # scans before the new columns
                          else pd.Series(np.nan, index=_v.index))
         _p = 'dd' if _lg else 'dr'
+        _v = _v.assign(_spy_ext=st.session_state.get('_spy_ext_atr'))   # 9 Nov 2026: market context for the depth chip
         if _dwatch:
             _v = _v.assign(_dd_mode='watch', _k=_vn(f'{_p}_watch_atr')).sort_values('_k', na_position='last')
         else:
