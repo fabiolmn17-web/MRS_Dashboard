@@ -7,7 +7,7 @@ Pipeline:
   1. Universe: US common stocks / ADRs, market cap >= $1B, price >= $10 (saved list as fallback; S&P 500 last);
      then 50-day average dollar volume >= $20M from the price download
   2. Batch download 1Y price history for all tickers + SPY (single yf.download call)
-  3. Fast pass per stock: technicals + RS; "L" = RS rating >= 80 (IBD-style percentile across the universe)
+  3. Fast pass per stock: technicals + RS; "L" = RS rating >= 80 (percentile across the universe)
   4. Slow pass for candidates only: fetch fundamentals (per-stock yfinance call)
   5. Compute actionability (patterns) for all fundamentally-passing stocks
   6. Save results to output/scan_results.csv
@@ -144,11 +144,11 @@ def run_scan(
         f'{len(lag)} ticker(s) still end before the expected session')
     log(f'  SPY: {len(spy_df)} bars ({spy_df.index[-1].date()} last)')
     log(f'  Price data fetched for {len([t_ for t_ in price_data if t_ not in ("SPY", "QQQ")])}/{len(tickers)} stocks')
-    # bases v3 (8 Nov 2026): IBD market state from SPY and QQQ (follow-through day), once per scan
+    # bases v3 (8 Nov 2026): market state from SPY and QQQ (follow-through day), once per scan
     try:
         ftd_spy = bases.follow_through(spy_df)
         mkt_cols = bases.market_fields(spy_df, price_data.get('QQQ'))
-        log(f"  Market (IBD): SPY {mkt_cols.get('mkt_state')} · QQQ {mkt_cols.get('qqq_state')}")
+        log(f"  Market: SPY {mkt_cols.get('mkt_state')} · QQQ {mkt_cols.get('qqq_state')}")
     except Exception as e:
         ftd_spy, mkt_cols = None, {}
         log(f'  Market follow-through state failed: {e}')
@@ -365,7 +365,7 @@ def run_scan(
             'atr_pct':            pat.get('atr_pct'),
             'atr_pct_rank':       pat.get('atr_pct_rank'),
             'atr_compressed':     pat.get('atr_compressed', False),
-            'bb_kc_squeeze':      pat.get('bb_kc_squeeze', False),   # any squeeze (Beardy: not green)
+            'bb_kc_squeeze':      pat.get('bb_kc_squeeze', False),   # any squeeze (not green)
             'sqz_level':          pat.get('sqz_level', ''),          # High / Mid / Low / Off
             'sqz_ratio':          pat.get('sqz_ratio'),              # 2 x stdev / SMA(TR); <=1 / 1.5 / 2
             'sqz_bars':           pat.get('sqz_bars', 0),            # consecutive bars in a squeeze
@@ -383,7 +383,7 @@ def run_scan(
             # Breakouts and bases (bases.py)
             **{k: bse.get(k) for k in bases.FIELDS},
             **{k: bse.get(k) for k in bases.SHORT_FIELDS},
-            **{k: mkt_cols.get(k) for k in bases.MKT_FIELDS},                  # v3: IBD market state (same every row)
+            **{k: mkt_cols.get(k) for k in bases.MKT_FIELDS},                  # v3: market state (same every row)
             # Momentum & trend (momentum.py)
             **{k: mom.get(k) for k in momentum.FIELDS},
             'next_earnings':      mt.get('next_earnings', ''),

@@ -270,7 +270,7 @@ def build_drilldown_html(sec_df: pd.DataFrame, ind_df, hold_df, sort_col: str, s
         note += (f'Industry rows (industry ETFs, same formula) and top 10 holdings: nightly'
                  f'{", as of " + _e(ind_as_of) if ind_as_of else ""}. '
                  'Holdings: weight in the ETF, % 52W Hi = distance from the 52-week closing high, '
-                 'RS Score = same composite, ATR <span style="color:#e8dccb">●</span> = bottom 35th pctile, Squeeze = Beardy Squeeze Pro level (High / Mid / Low compression, Fired ↑/↓ today). '
+                 'RS Score = same composite, ATR <span style="color:#e8dccb">●</span> = bottom 35th pctile, Squeeze = squeeze level (High / Mid / Low compression, Fired ↑/↓ today). '
                  'Some industry ETFs hold non-US listings.')
     h += f'<div class="note">{note}</div></div>'
     return h.replace('\n', ' ')

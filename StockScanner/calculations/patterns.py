@@ -5,7 +5,7 @@ Detects:
 1. ATR Compression  — tight base / low volatility consolidation
 2. Local Swing High — most recent pivot high (N bars each side)
 3. Near Pivot       — price within 5% below (or just above) the swing high
-4. Squeeze          — Beardy Squeeze Pro levels (BB 2.0 inside KC 1.0 / 1.5 / 2.0) and momentum
+4. Squeeze          — squeeze levels (BB 2.0 inside KC 1.0 / 1.5 / 2.0) and momentum
 
 These are NOT filters — they annotate every passing stock to help the user
 identify which stocks are in a low-risk entry zone.
@@ -55,7 +55,7 @@ class PatternDetector:
         high  = df['High'].dropna()
         low   = df['Low'].dropna()
 
-        # ── Squeeze (Beardy Squeeze Pro): needs only 2 x 20 bars, so before the ATR length check
+        # ── Squeeze: needs only 2 x 20 bars, so before the ATR length check
         result.update(self.compute_squeeze(df))
 
         if len(close) < self.ATR_PERIOD + self.ATR_LOOKBACK:
@@ -111,13 +111,13 @@ class PatternDetector:
         except Exception:
             return None
 
-    # ── Squeeze (Beardy Squeeze Pro) ─────────────────────────────────────────
+    # ── Squeeze ─────────────────────────────────────────
     SQZ_LENGTH = 20
     SQZ_BB_MULT = 2.0
     SQZ_KC = (1.0, 1.5, 2.0)          # High / Mid / Low compression (Keltner multipliers)
 
     def compute_squeeze(self, df: pd.DataFrame) -> dict:
-        """Beardy Squeeze Pro (TradingView, Beardy_Fred), same definitions as the Pine script:
+        """Squeeze levels (TradingView squeeze indicator), same definitions as the Pine script:
           BB  = SMA(close, 20) +/- 2.0 x stdev(close, 20)          (population stdev, as ta.stdev)
           KC  = SMA(close, 20) +/- k x SMA(true range, 20)        k = 1.0 / 1.5 / 2.0
           Both channels share the SMA basis, so "BB inside KC" reduces to 2 x stdev <= k x SMA(TR).

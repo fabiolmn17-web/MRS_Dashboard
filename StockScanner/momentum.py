@@ -60,6 +60,48 @@ FIELDS = ['held_score', 'held_label', 'held_trend', 'days_in_label', 'pending_la
 DD_KEYS = ['trig', 'k', 'sma', 'days', 'entry', 'stop', 'risk_pct', 'rvol', 'slope21', 'watch', 'watch_atr']
 DD_FIELDS = [f'{p}_{k}' for p in ('dd', 'dr') for k in DD_KEYS]
 FIELDS += DD_FIELDS
+# 9 Nov 2026: RVOL (Epistruct RVOL at Time, Pine v1.3): rvol_d = anchor 1D on daily bars (today's volume / the
+# average of the last 20 sessions); rvol_w = anchor 1W, Cumulative (week-to-date vs the same weekday, 20 weeks)
+FIELDS += ['rvol_d', 'rvol_w', 'rvol_w_n']
+
+
+def rvol_at_time(df, length=20, min_n=5, mode='Cumulative', anchor='W'):
+    """Epistruct RVOL at Time (Pine v1.3) on daily bars, for the last bar. anchor 'W' = 1-week periods (the indicator's
+    setting for a daily chart); anchor 'D' = the chart timeframe, which reduces to classic relative volume (today's volume
+    / the average of the last `length` sessions).
+    RVOL = volume so far this week (Cumulative) or today's volume (Regular) / the average of the same quantity at the
+    same offset from the week's first bar over the last `length` completed weeks (the last bar at or before that
+    offset). NaN when fewer than min(min_n, length) past weeks. Returns (rvol, n_weeks)."""
+    if df is None or 'Volume' not in df.columns or len(df) < 2:
+        return np.nan, 0
+    df = df.iloc[-(length * 7 + 10):]                        # enough bars for `length` past weeks
+    idx = pd.DatetimeIndex(df.index)
+    if idx.tz is not None:
+        idx = idx.tz_localize(None)
+    v = pd.Series(pd.to_numeric(df['Volume'], errors='coerce').fillna(0.0).to_numpy(float), index=idx)
+    if anchor == 'D':
+        starts = np.ones(len(idx), dtype=bool)                # every bar is its own period
+    else:
+        wk = idx.to_period('W-SUN')
+        starts = np.r_[True, wk[1:] != wk[:-1]]             # timeframe.change("1W")
+    pid = np.cumsum(starts) - 1
+    t0 = pd.Series(idx).where(starts).ffill().to_numpy()
+    off = (idx.to_numpy() - t0).astype('timedelta64[m]').astype(np.int64)
+    cum = pd.Series(v.to_numpy()).groupby(pid).cumsum().to_numpy()
+    vol = v.to_numpy()
+    last_p, o = pid[-1], off[-1]
+    cur = cum[-1] if mode == 'Cumulative' else vol[-1]
+    tot, cnt = 0.0, 0
+    for p in range(last_p - 1, max(-1, last_p - 1 - length), -1):
+        m = np.where((pid == p) & (off <= o))[0]
+        if len(m):
+            j = m[-1]
+            tot += cum[j] if mode == 'Cumulative' else vol[j]
+            cnt += 1
+    if cnt == 0 or cnt < min(min_n, length):
+        return np.nan, cnt
+    avg = tot / cnt
+    return (float(cur / avg) if avg > 0 else np.nan), cnt
 
 
 def _atr_wilder(df: pd.DataFrame, n: int = 14) -> pd.Series:
@@ -250,6 +292,8 @@ def momentum_fields(df: Optional[pd.DataFrame], spy_df: Optional[pd.DataFrame]) 
         if 'Volume' in df.columns:
             vv = df['Volume'].dropna().iloc[-50:]
             out['avg_vol50'] = float(vv.mean()) if len(vv) >= 20 else np.nan
+            out['rvol_d'] = rvol_at_time(df, anchor='D')[0]
+            out['rvol_w'], out['rvol_w_n'] = rvol_at_time(df, anchor='W')
         ok = lambda v: v is not None and not np.isnan(v)
         if ok(r5) and r5 <= -2:
             if ok(ext) and -1 <= ext <= 0.5 and ok(sl) and sl > 0:

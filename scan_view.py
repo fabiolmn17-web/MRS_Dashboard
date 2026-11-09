@@ -51,7 +51,7 @@ def _s(v):
     return '' if v is None or (isinstance(v, float) and math.isnan(v)) or str(v) == 'nan' else str(v)
 
 
-# Beardy Squeeze Pro: dot colours (orange = High, red = Mid, black = Low, green = none) and momentum colours
+# Squeeze (Bollinger inside Keltner): dot colours (orange = High, red = Mid, black = Low, green = none) and momentum colours
 SQZ_COL = {'High': '#f4a062', 'Mid': '#e0605a', 'Low': '#b9b2a9'}
 SQZ_RANK = {'High': 3, 'Mid': 2, 'Low': 1}
 MOM_SQZ_COL = {'aqua': '#4dd0e1', 'blue': '#2962ff', 'red': '#ef5350', 'yellow': '#fdd835'}
@@ -80,14 +80,14 @@ def squeeze_cell(r):
 
 
 HEAD = [('Ticker', 'l'), ('Heat', 'c'), ('Sector', 'l'), ('Close', ''), ('% 52W Hi', ''), ('RS label (held)', 'l'),
-        ('RS 3M', ''), ('RS 1M', ''), ('RS rtg', ''), ('Ext vs SMA50', ''), ('Momentum', 'c'), ('5-day', ''), ('CAN SLIM', 'c'),
+        ('RS 3M', ''), ('RS 1M', ''), ('RS rtg', ''), ('Ext vs SMA50', ''), ('Momentum', 'c'), ('5-day', ''), ('RVOL', ''), ('Growth', 'c'),
         ('EPS QoQ', ''), ('Setup', 'l'), ('Squeeze', 'c'), ('Base / pivot', 'l'), ('Breakout', 'c'), ('Earnings', ''),
         ('Industry (rank · state)', 'l')]
 
 BASE_ABBR = {'Cup w/ handle': 'Cup·H', 'Flat base': 'Flat', 'High tight flag': 'HTF', 'VCP': 'VCP',
              'Tight area': 'Tight', 'Double bottom': 'DB', 'Base-on-base': 'BoB', 'Ascending base': 'Asc',
              'IPO base': 'IPO'}
-# bases v3 (8 Nov 2026): short labels for the IBD fault chips (full text in the tooltip)
+# bases v3 (8 Nov 2026): short labels for the fault chips (full text in the tooltip)
 FAULT_ABBR = [('wedging handle', 'wedge'), ('V: straight up', 'V'), ('left side', 'long left'), ('late stage', 'late'),
               ('light-volume', 'light vol'), ('distribution', 'distrib'), ('wide and loose', 'loose'),
               ('deeper than the market', 'too deep')]
@@ -106,15 +106,15 @@ def quality_html(r):
     q, qm = int(float(q)), int(float(qm))
     col = TEAL if q >= 5 else COPPER if q >= 3 else DIM
     detail = _s(r.get('base_q_detail'))
-    out = f' <span title="{_e("IBD model-book checks (descriptive, untested): " + detail)}">{chip(f"Q {q}/{qm}", col, q >= 5)}</span>'
+    out = f' <span title="{_e("Base quality checks (descriptive, untested): " + detail)}">{chip(f"Q {q}/{qm}", col, q >= 5)}</span>'
     fl = [f for f in _s(r.get('base_faults')).split('; ') if f and f != 'None']
     for f in fl[:2]:
         ab = next((a for k, a in FAULT_ABBR if k in f), f)
-        out += f' <span title="{_e("Fault (IBD): " + f)}">{chip(ab, ORANGE, False)}</span>'
+        out += f' <span title="{_e("Fault: " + f)}">{chip(ab, ORANGE, False)}</span>'
     if len(fl) > 2:
         out += f' <span class="sub" title="{_e("; ".join(fl))}">+{len(fl) - 2}</span>'
     if _truthy(r.get('base_bo_ftd')):
-        out += (' <span title="Breakout within 20 sessions after a follow-through day on SPY (IBD timing)">'
+        out += (' <span title="Breakout within 20 sessions after a follow-through day on SPY">'
                 + chip('FTD', TEAL, True) + '</span>')
     if _truthy(r.get('db_sk3')):
         lv = r.get('db_sk3_level')
@@ -143,6 +143,21 @@ def short_base_cell(r):
             f'<span style="color:{col};">{txt}</span>{pv_txt}</span>'), sk
 
 
+def rvol_cell(r) -> str:
+    """9 Nov 2026: RVOL (Epistruct RVOL at Time, daily): today's volume / the average of the last 20 sessions (anchor =
+    chart timeframe). Tooltip: week-to-date vs the same weekday over 20 weeks (anchor 1W, cumulative)."""
+    v, w = r.get('rvol_d'), r.get('rvol_w')
+    if _nan(v):
+        return '<td class="num" data-s="-999"><span style="color:#6e675f;">—</span></td>'
+    v = float(v)
+    col, fw, zone = ((ORANGE, 700, 'extreme') if v >= 2 else (COPPER, 700, 'heavy') if v >= 1.5
+                     else ('#6e675f', 400, 'quiet') if v < 0.8 else ('#e8dccb', 400, 'normal'))
+    tip = (f'RVOL {v:.2f}x ({zone}): today\'s volume vs the average of the last 20 sessions. '
+           + ('' if _nan(w) else f'Week to date vs the same weekday over the last 20 weeks: {float(w):.2f}x. ')
+           + 'Quiet < 0.8, heavy >= 1.5, extreme >= 2. Same rules as the Epistruct RVOL at Time indicator. Descriptive.')
+    return (f'<td class="num" data-s="{v}" title="{_e(tip)}" style="color:{col};font-weight:{fw};">{v:.2f}×</td>')
+
+
 def setup_cell(r):
     """7 Nov 2026: pullback to a rising 20 / 50-day SMA (long) or rally to a falling one (short), from momentum.py."""
     mode = _s(r.get('_dd_mode'))
@@ -167,10 +182,10 @@ def setup_cell(r):
         dtxt = '' if _nan(days) else ('today' if int(float(days)) == 0 else f'{int(float(days))}d ago')
         sub = ' '.join(x for x in [dtxt, '' if _nan(stop) else f'stop {float(stop):,.2f}',
                                     '' if _nan(risk) else f'({float(risk):.1f}%)',
-                                    '' if _nan(rv) else f'RVOL {float(rv):.1f}×', ('↓21' if sh else '↑21') if ab else ''] if x)
+                                    '' if _nan(rv) else f'vol {float(rv):.1f}×', ('↓21' if sh else '↑21') if ab else ''] if x)
         title = (f'{tg} of the {sma} SMA' + ('' if _nan(k) or int(float(k)) == 0 else f' after {int(float(k))} close(s) beyond')
                  + f', {dtxt}. Entry ref = trigger close {r.get(f"{pre}_entry")}; stop = trigger-day '
-                 + ('high + 1 ATR(10)' if sh else 'low − 1 ATR(10)') + '.')
+                 + ('high + 1 ATR(10)' if sh else 'low − 1 ATR(10)') + '. vol = trigger-day volume ÷ the 10 sessions before.')
         rank = 10 - (0 if _nan(days) else int(float(days)))
         return f'<span title="{_e(title)}">{chip(lab, col, True)} <span class="sub">{_e(sub)}</span></span>', rank
     dp = _s(r.get('_dip'))
@@ -204,7 +219,7 @@ def base_cell(r):
             '★' * int(float(q)) + '☆' * (3 - int(float(q))) + '</span>'
     if broke:
         bv = r.get('base_bo_vol')
-        if _truthy(r.get('base_bo_light')):        # v3: a light-volume breakout reads grey (IBD: don't buy it)
+        if _truthy(r.get('base_bo_light')):        # v3: a light-volume breakout reads grey (not a buy)
             col = DIM
         vtxt = '' if _nan(bv) else (f' <span style="color:{TEAL if float(bv) >= 1.4 else DIM};">'
                                     f'{float(bv):.1f}× vol</span>')
@@ -366,7 +381,7 @@ def _row(r, today, sec_label, sec_score, leader_hold, yf_to_sector, clickable=Fa
     h += f'<td class="l" data-s="{_sv(hs) * 1000 + (0 if _nan(days) else float(days))}">{rs_html}</td>'
     for k in ('rs_3m', 'rs_1m'):
         h += f'<td class="num" data-s="{_sv(r.get(k))}" style="color:{_col(r.get(k))};">{_pct(r.get(k))}</td>'
-    # RS rating (3 Nov 2026): IBD-style percentile 1-99 across the scanned universe; >= 80 = CAN SLIM "L"
+    # RS rating (3 Nov 2026): percentile 1-99 across the scanned universe; >= 80 = the Growth screen's RS gate
     rr = r.get('rs_rating')
     rr_c = DIM if _nan(rr) else TEAL if float(rr) >= 80 else '#e8dccb' if float(rr) >= 50 else COPPER
     h += (f'<td class="num" data-s="{_sv(rr)}" style="color:{rr_c};" title="RS rating: weighted 12-month performance '
@@ -376,10 +391,11 @@ def _row(r, today, sec_label, sec_score, leader_hold, yf_to_sector, clickable=Fa
           f'{chip(ez, EXT_COL.get(ez, DIM), ez in ("Near", "Just below"))}</td>')
     h += f'<td class="c" data-s="{_e(mz)}">{chip(mz, MOM_COL.get(mz, DIM), mz in ("Persistent", "Building"))}</td>'
     h += f'<td class="num" data-s="{_sv(r5)}" style="color:{_col(r5)};">{"—" if _nan(r5) else f"{float(r5):+.1f}%"}{pb_txt}</td>'
+    h += rvol_cell(r)                               # 9 Nov 2026: RVOL column (sortable)
     h += f'<td class="c" data-s="{ {"STRICT": 2, "RELAXED": 1}.get(mode, 0) }">{cs}</td>'
     low = str(r.get('eps_low_base')).lower() == 'true'
     low_html = (' <span class="sub" title="Growth from a loss or a near-zero base a year ago (or above +300%): not '
-                'counted for CAN SLIM" style="color:#e3b48e;">low base</span>') if low else ''
+                'counted for the Growth screen" style="color:#e3b48e;">low base</span>') if low else ''
     h += f'<td class="num" data-s="{_sv(eps)}" style="color:{DIM if low else _col(eps)};">{_pct(eps, 0)}{low_html}</td>'
     su_html, su_sort = setup_cell(r)                # 7 Nov 2026: replaces the ATR-compression column
     h += f'<td class="l" data-s="{su_sort}">{su_html}</td>'

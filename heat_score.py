@@ -17,7 +17,7 @@ Industry: group state + leader inside it (20)   Audit v2 (8 Nov 2026): Descripti
                                                 TS sign p 0.02). Leader-in-group rank: untested (industry_groups.py).
 Sector state (5)                                Sectors showed no reliable momentum (audit v2: near null), so context only.
 52-week high proximity (15)                     Literature: George-Hwang (2004) 52-week-high momentum. Untested here.
-Trend: 200-day, 50 > 200, SMA50 momentum (20)   Practitioner rules (O'Neil / Minervini trend template). Untested here.
+Trend: 200-day, 50 > 200, SMA50 momentum (20)   Practitioner rules (trend template). Untested here.
 Extension above the SMA50 (0, no penalty)       stretched_label_v0 (28 Oct 2026): in stocks the left tail did NOT grow
                                                 with extension, so no penalty.
 Market regime (not in the score)                Provisional (audit v2, 8 Nov 2026): in the crash state (SPY 12m down / MRS

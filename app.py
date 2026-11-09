@@ -10,7 +10,7 @@ Password-protected. Reads mrs_history.csv and displays:
   • 90-day MRS history chart + SPX close panel + VIX state panel
   • S&P 500 Sector Performance & Relative Strength, with industry drill-down
     (industry ETFs + top 10 holdings, sector_view.py / StockScanner/industry.py)
-  • CAN SLIM Stock Scanner
+  • Growth stock scanner
 """
 import numpy as np
 import pandas as pd
@@ -709,7 +709,7 @@ if _pend:
     _changes.append(f'<span title="{_esc(_all)}">Labels confirming (3 sessions needed): {_shown}'
                     + (f' <span style="color:#a89f95;">+{_more} more ⓘ</span>' if _more > 0 else '') + '</span>')
 
-# bases v3 (8 Nov 2026): IBD market state from the nightly scan (follow-through day on SPY and QQQ), one short item
+# bases v3 (8 Nov 2026): market state from the nightly scan (follow-through day on SPY and QQQ), one short item
 try:
     if _scan_df is not None and len(_scan_df) and 'mkt_state' in _scan_df.columns:
         _mst = str(_scan_df['mkt_state'].iloc[0])
@@ -718,10 +718,10 @@ try:
             _mcol = ('#85cac5' if _mst.startswith(('Confirmed', 'Uptrend')) else '#f4a062' if _mst == 'Correction'
                      else '#e3b48e')
             _qtxt = '' if _qst in ('', 'nan', 'None') else f' · QQQ {_esc(_qst)}'
-            _changes.append(f'<span title="IBD-style market state from the nightly scan. Correction = SPY 8%+ below its '
+            _changes.append(f'<span title="Market state from the nightly scan. Correction = SPY 8%+ below its '
                             f'52-week high; follow-through day (FTD) = day 4+ of a rally attempt, up 1.25%+ on higher '
-                            f'volume (IBD convention, assumed); fails if the rally low is undercut. Descriptive, untested.">'
-                            f'Market (IBD): <b style="color:{_mcol};">SPY {_esc(_mst)}</b>{_qtxt}</span>')
+                            f'volume (common convention, assumed); fails if the rally low is undercut. Descriptive, untested.">'
+                            f'Market: <b style="color:{_mcol};">SPY {_esc(_mst)}</b>{_qtxt}</span>')
 except Exception:
     pass
 
@@ -963,7 +963,7 @@ def _ctx_maps():
 
 def _wl_side_panel(t):
     """4 Nov 2026: what the ticker lookup shows, next to the watchlist chart: heat score, the scan row as a list,
-    momentum list / CAN SLIM / industry lines and Ext·Mom."""
+    momentum list / Growth / industry lines and Ext·Mom."""
     sl, ss, lh = _ctx_maps()
     r, in_scan = None, False
     if _scan_df is not None and len(_scan_df):
@@ -1174,7 +1174,7 @@ _scan_table_and_chart = st.fragment(_scan_table_and_chart_body) if hasattr(st, '
 @st.cache_data(ttl=1800, show_spinner=False)
 def _lookup_live(ticker):
     """Price-only scan fields for a ticker outside the nightly universe (same functions as the scanner).
-    CAN SLIM fundamentals are not fetched here."""
+    Growth fundamentals are not fetched here."""
     from StockScanner import momentum as _mom
     from StockScanner.calculations import RelativeStrengthCalculator, PatternDetector
     h = _chart_history(ticker)
@@ -1262,16 +1262,16 @@ def _scan_counts_html(sd):
     bt = sd['base_type'].fillna('').astype(str) if 'base_type' in sd.columns else pd.Series('', index=sd.index)
     bs = sd['base_state'].fillna('').astype(str) if 'base_state' in sd.columns else pd.Series('', index=sd.index)
     groups = [
-        ('Lists', [('Momentum', mom, '#85cac5'), ('CAN SLIM strict', pm == 'STRICT', '#85cac5'),
-                   ('CAN SLIM relaxed', pm.isin(['STRICT', 'RELAXED']), '#e3b48e'),
-                   ('Momentum + CAN SLIM', mom & pm.notna(), '#85cac5')]),
+        ('Lists', [('Momentum', mom, '#85cac5'), ('Growth strict', pm == 'STRICT', '#85cac5'),
+                   ('Growth relaxed', pm.isin(['STRICT', 'RELAXED']), '#e3b48e'),
+                   ('Momentum + Growth', mom & pm.notna(), '#85cac5')]),
         ('Bases', [('Cup w/ handle', bt == 'Cup w/ handle', '#85cac5'), ('Double bottom', bt == 'Double bottom', '#85cac5'),
                    ('VCP', bt == 'VCP', '#85cac5'), ('Base-on-base', bt == 'Base-on-base', '#85cac5'),
                    ('Flat base', bt == 'Flat base', '#e8dccb'), ('Tight area', bt == 'Tight area', '#e8dccb'),
                    ('Ascending', bt == 'Ascending base', '#e8dccb'), ('IPO base', bt == 'IPO base', '#e8dccb'),
                    ('High tight flag', bt == 'High tight flag', '#e3b48e'), ('Trend template ✓', tb('tt_pass'), '#9b958f')]),
-        # bases v3 (8 Nov 2026): IBD model-book quality (descriptive, untested)
-        ('Base quality (IBD)', [('Q 5+ of 7', pd.to_numeric(sd['base_q'], errors='coerce') >= 5
+        # bases v3 (8 Nov 2026): base quality (descriptive, untested)
+        ('Base quality', [('Q 5+ of 7', pd.to_numeric(sd['base_q'], errors='coerce') >= 5
                                  if 'base_q' in sd.columns else pd.Series(False, index=sd.index), '#85cac5'),
                                 ('No faults', (bt != '') & sd['base_faults'].fillna('').astype(str).isin(['', 'None', 'nan'])
                                  if 'base_faults' in sd.columns else pd.Series(False, index=sd.index), '#85cac5'),
@@ -1306,7 +1306,7 @@ def _scan_counts_html(sd):
 
 
 def _info_lines(r, t, in_scan, sd, leader_hold):
-    """Momentum list, CAN SLIM and industry lines for one stock (ticker lookup and watchlist side panel)."""
+    """Momentum list, Growth and industry lines for one stock (ticker lookup and watchlist side panel)."""
     def ok(v):
         return str(v).lower() == 'true'
     hs = pd.to_numeric(pd.Series([r.get('held_score')]), errors='coerce').iloc[0]
@@ -1326,14 +1326,14 @@ def _info_lines(r, t, in_scan, sd, leader_hold):
     if in_scan:
         pm = r.get('pass_mode')
         if isinstance(pm, str) and pm:
-            lines.append(f'<b style="color:#f3ece2;">CAN SLIM:</b> {pm}')
+            lines.append(f'<b style="color:#f3ece2;">Growth:</b> {pm}')
         else:
             why = r.get('tech_fail_reason')
             why = '' if why is None or (isinstance(why, float) and np.isnan(why)) else str(why)
             why = why.replace('_', ' ').replace('sma', 'SMA ').replace('  ', ' ').strip()
-            lines.append('<b style="color:#f3ece2;">CAN SLIM:</b> not passing' + (f' ({_html_mod.escape(why)})' if why else ''))
+            lines.append('<b style="color:#f3ece2;">Growth:</b> not passing' + (f' ({_html_mod.escape(why)})' if why else ''))
     else:
-        lines.append('<b style="color:#f3ece2;">CAN SLIM:</b> not checked (outside the nightly universe)')
+        lines.append('<b style="color:#f3ece2;">Growth:</b> not checked (outside the nightly universe)')
     etf = leader_hold.get(t)
     _g = r.get('ind_group')
     if isinstance(_g, str) and _g:
@@ -1358,7 +1358,7 @@ def _scan_lookup(sd, sec_label, sec_score, leader_hold):
         q = st.text_input('Look up a ticker', value='', key='ms_lookup', placeholder='e.g. CRM, PNTG, XNCR',
                           help='Shows the stock as the scan sees it. Names in the nightly universe (US stocks, market cap ≥ $1B, '
                                'price ≥ $10, 50-day dollar volume ≥ $20M) come from the scan; any other US ticker is '
-                               'computed live from prices (no CAN SLIM fundamentals).')
+                               'computed live from prices (no Growth fundamentals).')
     t = (q or '').strip().upper().lstrip('$')
     if not t:
         return
@@ -1373,7 +1373,7 @@ def _scan_lookup(sd, sec_label, sec_score, leader_hold):
         if r is None:
             st.warning(f'No price history found for {t}.')
             return
-        src = 'computed live from prices (not in the nightly universe; CAN SLIM not checked)'
+        src = 'computed live from prices (not in the nightly universe; Growth not checked)'
     with c_note:
         st.markdown(f'<div style="font-size:0.74rem;color:#a89f95;padding-top:30px;">'
                     f'<b style="color:#f3ece2;">{_html_mod.escape(str(r.get("name") or t))}</b> · {src}</div>',
@@ -1424,7 +1424,7 @@ if _scan_df is not None and len(_scan_df) > 0:
     for _c in ('held_score', 'rs_3m', 'ext_atr', 'rs_composite'):
         if _c in _sd.columns:
             _sd[_c] = pd.to_numeric(_sd[_c], errors='coerce')
-    if not _has_mom:   # CSV from before the momentum scan: fall back to the CAN SLIM rows
+    if not _has_mom:   # CSV from before the momentum scan: fall back to the Growth rows
         _sd['held_score'] = _sd.get('rs_composite')
         _sd['held_label'] = _sd.get('rs_label')
 
@@ -1450,11 +1450,11 @@ if _scan_df is not None and len(_scan_df) > 0:
         + (f' · MRS at scan {float(_scan_mrs):+.2f}' if _scan_mrs is not None and pd.notna(_scan_mrs) else '')
         + ' · updated nightly 10 PM UTC</div>', unsafe_allow_html=True)
     if not _has_mom:
-        st.info('The momentum columns arrive with the next nightly scan. Until then the table shows the CAN SLIM candidates.')
+        st.info('The momentum columns arrive with the next nightly scan. Until then the table shows the Growth candidates.')
     if len(_sd) < 900:          # 3 Nov 2026: the broad US universe is ~1,500+ names; fewer = it fell back
         st.warning(f'The scan covered only {len(_sd)} stocks' + (f' ({_uni_src})' if _uni_src else '') + ': the US '
                    'universe download did not work in the nightly run, so the lists are shorter than usual. Check the '
-                   '"CAN SLIM Scanner" run on GitHub (Actions tab).')
+                   'nightly scanner workflow on GitHub (Actions tab).')
 
     _scan_lookup(_sd, _sec_label, _sec_score, _leader_hold)
 
@@ -1510,7 +1510,7 @@ if _scan_df is not None and len(_scan_df) > 0:
     _fl, _fs = _fmask('long'), _fmask('short')
     _m_long, _m_short = _m_long & _fl, _m_short & _fs
     _BASES = ['Cup w/ handle', 'Flat base', 'VCP', 'Tight area', 'Double bottom', 'Base-on-base', 'Ascending base',
-              'IPO base']                                  # v3 (8 Nov 2026): IBD patterns added
+              'IPO base']                                  # v3 (8 Nov 2026): patterns added
     _bt, _bst = _txt('base_type'), _txt('base_state')
     # bases v3 (8 Nov 2026): pattern / fault / correction filters of the Bases scans (widgets below; read here so the
     # counts on the scan buttons follow them, like the squeeze and earnings filters)
@@ -1540,7 +1540,7 @@ if _scan_df is not None and len(_scan_df) > 0:
     # sessions, with no close back below and the stop (trigger low - 1 ATR(10)) not hit. 'Watch' = 20 closes above
     # and now within 1 ATR above the SMA (no trigger yet). Deep rip = the mirror. Plus the 21-session slope of the
     # trigger SMA (select) and >= 25% above the 52-week low (long) / below the 52-week high (short).
-    _dsl = _DIP_SLOPE.get(st.session_state.get('ms_dipslope', 'Rising (> 0)'), 0.0)
+    _dsl = None   # 9 Nov 2026: slope filter removed (audit v2: no measurable difference, within +-0.04R)
     _dwatch = st.session_state.get('ms_dipshow', _DIP_SHOW[0]) == _DIP_SHOW[1]
     _dsl_l, _dsl_s = _num('dd_slope21'), _num('dr_slope21')
     _sl_ok_l = pd.Series(True, index=_sd.index) if _dsl is None else ((_dsl_l >= _dsl) if _dsl > 0 else (_dsl_l > 0))
@@ -1563,7 +1563,7 @@ if _scan_df is not None and len(_scan_df) > 0:
         'L_bases': ('Bases', int(_q_lb.sum()), 'long',
                     'Momentum list stocks in a base (cup with handle, double bottom, VCP, base-on-base, flat base, tight '
                     'area, ascending base, IPO base) that is still actionable: in the base, within 5% below the pivot, or '
-                    'broke out today. Sorted by state, then quality Q, then distance to the pivot. Q = IBD model-book checks, orange = faults (descriptive).'),
+                    'broke out today. Sorted by state, then quality Q, then distance to the pivot. Q = base quality checks, orange = faults (descriptive).'),
         'L_pb': ('Pullbacks', int(_q_lp.sum()), 'long',
                  'Momentum list stocks down 2% or more over 5 sessions, closing within −1 to +0.5 ATR of a rising '
                  '20- or 50-day SMA (Setup column: PB 20d / PB 50d). Hottest first.'),
@@ -1637,12 +1637,12 @@ if _scan_df is not None and len(_scan_df) > 0:
                 'Squeeze started today', 'Squeeze fired today'] if _has_sqz else ['Any', 'In a squeeze (any level)']
     with _c3:
         _sq_f = st.selectbox('Squeeze', _SQ_OPTS, index=0, key='ms_sqz',
-                             help='Beardy Squeeze Pro, daily: Bollinger 2.0 inside Keltner 2.0 / 1.5 / 1.0 = Low / Mid / High '
+                             help='Squeeze, daily: Bollinger 2.0 inside Keltner 2.0 / 1.5 / 1.0 = Low / Mid / High '
                                   'compression (black / red / orange dots). Fired = out of the squeeze today after a squeeze yesterday.')
     with _c5:
         st.markdown('<div style="height:1.75rem;"></div>', unsafe_allow_html=True)
         _no_earn = st.checkbox('Hide earnings ≤ 7 days', value=False, key='ms_earn')
-    if _scan in ('L_bases', 'S_bases'):               # bases v3 (8 Nov 2026): IBD model-book filters
+    if _scan in ('L_bases', 'S_bases'):               # bases v3 (8 Nov 2026): base quality filters
         _b0, _b1, _b2, _b3 = st.columns([1.2, 1.0, 1.3, 1.5])
         with _b0:
             st.selectbox('Pattern', ['All patterns'] + _BASES, index=0, key='ms_bpat',
@@ -1652,14 +1652,14 @@ if _scan_df is not None and len(_scan_df) > 0:
             with _b1:
                 st.markdown('<div style="height:1.75rem;"></div>', unsafe_allow_html=True)
                 st.checkbox('Hide faulty bases', value=False, key='ms_bnofault',
-                            help='IBD faults: wedging handle, V / straight up from the low, wide and loose, left side > 13 '
+                            help='Faults: wedging handle, V / straight up from the low, wide and loose, left side > 13 '
                                  'weeks, 3rd+ stage, light-volume breakout, distribution, deeper than 2.5× the market. '
-                                 'Descriptive (O\'Neil\'s hand-picked winners as a model book), untested.')
+                                 'Descriptive, untested.')
             with _b2:
                 st.markdown('<div style="height:1.75rem;"></div>', unsafe_allow_html=True)
                 st.checkbox('Base formed in a market correction', value=False, key='ms_bcorr',
-                            help='SPY fell 8% or more (from its high inside the window) while the base formed. O\'Neil: '
-                                 '80-90% of sound bases form during market corrections.')
+                            help='SPY fell 8% or more (from its high inside the window) while the base formed. Most sound '
+                                 'bases in the model book formed during market corrections.')
     if _scan in ('L_dip', 'S_dip'):                   # 7 Nov 2026 (c): settings of the Deep dip / rip scans
         _d0, _d1, _d3 = st.columns([1.2, 1.0, 2.2])
         with _d0:
@@ -1667,11 +1667,6 @@ if _scan_df is not None and len(_scan_df) > 0:
                          help='Triggers = entries that fired today or yesterday and are still live (later entries had no '
                               'edge in the study). Watch = names '
                               'approaching the 200 / 250 from the trend side, to prepare for the next sessions.')
-        with _d1:
-            st.selectbox('Slope of the SMA (21 sessions)', list(_DIP_SLOPE), index=1, key='ms_dipslope',
-                         help='Slope of the trigger SMA (the 200 when both): up at least this much over 21 sessions '
-                              '(Deep dip) or down at least this much (Deep rip). In the stock study the slope made no '
-                              'measurable difference (within ±0.04R); it is a preference filter.')
         if not _has_dip:
             with _d3:
                 st.markdown('<div style="height:1.9rem;"></div><span style="font-size:0.75rem;color:#e3b48e;">'
@@ -1735,7 +1730,7 @@ if _scan_df is not None and len(_scan_df) > 0:
             '<div style="font-size:0.70rem;color:#9b958f;line-height:1.55;">'
             f'{len(_v)} stocks{" (first 600 shown)" if len(_v) > 600 else ""}. Click a header to sort. '
             'Momentum list = held RS score +1 or higher (beats SPY on 1Y / 6M / 3M, label held 3 sessions) AND close above the '
-            '200-day SMA AND 50-day above 200-day. CAN SLIM = STRICT ≥ 25% EPS and revenue growth, RELAXED ≥ 20% / 15% '
+            '200-day SMA AND 50-day above 200-day. Growth = STRICT ≥ 25% EPS and revenue growth, RELAXED ≥ 20% / 15% '
             '(fundamentals are fetched only for stocks above their 50-day SMA, within 20% of the 52-week high). '
             'Ext vs SMA50 = (close − SMA50) / ATR(14): Deep below ≤ −3, Below ≤ −1, Just below ≤ 0, Near ≤ +0.5, '
             'Above ≤ +5, Far above beyond (Above is a trend state, not a reversal warning: the next month\'s left tail was '
@@ -1746,7 +1741,7 @@ if _scan_df is not None and len(_scan_df) > 0:
             '5-day: dip ≤ −2%, pullback ≤ −3%, sharp ≤ −4%. Setup: PB 20d / 50d = pullback to a rising SMA (long), '
             'Rally 20d / 50d = rally to a falling SMA (short). Base / pivot on the short scans = bear base (↓) and '
             'the breakdown level. Earnings in orange = within 7 days. '
-            'Squeeze = Beardy Squeeze Pro on daily bars: Bollinger (20, 2.0) inside Keltner (SMA 20 ± k × average true range 20), '
+            'Squeeze = Bollinger inside Keltner on daily bars: Bollinger (20, 2.0) inside Keltner (SMA 20 ± k × average true range 20), '
             'High k = 1.0, Mid 1.5, Low 2.0; days = consecutive sessions in a squeeze; Fired ↑/↓ = out of the squeeze today, '
             'by momentum sign; the square is the momentum colour (aqua &gt; 0 rising, blue &gt; 0 falling, red &lt; 0 falling, yellow &lt; 0 rising). '
             + market_state.ev('Descriptive') + ' The momentum rules come from the industry study and the literature; the '

@@ -115,7 +115,7 @@ class RelativeStrengthCalculator:
         return result
 
 
-# ── RS rating (3 Nov 2026): IBD-style percentile rank, the "L" of CAN SLIM ────────────────────────────────
+# ── RS rating (3 Nov 2026): percentile rank, the "L" of CAN SLIM ────────────────────────────────
 # Weighted 12-month price performance, the latest quarter counting double: 40% last 63 bars + 20% each of the three
 # quarters before. Ranked across the whole scanned universe, 1-99 (99 = strongest). Stocks with 6-12 months of history
 # use the quarters they have (weights renormalised); under ~6 months = no rating.

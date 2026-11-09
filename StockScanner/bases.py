@@ -11,7 +11,7 @@ Breakouts (today's close against the prior sessions)
 Bases (the current base: it ends yesterday, so today can be the breakout day)
   Flat base         >= 25 sessions (5 weeks) within 15% (highest high to lowest low), after a prior advance of
                     >= 20% (base start vs the lowest low of the 65 sessions before it). Pivot = base high.
-  Cup with handle   O'Neil-style:
+  Cup with handle   Classic rules:
                     - prior uptrend >= 30% (left lip vs the lowest low of the 130 sessions before it)
                     - cup 35-325 sessions (7-65 weeks) from the left lip to the right lip, 12-33% deep
                     - rounded bottom, not a V: >= 10 sessions and >= 15% of the cup with the close in the bottom third,
@@ -29,20 +29,20 @@ State (today's close vs the pivot)
                         above that pivot
   Near pivot            close at most 5% below the pivot
   In base               deeper than that
-Breakout volume = the breakout day's volume / its prior 50-day average (>= 1.4x = confirmed, O'Neil's 40-50%).
+Breakout volume = the breakout day's volume / its prior 50-day average (>= 1.4x = confirmed, a 40-50% rise).
 Quality (0-3, a sort aid, not a test): volume dry-up (last 10 sessions' volume < 80% of the 50-day average),
 tight closes (last 10 closes within 5%), RS rating >= 80 (added by the scanner).
 
 Descriptive: these are definitions, not tested signals. Follow-through after such breakouts in this universe has not
 been measured (planned study); the SPY/QQQ pivot study found broken levels retested 84-89% of the time.
 
-v3, 8 Nov 2026: IBD context and quality layer (O'Neil, "How To Find & Own America's Greatest Opportunities", 70
-annotated weekly charts of hand-picked winners, used as a MODEL BOOK; see MRS_Dashboard/docs/bases_v3_ibd_layer.md).
-All of it is Descriptive and untested: the features below describe the IBD template; whether they separate outcomes
+v3, 8 Nov 2026: context and quality layer (a model book of classic base patterns from annotated charts of
+hand-picked historical winners; see MRS_Dashboard/docs/bases_v3_quality_layer.md).
+All of it is Descriptive and untested: the features below describe the template; whether they separate outcomes
 in this universe is the planned Base Quality v1 study.
   Market (follow_through(): SPY and QQQ)  correction = close >= 8% below the 52-week high; rally attempt day 1 = first
       up close after a new correction low; follow-through day (FTD) = day >= 4 of the attempt, index >= +1.25% on
-      volume above the prior day (the 1.25% and day-4 are IBD's published convention, ASSUMPTIONS: not in the PDF);
+      volume above the prior day (the 1.25% and day-4 are a common published convention, ASSUMPTIONS: not in the PDF);
       the attempt / uptrend fails if the correction low is undercut.
   New patterns  Double bottom (second low undercuts the first by 0-8%, pivot = middle high + $0.10, >= 7 weeks,
       15-35% deep, up to 50% when SPY fell >= 20% in the window, not three bottoms; "Shakeout+3" tag when the close
@@ -89,7 +89,7 @@ FIELDS = ['hi21', 'bo21', 'd21_pct', 'hi52w', 'bo52', 'd52_pct', 'vol_ratio',
           'base_left_date', 'base_right_date', 'handle_start', 'handle_low', 'handle_depth', 'base_prior_adv',
           'base_bo_vol', 'base_quality', 'base_dryup', 'base_tight',
           'piv_hi', 'piv_date', 'piv_bo', 'piv_dist_pct', 'tt_pass', 'tt_score', 'vcp_n', 'vcp_contractions', 'vcp_points',
-          # v3 (8 Nov 2026): IBD context and quality layer
+          # v3 (8 Nov 2026): context and quality layer
           'mkt_dd_in_base', 'depth_vs_mkt', 'base_in_corr', 'rs_holds', 'rs_line_hi', 'rs_leads', 'ftd_age',
           'base_bo_ftd', 'tight_weeks', 'support_wks', 'distrib_flag', 'ud_vol_50', 'handle_dryup', 'base_bo_light',
           'base_stage', 'base_faults', 'base_q', 'base_q_max', 'base_q_detail',
@@ -97,10 +97,10 @@ FIELDS = ['hi21', 'bo21', 'd21_pct', 'hi52w', 'bo52', 'd52_pct', 'vol_ratio',
 # market columns written once per scan (constant across rows): follow_through() on SPY and QQQ
 MKT_FIELDS = ['mkt_state', 'ftd_date', 'ftd_age', 'mkt_dd', 'qqq_state', 'qqq_ftd_date', 'qqq_ftd_age']
 
-# v3 thresholds (IBD model book; see the docstring)
+# v3 thresholds (model book; see the docstring)
 FTD_CORR = 0.08          # correction: close >= 8% below the 52-week high
-FTD_MIN_DAY = 4          # ASSUMPTION (IBD convention, not in the PDF): FTD on day 4 or later of the rally attempt
-FTD_MIN_GAIN = 0.0125    # ASSUMPTION (IBD convention, not in the PDF): index up >= 1.25% on higher volume
+FTD_MIN_DAY = 4          # ASSUMPTION (common convention, assumed): FTD on day 4 or later of the rally attempt
+FTD_MIN_GAIN = 0.0125    # ASSUMPTION (common convention, assumed): index up >= 1.25% on higher volume
 FTD_STALE = 126          # a confirmed uptrend older than ~6 months with no new correction reads "Uptrend"
 FTD_NEAR = 20            # breakout within 20 sessions after an FTD
 BEAR_DD = 0.20           # SPY drawdown in the window that allows deeper cups / double bottoms (up to 50%)
@@ -194,7 +194,7 @@ def _swing_highs(h, a, e, w=5):
 
 
 def _vcp(h, l, c, v, e, ctx):
-    """Volatility contraction pattern (Minervini), rule-based, on bars [0 .. e]:
+    """Volatility contraction pattern (VCP), rule-based, on bars [0 .. e]:
     - trend template (ctx['tt'] at e): price > 150- and 200-day, 150 > 200, 200 rising over 21 sessions, 50 > 150 and
       200, price > 50-day, >= 30% above the 52-week low, within 25% of the 52-week high, RS rating >= 70 (if known)
     - base: from the highest high of the last 325 sessions (no close above it since), 15-325 sessions long
@@ -240,7 +240,7 @@ def _vcp(h, l, c, v, e, ctx):
 
 
 def _trend_template(h, l, c, e, rs=None):
-    """Minervini's trend template at bar e: (all passed, number passed of 8)."""
+    """Trend template at bar e: (all passed, number passed of 8)."""
     if e < 220:
         return False, 0
     cl = c[:e + 1]
@@ -329,9 +329,9 @@ def _high_tight_flag(h, l, c, e):
     return None
 
 
-# ── v3 (8 Nov 2026): market follow-through day, new IBD patterns, context and quality ────────────────────────────
+# ── v3 (8 Nov 2026): market follow-through day, new patterns, context and quality ────────────────────────────
 def follow_through(m: Optional[pd.DataFrame]) -> dict:
-    """IBD-style market state on an index (SPY / QQQ daily OHLCV). Returns state (text), ftd_date, ftd_age (sessions
+    """Market state on an index (SPY / QQQ daily OHLCV). Returns state (text), ftd_date, ftd_age (sessions
     since the latest FTD), dd (close vs the 52-week high), corr_low, attempt_day and ftd_dates (all FTDs, for
     'breakout within 20 sessions of an FTD'). The 1.25% / day-4 rule is an assumption (see FTD_MIN_*)."""
     out = dict(state=None, ftd_date=None, ftd_age=None, dd=None, corr_low=None, attempt_day=None, ftd_dates=[])
@@ -526,7 +526,7 @@ def _base_on_base(h, l, c, e, b, ph):
 
 
 def _stage(h, l, c, start, ph, sma200, mkt_reset=None):
-    """IBD base stage: 1 + base breakouts (a 10/10 pivot high that stood >= 25 sessions and >= 5% deep, cleared by a
+    """Base stage: 1 + base breakouts (a 10/10 pivot high that stood >= 25 sessions and >= 5% deep, cleared by a
     close; one per 25 sessions) since the last close below the 200-day or the last >= 10% SPY drawdown."""
     below = np.nonzero(np.isfinite(sma200[:start + 1]) & (c[:start + 1] < sma200[:start + 1]))[0]
     reset = int(below[-1]) if len(below) else 0
@@ -774,7 +774,7 @@ def detect(df: pd.DataFrame, rs_rating: Optional[float] = None, mkt: Optional[pd
         hi52 = float(h[last - 252:last].max())
         out.update(hi52w=hi52, bo52=bool(c[last] > hi52), d52_pct=float(c[last] / hi52 - 1))
     out['vol_ratio'] = vr(last)
-    # v2: the active 10/10 pivot high (as yesterday) and today's close against it; Minervini trend template today
+    # v2: the active 10/10 pivot high (as yesterday) and today's close against it; trend template today
     if n > PIV_L + PIV_R + 2:
         p_ = active_pivot(h, c, last - 1)
         if p_ is not None:
@@ -827,7 +827,7 @@ def detect(df: pd.DataFrame, rs_rating: Optional[float] = None, mkt: Optional[pd
         vcp_contractions=' · '.join(f"{x[2] * 100:.0f}%" for x in base['vcp']) if base.get('vcp') else None,
         vcp_points=';'.join(f"{ds(a_)},{h[a_]:.2f},{ds(b_)},{l[b_]:.2f}" for a_, b_, _ in base['vcp'])
         if base.get('vcp') else None)
-    # v3: IBD context, character, faults and quality
+    # v3: context, character, faults and quality
     try:
         if n > 40:
             ctx['sma200'] = pd.Series(c).rolling(200).mean().to_numpy()
