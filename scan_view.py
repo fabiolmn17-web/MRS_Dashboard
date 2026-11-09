@@ -208,7 +208,7 @@ def setup_cell(r):
                                     '' if _nan(rv) else f'vol {float(rv):.1f}×', ('↓21' if sh else '↑21') if ab else ''] if x)
         title = (f'{tg} of the {sma} SMA' + ('' if _nan(k) or int(float(k)) == 0 else f' after {int(float(k))} close(s) beyond')
                  + f', {dtxt}. Entry ref = trigger close {r.get(f"{pre}_entry")}; stop = trigger-day '
-                 + ('high + 1 ATR(10)' if sh else 'low − 1 ATR(10)') + '. vol = trigger-day volume ÷ the 10 sessions before.')
+                 + ('close + 2 ATR(10)' if sh else 'close − 2 ATR(10)') + '. vol = trigger-day volume ÷ the 10 sessions before.')
         rank = 10 - (0 if _nan(days) else int(float(days)))
         return (f'<span title="{_e(title)}">{chip(lab, col, True)} <span class="sub">{_e(sub)}</span></span>'
                 + ('' if sh else depth_chip(r))), rank

@@ -154,7 +154,8 @@ def deep_dip_fields(df: pd.DataFrame, side: str = 'long', n_above: int = 20, max
       RECLAIM   = 1-5 closes below the SMA, then a close back above (8 Nov 2026: 5, was 3 in the study; wider net,
                   Fabio screens by hand).
     A trigger in the last max_days sessions stays listed while every close since is still above that SMA and the
-    stop (trigger-day low - 1 ATR(10)) has not been hit. If both SMAs trigger on the same bar: '200+250'.
+    stop (trigger close - 2 ATR(10); 9 Nov 2026: was trigger-day low - 1 ATR(10), no meaningful difference in the stop
+    check, Fabio's rule) has not been hit. If both SMAs trigger on the same bar: '200+250'.
     entry = trigger close; risk_pct = (entry - stop) / entry; rvol = trigger-day volume / mean of the 10 before;
     slope21 = % change of the trigger SMA over 21 sessions (the 200 when both).
     WATCH (no live trigger): the last 20 closes all above the SMA and the close within 1 ATR above it ('Near 200' /
@@ -193,7 +194,7 @@ def deep_dip_fields(df: pd.DataFrame, side: str = 'long', n_above: int = 20, max
                         k = 0
                 if typ is None:
                     continue
-                stop = (l[i] - a10[i]) if s > 0 else (h[i] + a10[i])
+                stop = c[i] - s * 2 * a10[i]               # 9 Nov 2026: close -/+ 2 ATR(10) (was low - 1 ATR)
                 later = slice(i + 1, n)
                 if (x[later] <= 0).any() or ((l[later] <= stop).any() if s > 0 else (h[later] >= stop).any()):
                     continue                          # closed back through the SMA, or stopped out since
@@ -205,7 +206,7 @@ def deep_dip_fields(df: pd.DataFrame, side: str = 'long', n_above: int = 20, max
         if best is not None:
             dago, Ls, typ, k = best
             i = n - 1 - dago
-            stop = (l[i] - a10[i]) if s > 0 else (h[i] + a10[i])
+            stop = c[i] - s * 2 * a10[i]
             Lr = 200 if 200 in Ls else 250
             sm = smas[Lr]
             v10 = np.nanmean(vol[i-10:i]) if i >= 10 else np.nan
