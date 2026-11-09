@@ -67,6 +67,22 @@ in this universe is the planned Base Quality v1 study.
       held up while SPY fell (rs_holds or rs_leads), 3+ weeks tight, volume dry-up, accumulation (ud_vol_50 >= 1.2 or
       a support week), depth in line with the market (<= 2.5x SPY's drawdown; <= 20% when SPY fell < 5%).
       base_q_detail is the tooltip text. The old base_quality (0-3) is kept for older views.
+
+v4, 9 Nov 2026 (Fabio's chart review of 13 scan names, MRS_Dashboard/research/base_reads/): the detector now matches
+his reads on all 13 (before: the label was right on 1 of 13).
+  - A breakout comes first: a base cleared in the last 5 sessions and still held is reported as "Broke out ..."
+    (the Breakouts scan), even if a larger structure is forming around it; a base is never made of its own breakout.
+  - Near pivot = within 1.5 ATR(14) below the pivot (was 5%); flat base depth 15% or 4 ATR, tight area 8% or 2.5 ATR,
+    whichever is larger (volatile names).
+  - Not bases: a falling channel (closes falling > 40% of the range and >= 1.5 ATR through the window), an ascending
+    "base" whose highs step up > 10% (a run with pullbacks), a VCP whose last contraction tops out more than 1.5 ATR
+    under the base high, a double bottom whose undercut is under 0.5 ATR.
+  - New: Cup (no handle yet: right side back within 10% of the left lip, >= 3 closes in the upper half, no failed right
+    side); a flat base sitting as the handle of an earlier cup is labelled Cup w/ handle; '52-week high' = a first close
+    above a 52-week high that stood >= 20 sessions (breakouts only).
+  - New fields: base_bo_cl (breakout-day close location), overhead / overhead_atr (nearest overhead 10/10 pivot high).
+  - The scans also need RS rating >= 70 (long) / <= 30 (short) for bases (app.py): the choppy names had patterns but
+    no setup. All of it is descriptive and untested.
 """
 from typing import Optional
 
@@ -76,12 +92,22 @@ import pandas as pd
 # 7 Nov 2026: short side. detect_short() runs the same rules on inverted prices (K / price: highs become lows), so a
 # flat base / tight area / VCP / cup with handle in the inverted series is the same shape upside down under a support
 # pivot low (bear base). Percent thresholds carry over approximately (a 20% decline = a 25% rise in K / price).
-# States: In base, Near breakdown (close at most 5% above the pivot low), Broke down today, Broke down Nd ago.
-SHORT_FIELDS = ['sb_type', 'sb_state', 'sb_pivot', 'sb_dist_pct', 'sb_depth', 'sb_weeks', 'sb_days_since']
+# States: In base, Near breakdown (close at most 1.5 ATR above the pivot low; v4: was 5%), Broke down today, Broke down Nd ago.
+SHORT_FIELDS = ['sb_type', 'sb_state', 'sb_pivot', 'sb_dist_pct', 'sb_depth', 'sb_weeks', 'sb_days_since', 'sb_dist_atr']
 
-NEAR_PIVOT = 0.05            # near pivot: close at most 5% below
+NEAR_PIVOT = 0.05            # (before 9 Nov 2026) near pivot: close at most 5% below; kept for older callers
 BO_VOL_OK = 1.4              # breakout volume >= 1.4x the 50-day average
 RECENT = 4                   # "broke out N sessions ago", N = 1..4
+
+# v4, 9 Nov 2026 (Fabio's chart review of 13 scan names): volatility-scaled limits, no stale bases, no channels / flags
+NEAR_PIVOT_ATR = 1.5         # near pivot: close at most 1.5 ATR(14) below (about 5% for a stock moving ~3.3% a day)
+FLAT_MAX_ATR = 4.0           # flat base: no deeper than 15% OR 4 ATR, whichever is larger (volatile names, e.g. KOD)
+TIGHT_MAX_ATR = 2.5          # tight area: no deeper than 8% OR 2.5 ATR, whichever is larger
+CHANNEL_SLOPE = -0.40        # flat base / tight area: closes falling through the window (fitted change / range) = channel
+DB_UNDERCUT_ATR = 0.5        # double bottom: the second low undercuts the first by at least 0.5 ATR (a clear shakeout)
+VCP_TOP_ATR = 1.5            # VCP: the last contraction tops out within 1.5 ATR of the base high (tightening at the top)
+ASC_STEP = 0.10              # ascending base: each swing high at most 10% above the one before (else a run, not a base)
+CUP_UPPER_DAYS = 3           # cup (no handle yet): >= 3 closes in the upper half of the cup since its low (not a V)
 
 FIELDS = ['hi21', 'bo21', 'd21_pct', 'hi52w', 'bo52', 'd52_pct', 'vol_ratio',
           'base_type', 'base_state', 'base_days_since_bo', 'base_pivot', 'base_dist_pct', 'base_dist_atr',
@@ -93,7 +119,10 @@ FIELDS = ['hi21', 'bo21', 'd21_pct', 'hi52w', 'bo52', 'd52_pct', 'vol_ratio',
           'mkt_dd_in_base', 'depth_vs_mkt', 'base_in_corr', 'rs_holds', 'rs_line_hi', 'rs_leads', 'ftd_age',
           'base_bo_ftd', 'tight_weeks', 'support_wks', 'distrib_flag', 'ud_vol_50', 'handle_dryup', 'base_bo_light',
           'base_stage', 'base_faults', 'base_q', 'base_q_max', 'base_q_detail',
-          'db_l1', 'db_l1_date', 'db_mid', 'db_mid_date', 'db_sk3', 'db_sk3_level']
+          'db_l1', 'db_l1_date', 'db_mid', 'db_mid_date', 'db_sk3', 'db_sk3_level',
+          # v4 (9 Nov 2026): breakout-day close location (0 = low, 1 = high), nearest overhead 10/10 pivot high
+          # above today's close (52 weeks) and its distance in ATR; the cup low when the base is a cup's handle
+          'base_bo_cl', 'overhead', 'overhead_atr', 'cup_low', 'cup_low_date']
 # market columns written once per scan (constant across rows): follow_through() on SPY and QQQ
 MKT_FIELDS = ['mkt_state', 'ftd_date', 'ftd_age', 'mkt_dd', 'qqq_state', 'qqq_ftd_date', 'qqq_ftd_age']
 
@@ -164,10 +193,25 @@ def active_pivot(h, c, e, L=PIV_L, R=PIV_R):
     return None
 
 
-def _pivot_base(h, l, c, e):
+def _channel(c, a, e, atr=None):
+    """v4: True when the closes of [a, e] fall through the window like a channel: the least-squares line drops by more than
+    40% of the window's close range (a sideways base is near 0, a cup goes down then up) AND by at least 1.5 ATR (a tight
+    area drifting down a little is still tight)."""
+    C = c[a:e + 1]
+    rng = C.max() - C.min()
+    if len(C) < 5 or rng <= 0:
+        return False
+    drop = -np.polyfit(np.arange(len(C)), C, 1)[0] * len(C)
+    big = atr is None or not np.isfinite(atr[e]) or drop >= 1.5 * atr[e]
+    return drop / rng >= -CHANNEL_SLOPE and big
+
+
+def _pivot_base(h, l, c, e, atr=None):
     """Flat base / tight area anchored on the active pivot (v2, 4 Nov 2026): the base runs from the pivot high to e
     and never closes above it. Flat base: >= 25 sessions, <= 15% deep. Tight area: 10-24 sessions, <= 8% deep.
-    Both after a prior advance >= 20% (pivot vs the lowest low of the 65 sessions before it)."""
+    Both after a prior advance >= 20% (pivot vs the lowest low of the 65 sessions before it).
+    v4 (9 Nov 2026): depth limits scale with volatility (15% or 4 ATR, 8% or 2.5 ATR, whichever is larger) and a
+    falling channel (_channel) is rejected."""
     p = active_pivot(h, c, e)
     if p is None or p < 65:
         return None
@@ -178,11 +222,14 @@ def _pivot_base(h, l, c, e):
     adv = pv / l[p - 65:p].min() - 1
     if adv < 0.20:
         return None
-    if n >= 25 and depth <= 0.15:
+    a_ = atr[e] / c[e] if atr is not None and np.isfinite(atr[e]) and c[e] > 0 else 0.0   # ATR as a fraction of price
+    if n >= 25 and depth <= max(0.15, FLAT_MAX_ATR * a_):
         typ = 'Flat base'
-    elif 10 <= n < 25 and depth <= 0.08:
+    elif 10 <= n < 25 and depth <= max(0.08, TIGHT_MAX_ATR * a_):
         typ = 'Tight area'
     else:
+        return None
+    if _channel(c, p, e, atr):                       # v4: a falling channel is not a base
         return None
     return dict(type=typ, start=p, end=e, pivot=float(pv), low=float(low), low_i=p + int(np.argmin(l[p:e + 1])),
                 depth=float(depth), prior_adv=float(adv), left=float(pv), left_i=p)
@@ -205,6 +252,7 @@ def _vcp(h, l, c, v, e, ctx):
     if not ctx.get('tt', False):
         return None
     a = max(0, e - 325)
+    # v4 (9 Nov 2026): the last contraction must top out within 1.5 ATR of the base high (ctx['atr'])
     i0 = a + int(np.argmax(h[a:e - 4]))
     if c[i0 + 1:e + 1].max() > h[i0] or not (15 <= e - i0 <= 325):
         return None
@@ -230,6 +278,9 @@ def _vcp(h, l, c, v, e, ctx):
     if not (0.10 <= ds[0] <= 0.35) or ds[-1] > 0.10 or any(ds[j] > 0.85 * ds[j - 1] for j in range(1, len(ds))):
         return None
     li, lo_i, _ = con[-1]
+    atr = ctx.get('atr')
+    if atr is not None and np.isfinite(atr[e]) and h[li] < h[i0] - VCP_TOP_ATR * atr[e]:
+        return None                                  # v4: contractions must tighten near the top, not mid-base
     if np.isfinite(v[li:e + 1]).any():
         v50 = np.nanmean(v[max(0, e - 49):e + 1])
         if not np.nanmean(v[li:e + 1]) < v50:
@@ -304,6 +355,73 @@ def _cup_handle(h, l, c, e, mdd=None):
         if best is None or left > best['left']:
             best = cand
     return best
+
+
+def _cup(h, l, c, e, mdd=None):
+    """v4 (9 Nov 2026): cup with no handle yet (a cup still forming its right side). Same cup rules as above (prior
+    uptrend >= 30%, 7-65 weeks, 12-33% deep or 50% in a >= 20% market decline, low inside the cup, rounded bottom), and:
+    - the right side is back within 10% of the left lip (high), with >= 3 closes in the upper half since the low
+      (a straight-up V of a few sessions is a breakout move, not a cup)
+    - once the right side reached 90% of the left lip, no pullback deeper than 12% since (deeper = a failed right side:
+      the handle rules of a cup with handle would reject it too)
+    - no close above the left lip since. Pivot = left lip + $0.10."""
+    best = None
+    for iL in _local_peaks(h, e - 325, e - 35):
+        if iL < 130:
+            continue
+        left = h[iL]
+        adv = left / l[iL - 130:iL].min() - 1
+        if adv < 0.30 or c[iL + 1:e + 1].max() > left:
+            continue
+        seg = l[iL + 1:e + 1]
+        iB = iL + 1 + int(np.argmin(seg))
+        low = l[iB]
+        depth = (left - low) / left
+        if not (0.12 <= depth <= 0.50):
+            continue
+        if depth > 0.33 and (mdd is None or not mdd(iL, e) >= BEAR_DD):
+            continue
+        n = e - iL
+        if not (35 <= n <= 325) or not (0.15 <= (iB - iL) / n <= 0.85):
+            continue
+        mid = low + 0.5 * (left - low)
+        if h[iB:e + 1].max() < 0.90 * left or int((c[iB:e + 1] > mid).sum()) < CUP_UPPER_DAYS:
+            continue
+        reach = np.nonzero(h[iB + 1:e + 1] >= 0.90 * left)[0]
+        if len(reach):
+            j = iB + 1 + int(reach[0])
+            run = np.maximum.accumulate(h[j:e + 1])
+            if (1 - l[j:e + 1] / run).max() > 0.12:
+                continue
+        third = low + (left - low) / 3
+        n_bot = int((c[iL:e + 1] <= third).sum())
+        if n_bot < 10 or n_bot < 0.15 * n:
+            continue
+        cand = dict(type='Cup', start=iL, end=e, pivot=float(left + 0.10), low=float(low), low_i=iB, left=float(left),
+                    left_i=iL, depth=float(depth), prior_adv=float(adv))
+        if best is None or left > best['left']:
+            best = cand
+    return best
+
+
+def _as_handle(h, l, b):
+    """v4: a flat base / tight area / base-on-base that sits in the upper half of a deeper earlier decline, under a high at
+    most 10% above its pivot, is the handle of a cup: relabelled 'Cup w/ handle' (pivot unchanged: the handle high)."""
+    s0, pv = b['start'], b['pivot']
+    a = max(0, s0 - 325)
+    if s0 - a < 35:
+        return b
+    iL = a + int(np.argmax(h[a:s0]))
+    lip = h[iL]
+    if not (pv <= lip <= 1.10 * pv):
+        return b
+    low = l[iL:s0].min()
+    if (lip - low) / lip < 0.20 or b['low'] < low + 0.5 * (lip - low):
+        return b
+    out = dict(b)
+    out.update(type='Cup w/ handle', left=float(lip), left_i=iL, handle_i=s0, handle_low=b['low'], right_i=s0,
+               handle_depth=b['depth'], cup_low=float(low), cup_low_i=iL + int(np.argmin(l[iL:s0])))
+    return out
 
 
 def _high_tight_flag(h, l, c, e):
@@ -411,7 +529,7 @@ def _mdd_fn(mh, ml):
     return mdd
 
 
-def _double_bottom(h, l, c, e, mdd=None):
+def _double_bottom(h, l, c, e, mdd=None, atr=None):
     """W: left high -> first low L1 -> middle high M -> second low L2 that undercuts L1 by 0-8% (shakeout).
     >= 35 sessions from the left high, 15-35% deep (up to 50% in a >= 20% market decline), prior advance >= 30%,
     no third bottom near L1 before it, M not yet cleared by a close. Pivot = M high + $0.10."""
@@ -423,6 +541,8 @@ def _double_bottom(h, l, c, e, mdd=None):
         i2 = i1 + 1 + int(np.argmin(seg))
         if not (l[i2] < l[i1] and l[i2] >= 0.92 * l[i1]) or i2 - i1 < 10 or e - i2 < 3:
             continue
+        if atr is not None and np.isfinite(atr[i2]) and l[i1] - l[i2] < DB_UNDERCUT_ATR * atr[i2]:
+            continue                                 # v4: the undercut must be a clear shakeout (>= 0.5 ATR)
         iM = i1 + 1 + int(np.argmax(h[i1 + 1:i2]))
         if (h[iM] - l[i1]) / l[i1] < 0.08:
             continue
@@ -478,6 +598,8 @@ def _ascending_base(h, l, c, e):
         lows.append(l[lo_i]); pulls.append((h[i] - l[lo_i]) / h[i])
     if not all(0.10 <= p <= 0.20 for p in pulls) or not (lows[0] < lows[1] < lows[2]):
         return None
+    if any(h[seq[k + 1]] > (1 + ASC_STEP) * h[seq[k]] for k in range(2)):
+        return None                                  # v4: highs stepping up > 10% = a run with pullbacks, not a base
     if not (45 <= e - seq[0] + 1 <= 85) or seq[0] < 65:
         return None
     adv = h[seq[0]] / l[seq[0] - 65:seq[0]].min() - 1
@@ -712,20 +834,22 @@ def _context_quality(d, h, l, c, v, base, e, bo_i, last, ctx):
 
 
 def _base_at(h, l, c, v, e, rs=None, ctx=None):
-    """One base per stock, in this order (v3): cup with handle, double bottom, VCP, high tight flag, ascending base,
-    flat base / tight area (as base-on-base when it sits on the prior base), IPO base."""
+    """One base per stock, in this order (v4): cup with handle, double bottom, VCP, high tight flag, ascending base,
+    flat base / tight area (as base-on-base when it sits on the prior base, as a cup with handle when it is the handle of
+    an earlier cup), cup with no handle yet, IPO base."""
     ctx = ctx or {}
     mdd = ctx.get('mdd')
     tt, _ = _trend_template(h, l, c, e, rs)
-    b = (_cup_handle(h, l, c, e, mdd) or _double_bottom(h, l, c, e, mdd) or _vcp(h, l, c, v, e, {'tt': tt})
-         or _high_tight_flag(h, l, c, e) or _ascending_base(h, l, c, e))
+    atr = ctx.get('atr')
+    b = (_cup_handle(h, l, c, e, mdd) or _double_bottom(h, l, c, e, mdd, atr)
+         or _vcp(h, l, c, v, e, {'tt': tt, 'atr': atr}) or _high_tight_flag(h, l, c, e) or _ascending_base(h, l, c, e))
     if b:
         return b
-    b = _pivot_base(h, l, c, e)
+    b = _pivot_base(h, l, c, e, atr)
     if b:
         ph = [i for i in ctx.get('ph', []) if i <= e - PIV_R] if ctx.get('ph') is not None else pivot_highs(h, e)
-        return _base_on_base(h, l, c, e, b, ph) or b
-    return _ipo_base(h, l, c, e)
+        return _as_handle(h, l, _base_on_base(h, l, c, e, b, ph) or b)
+    return _cup(h, l, c, e, mdd) or _ipo_base(h, l, c, e)
 
 
 def detect(df: pd.DataFrame, rs_rating: Optional[float] = None, mkt: Optional[pd.DataFrame] = None,
@@ -747,7 +871,7 @@ def detect(df: pd.DataFrame, rs_rating: Optional[float] = None, mkt: Optional[pd
     vr = lambda i: float(v[i] / vol50(i)) if np.isfinite(v[i]) and vol50(i) and np.isfinite(vol50(i)) else None
     ds = lambda i: str(dates[i].date()) if i is not None and 0 <= i < n else None
     # v3 context arrays (once per call)
-    ctx = {'ph': pivot_highs(h, last) if n > PIV_L + PIV_R + 2 else []}
+    ctx = {'ph': pivot_highs(h, last) if n > PIV_L + PIV_R + 2 else [], 'atr': atr}
     if mkt is not None and len(mkt) and {'High', 'Low', 'Close'} <= set(mkt.columns):
         try:
             mi = mkt[['High', 'Low', 'Close']].copy()
@@ -783,32 +907,58 @@ def detect(df: pd.DataFrame, rs_rating: Optional[float] = None, mkt: Optional[pd
     tt_, tts_ = _trend_template(h, l, c, last, rs_rating)
     out.update(tt_pass=tt_, tt_score=tts_)
 
-    # the current base (ends yesterday); else a base cleared 1..RECENT sessions ago and still held
+    # v4 (9 Nov 2026): a breakout in the last 5 sessions comes first (a base cleared today .. RECENT sessions ago and
+    # still held: that base is used up, even if a bigger structure is forming around it); else the live base ending
+    # yesterday. Before v4 a live base was checked first, so a name could show a fresh "base" made of its own breakout.
     base, bo_i = None, None
-    b = _base_at(h, l, c, v, last - 1, rs_rating, ctx)
-    if b:
-        base = b
-        if c[last] > b['pivot']:
-            bo_i = last
-    else:
-        for k in range(1, RECENT + 1):
-            e = last - 1 - k
-            if e < 60:
-                break
-            b = _base_at(h, l, c, v, e, rs_rating, ctx)
-            if b and c[e + 1] > b['pivot'] and c[last] > b['pivot']:
-                base, bo_i = b, e + 1
-                break
+    for k in range(0, RECENT + 1):
+        e = last - 1 - k
+        if e < 60:
+            break
+        b = _base_at(h, l, c, v, e, rs_rating, ctx)
+        if b and c[e + 1] > b['pivot'] and c[last] > b['pivot']:
+            base, bo_i = b, e + 1
+            break
+    if base is None:
+        b = _base_at(h, l, c, v, last - 1, rs_rating, ctx)
+        if b and c[last] <= b['pivot']:
+            base = b
+    if base is None and n > 300:
+        # v4: no pattern, but a first close above the prior 52-week high in the last 5 sessions, where that high had
+        # stood for >= 20 sessions (a pause under it, not a stock making a new high every day), still held today
+        for k in range(0, RECENT + 1):
+            i = last - k
+            j0 = i - 252
+            hi_i = j0 + int(np.argmax(h[j0:i]))
+            if i - hi_i < 20 or c[i] <= h[hi_i] or c[last] <= h[hi_i]:
+                continue
+            if c[hi_i + 1:i].max() > h[hi_i]:
+                continue
+            base = dict(type='52-week high', start=hi_i, end=i - 1, pivot=float(h[hi_i]), low=float(l[hi_i:i].min()),
+                        low_i=hi_i + int(np.argmin(l[hi_i:i])), depth=float(1 - l[hi_i:i].min() / h[hi_i]),
+                        prior_adv=None, left=float(h[hi_i]), left_i=hi_i)
+            bo_i = i
+            break
     if not base:
         return out
     pv = base['pivot']
     dist = c[last] / pv - 1
+    a_l = atr[last] if np.isfinite(atr[last]) and atr[last] > 0 else np.nan
     if bo_i is not None:
         since = last - bo_i
         state = 'Broke out today' if since == 0 else f'Broke out {since}d ago'
+        rg = h[bo_i] - l[bo_i]
+        out['base_bo_cl'] = float((c[bo_i] - l[bo_i]) / rg) if rg > 0 else None
     else:
         since = None
-        state = 'Near pivot' if dist >= -NEAR_PIVOT else 'In base'
+        # v4: near = within 1.5 ATR below the pivot (was 5%), so the band follows each stock's volatility
+        near = (pv - c[last]) <= NEAR_PIVOT_ATR * a_l if np.isfinite(a_l) else dist >= -NEAR_PIVOT
+        state = 'Near pivot' if near else 'In base'
+    # v4: nearest overhead resistance = the lowest 10/10 pivot high of the last 252 sessions above today's close
+    above = [h[i] for i in ctx.get('ph', []) if i >= last - 252 and h[i] > c[last]]
+    if above:
+        out['overhead'] = round(float(min(above)), 2)
+        out['overhead_atr'] = float((min(above) - c[last]) / a_l) if np.isfinite(a_l) else None
     e = base['end']
     w10 = slice(max(0, e - 9), e + 1)
     dry = bool(np.isfinite(vol50(e + 1)) and np.nanmean(v[w10]) < 0.8 * vol50(e + 1)) if np.isfinite(v[w10]).any() else None
@@ -823,6 +973,7 @@ def detect(df: pd.DataFrame, rs_rating: Optional[float] = None, mkt: Optional[pd
         handle_start=ds(base.get('handle_i')), handle_low=base.get('handle_low'), handle_depth=base.get('handle_depth'),
         base_prior_adv=base.get('prior_adv'), base_bo_vol=vr(bo_i) if bo_i is not None else None,
         base_quality=q, base_dryup=dry, base_tight=tight,
+        cup_low=base.get('cup_low'), cup_low_date=ds(base.get('cup_low_i')),
         vcp_n=len(base['vcp']) if base.get('vcp') else None,
         vcp_contractions=' · '.join(f"{x[2] * 100:.0f}%" for x in base['vcp']) if base.get('vcp') else None,
         vcp_points=';'.join(f"{ds(a_)},{h[a_]:.2f},{ds(b_)},{l[b_]:.2f}" for a_, b_, _ in base['vcp'])
@@ -863,6 +1014,8 @@ def detect_short(df: pd.DataFrame, rs_rating: Optional[float] = None) -> dict:
     t = r.get('base_type')
     if not t or t == 'High tight flag':
         return out
+    if t == '52-week high':                          # v4: the mirror of a 52-week-high breakout
+        t = '52-week low'
     st_ = str(r.get('base_state') or '')
     st_ = (st_.replace('Broke out', 'Broke down').replace('Near pivot', 'Near breakdown'))
     piv = r.get('base_pivot')
@@ -870,5 +1023,6 @@ def detect_short(df: pd.DataFrame, rs_rating: Optional[float] = None) -> dict:
     close = float(d['Close'].iloc[-1])
     out.update(sb_type=t, sb_state=st_, sb_pivot=round(real_piv, 2) if real_piv else None,
                sb_dist_pct=(close / real_piv - 1) if real_piv else None, sb_depth=r.get('base_depth'),
-               sb_weeks=r.get('base_weeks'), sb_days_since=r.get('base_days_since_bo'))
+               sb_weeks=r.get('base_weeks'), sb_days_since=r.get('base_days_since_bo'),
+               sb_dist_atr=(-r['base_dist_atr']) if r.get('base_dist_atr') is not None else None)
     return out

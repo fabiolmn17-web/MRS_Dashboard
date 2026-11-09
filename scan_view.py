@@ -86,7 +86,7 @@ HEAD = [('Ticker', 'l'), ('Heat', 'c'), ('Sector', 'l'), ('Close', ''), ('% 52W 
 
 BASE_ABBR = {'Cup w/ handle': 'Cup·H', 'Flat base': 'Flat', 'High tight flag': 'HTF', 'VCP': 'VCP',
              'Tight area': 'Tight', 'Double bottom': 'DB', 'Base-on-base': 'BoB', 'Ascending base': 'Asc',
-             'IPO base': 'IPO'}
+             'IPO base': 'IPO', 'Cup': 'Cup', '52-week high': '52W hi', '52-week low': '52W lo'}   # v4: Cup, 52W
 # bases v3 (8 Nov 2026): short labels for the fault chips (full text in the tooltip)
 FAULT_ABBR = [('wedging handle', 'wedge'), ('V: straight up', 'V'), ('left side', 'long left'), ('late stage', 'late'),
               ('light-volume', 'light vol'), ('distribution', 'distrib'), ('wide and loose', 'loose'),
@@ -132,7 +132,9 @@ def short_base_cell(r):
     pv, dist = r.get('sb_pivot'), r.get('sb_dist_pct')
     broke = st_.startswith('Broke down')
     col = ORANGE if broke else COPPER if st_ == 'Near breakdown' else DIM
-    txt = _e(st_.replace('Broke down ', 'down ')) if broke else ('' if _nan(dist) else f'{float(dist) * 100:+.1f}%')
+    da = r.get('sb_dist_atr')
+    txt = _e(st_.replace('Broke down ', 'down ')) if broke else (
+        f'{float(da):+.1f} ATR' if not _nan(da) else '' if _nan(dist) else f'{float(dist) * 100:+.1f}%')   # v4: ATR
     pv_txt = '' if _nan(pv) else f' <span class="sub">to {float(pv):,.2f}</span>'
     w = r.get('sb_weeks')
     wk = '' if _nan(w) else f' <span class="sub">{float(w):.0f}w</span>'
@@ -217,15 +219,25 @@ def base_cell(r):
     if not stars:                                   # scans before bases v3 (8 Nov 2026): the old 0-3 stars
         stars = '' if _nan(q) else ' <span class="sub" title="Quality: volume dry-up, tight closes, RS rating ≥ 80">' + \
             '★' * int(float(q)) + '☆' * (3 - int(float(q))) + '</span>'
+    da = r.get('base_dist_atr')
+    extra = ''
     if broke:
         bv = r.get('base_bo_vol')
         if _truthy(r.get('base_bo_light')):        # v3: a light-volume breakout reads grey (not a buy)
             col = DIM
         vtxt = '' if _nan(bv) else (f' <span style="color:{TEAL if float(bv) >= 1.4 else DIM};">'
                                     f'{float(bv):.1f}× vol</span>')
-        txt = f'{_e(st_.replace("Broke out ", "out "))}{vtxt}'
+        # v4 (9 Nov 2026): how far above the pivot in ATR (orange beyond 1.5 = extended)
+        atxt = '' if _nan(da) else (f' <span style="color:{ORANGE if float(da) > 1.5 else TEAL};">'
+                                    f'+{float(da):.1f} ATR</span>')
+        txt = f'{_e(st_.replace("Broke out ", "out "))}{vtxt}{atxt}'
     else:
-        txt = '' if _nan(dist) else f'{float(dist) * 100:+.1f}%'
+        # v4: distance below the pivot in ATR (near = within 1.5 ATR); % in the tooltip
+        txt = (f'{float(da):+.1f} ATR' if not _nan(da) else '' if _nan(dist) else f'{float(dist) * 100:+.1f}%')
+    oh, oha = r.get('overhead'), r.get('overhead_atr')
+    if (not _nan(oh) and not _nan(oha) and float(oha) <= 2.0       # v4: overhead pivot high close above,
+            and (_nan(pv) or float(oh) > 1.005 * float(pv))):     # when it is above the pivot itself
+        extra = f' <span class="sub" title="Next overhead pivot high {float(oh):,.2f}, {float(oha):.1f} ATR above the close">↑{float(oh):,.2f}</span>'
     pv_txt = '' if _nan(pv) else f' <span class="sub">to {float(pv):,.2f}</span>'
     w = r.get('base_weeks')
     wk = '' if _nan(w) else f' <span class="sub">{float(w):.0f}w</span>'
@@ -236,10 +248,14 @@ def base_cell(r):
     rank = {'Broke out today': 4}.get(st_, 3 if broke else 2 if st_ == 'Near pivot' else 1)
     sk = rank * 1000 + (0 if _nan(dist) else float(dist) * 100)
     dep = r.get('base_depth')
+    cl = r.get('base_bo_cl')
     title = _e(f"{bt}: pivot {pv}" + ('' if _nan(dep) else f", depth {float(dep) * 100:.0f}%")
-               + ('' if not _s(r.get('base_start')) else f", from {_s(r.get('base_start'))}"))
+               + ('' if not _s(r.get('base_start')) else f", from {_s(r.get('base_start'))}")
+               + ('' if _nan(dist) else f", close {float(dist) * 100:+.1f}% vs pivot")
+               + ('' if not broke or _nan(cl) else f", breakout day closed at {float(cl) * 100:.0f}% of its range")
+               + ('' if _nan(oh) else f", next overhead pivot high {float(oh):,.2f}"))
     return (f'<span title="{title}">{chip(BASE_ABBR.get(bt, bt), col, broke or st_ == "Near pivot")}{wk} '
-            f'<span style="color:{col};">{txt}</span>{pv_txt}{stars}</span>'), sk
+            f'<span style="color:{col};">{txt}</span>{pv_txt}{stars}{extra}</span>'), sk
 
 
 def ind_cell(r, etf=''):

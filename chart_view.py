@@ -82,9 +82,12 @@ def _add_base(fig, v, b):
     if x0 and x1 and lo is not None:
         fig.add_shape(type='rect', xref='x', yref='y', x0=x0, x1=x1, y0=lo, y1=pv, layer='below', line_width=0,
                       fillcolor='rgba(133,202,197,0.08)')
-    if typ == 'Cup w/ handle':
-        pts = [(b.get('base_left_date'), b.get('base_left')), (b.get('base_low_date'), lo),
-               (b.get('base_right_date'), pv - 0.10)]
+    if typ in ('Cup w/ handle', 'Cup'):
+        # v4 (9 Nov 2026): a handle found as a flat base carries the cup low separately (cup_low); a cup with no handle
+        # yet is drawn from the left lip through the low to today's close
+        cl, cld = (b.get('cup_low'), b.get('cup_low_date')) if b.get('cup_low_date') else (lo, b.get('base_low_date'))
+        rgt = (b.get('base_right_date'), pv - 0.10) if typ == 'Cup w/ handle' else (last, float(v['Close'].iloc[-1]))
+        pts = [(b.get('base_left_date'), b.get('base_left')), (cld, cl), rgt]
         pts = [(clip(d), y) for d, y in pts if d and y is not None and d >= first]
         if len(pts) >= 2:
             fig.add_trace(go.Scatter(x=[p[0] for p in pts], y=[p[1] for p in pts], mode='lines+markers',

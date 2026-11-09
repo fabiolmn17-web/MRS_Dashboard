@@ -1509,18 +1509,29 @@ if _scan_df is not None and len(_scan_df) > 0:
 
     _fl, _fs = _fmask('long'), _fmask('short')
     _m_long, _m_short = _m_long & _fl, _m_short & _fs
-    _BASES = ['Cup w/ handle', 'Flat base', 'VCP', 'Tight area', 'Double bottom', 'Base-on-base', 'Ascending base',
-              'IPO base']                                  # v3 (8 Nov 2026): patterns added
+    _BASES = ['Cup w/ handle', 'Cup', 'Flat base', 'VCP', 'Tight area', 'Double bottom', 'Base-on-base', 'Ascending base',
+              'High tight flag', 'IPO base']               # v3 (8 Nov 2026): patterns added; v4 (9 Nov): Cup, HTF
+    _BO_TYPES = _BASES + ['52-week high', '52-week low']  # v4: a first close above a 52-week high that stood >= 4 weeks
+    # v4 (9 Nov 2026, Fabio's review of 13 names): bases only in stocks that have trended over the year (RS rating >= 70
+    # long, <= 30 short): the choppy names (SKY, TDC, HPQ, EMBJ: RS 51-67) carried patterns but no setup
+    _RS_BASE = 70
+    _rsr = _num('rs_rating')
+    _rs_l = (_rsr >= _RS_BASE) if 'rs_rating' in _sd.columns else pd.Series(True, index=_sd.index)
+    _rs_s = (_rsr <= 100 - _RS_BASE) if 'rs_rating' in _sd.columns else pd.Series(True, index=_sd.index)
     _bt, _bst = _txt('base_type'), _txt('base_state')
     # bases v3 (8 Nov 2026): pattern / fault / correction filters of the Bases scans (widgets below; read here so the
     # counts on the scan buttons follow them, like the squeeze and earnings filters)
     _bpat = st.session_state.get('ms_bpat', 'All patterns')
     _bpat_m = pd.Series(True, index=_sd.index) if _bpat == 'All patterns' else _bt.eq(_bpat)
+    _bo_st = _bst.str.startswith('Broke out')
     _bnf = (~(_txt('base_faults').str.len() > 0) | _txt('base_faults').isin(['None', 'nan'])) \
         if st.session_state.get('ms_bnofault') and 'base_faults' in _sd.columns else pd.Series(True, index=_sd.index)
     _bcorr = _bool('base_in_corr') if st.session_state.get('ms_bcorr') and 'base_in_corr' in _sd.columns \
         else pd.Series(True, index=_sd.index)
-    _q_lb = _m_long & _bt.isin(_BASES) & _bst.isin(['In base', 'Near pivot', 'Broke out today']) & _bpat_m & _bnf & _bcorr
+    # v4 (9 Nov 2026): Bases = live bases only (in the base or near the pivot); a base cleared in the last 5 sessions
+    # moves to Breakouts (it is used up as a base)
+    _q_lb = _m_long & _rs_l & _bt.isin(_BASES) & _bst.isin(['In base', 'Near pivot']) & _bpat_m & _bnf & _bcorr
+    _q_lbo = _m_long & _rs_l & _bt.isin(_BO_TYPES) & _bo_st & _bpat_m & _bnf & _bcorr
     _r5, _e50, _sl50 = _num('ret_5d'), _num('ext_atr'), _num('sma50_slope5')
     if 'pb_setup' in _sd.columns:
         _pbs, _rls = _txt('pb_setup'), _txt('rally_setup')
@@ -1532,8 +1543,9 @@ if _scan_df is not None and len(_scan_df) > 0:
         _sd['pb_setup'], _sd['rally_setup'] = _pbs, _rls
     _q_lp = _m_long & (_pbs != '')
     _sbt, _sbs = _txt('sb_type'), _txt('sb_state')
-    _q_sb = _m_short & _sbt.isin(_BASES) & _sbs.isin(['In base', 'Near breakdown', 'Broke down today']) & \
-        (pd.Series(True, index=_sd.index) if _bpat == 'All patterns' else _sbt.eq(_bpat))
+    _sbpat = pd.Series(True, index=_sd.index) if _bpat == 'All patterns' else _sbt.eq(_bpat)
+    _q_sb = _m_short & _rs_s & _sbt.isin(_BASES) & _sbs.isin(['In base', 'Near breakdown']) & _sbpat
+    _q_sbd = _m_short & _rs_s & _sbt.isin(_BO_TYPES) & _sbs.str.startswith('Broke down') & _sbpat
     _q_sr = _m_short & (_rls != '')
     # 8 Nov 2026: Deep dip = a live trigger on the 200 or 250 SMA (Deep_Dip study rules): the 20 closes before all above
     # the SMA, then an undercut (low below, close back above) or a reclaim after 1-5 closes below, in the last 3
@@ -1561,9 +1573,17 @@ if _scan_df is not None and len(_scan_df) > 0:
         'S_all': ('All', int(_m_short.sum()), 'short',
                   'Every stock on the short list (held RS −1 or lower, below the 200-day, 50 < 200). Coldest first.'),
         'L_bases': ('Bases', int(_q_lb.sum()), 'long',
-                    'Momentum list stocks in a base (cup with handle, double bottom, VCP, base-on-base, flat base, tight '
-                    'area, ascending base, IPO base) that is still actionable: in the base, within 5% below the pivot, or '
-                    'broke out today. Sorted by state, then quality Q, then distance to the pivot. Q = base quality checks, orange = faults (descriptive).'),
+                    'Momentum list stocks with RS rating 70+ in a live base (cup with handle, cup still forming, double '
+                    'bottom, VCP, base-on-base, flat base, tight area, ascending base, high tight flag, IPO base): in the '
+                    'base, or near the pivot = within 1.5 ATR below it. Not here: bases already cleared (see Breakouts), '
+                    'falling channels, flags and pullbacks after a breakout. Sorted by state, then quality Q, then '
+                    'distance to the pivot in ATR. Q = base quality checks, orange = faults (descriptive).'),
+        'L_bo': ('Breakouts', int(_q_lbo.sum()), 'long',
+                 'Momentum list stocks with RS rating 70+ that closed above a base pivot (or above a 52-week high that '
+                 'stood 4+ weeks) in the last 5 sessions and are still above it. The base is used up: this is where the '
+                 'move is now. Shows days since, breakout volume, where the breakout day closed in its range, the '
+                 'distance above the pivot in ATR (more than 1.5 ATR = extended) and the next overhead pivot high. '
+                 'Newest first. Descriptive: a mechanical breakout alone had no edge (Study B).'),
         'L_pb': ('Pullbacks', int(_q_lp.sum()), 'long',
                  'Momentum list stocks down 2% or more over 5 sessions, closing within −1 to +0.5 ATR of a rising '
                  '20- or 50-day SMA (Setup column: PB 20d / PB 50d). Hottest first.'),
@@ -1583,9 +1603,12 @@ if _scan_df is not None and len(_scan_df) > 0:
                   'The 50 highest heat scores across all scanned stocks that pass the liquidity filter (any list): where '
                   'to look for setups. The list itself had no return edge (2009–26). Descriptive.'),
         'S_bases': ('Bases', int(_q_sb.sum()), 'short',
-                    'Short list stocks (held RS −1 or lower, below the 200-day, 50 < 200) in a bear base: the same base '
-                    'rules upside down, under a pivot low. Still actionable: in the base, within 5% above the breakdown '
-                    'level, or broke down today. Closest to the level first.'),
+                    'Short list stocks (held RS −1 or lower, below the 200-day, 50 < 200; RS rating 30 or lower) in a '
+                    'live bear base: the same base rules upside down, under a pivot low. In the base, or within 1.5 ATR '
+                    'above the breakdown level. Closest to the level first.'),
+        'S_bd': ('Breakdowns', int(_q_sbd.sum()), 'short',
+                 'Short list stocks (RS rating 30 or lower) that closed below a bear-base level (or a 52-week low that '
+                 'stood 4+ weeks) in the last 5 sessions and are still below it. Newest first.'),
         'S_rally': ('Rallies', int(_q_sr.sum()), 'short',
                     'Short list stocks up 2% or more over 5 sessions, closing within −0.5 to +1 ATR of a falling '
                     '20- or 50-day SMA (Setup column: Rally 20d / 50d). Coldest first.'),
@@ -1600,7 +1623,7 @@ if _scan_df is not None and len(_scan_df) > 0:
                    'heat alone is not a short signal: the coldest names did not lag the universe. Descriptive.'),
     }
     # 8 Nov 2026: Deep rip (short mirror lost money, Tested) and Cold 50 (coldest names did not lag) removed
-    _LONG_K, _SHORT_K = ['L_all', 'L_bases', 'L_pb', 'L_dip', 'L_hot'], ['S_all', 'S_bases', 'S_rally']
+    _LONG_K, _SHORT_K = ['L_all', 'L_bases', 'L_bo', 'L_pb', 'L_dip', 'L_hot'], ['S_all', 'S_bases', 'S_bd', 'S_rally']
     for _k_rm in ('S_dip', 'S_cold'):
         _SCANS.pop(_k_rm, None)
     if st.session_state.get('ms_scan') not in _SCANS:
@@ -1642,13 +1665,15 @@ if _scan_df is not None and len(_scan_df) > 0:
     with _c5:
         st.markdown('<div style="height:1.75rem;"></div>', unsafe_allow_html=True)
         _no_earn = st.checkbox('Hide earnings ≤ 7 days', value=False, key='ms_earn')
-    if _scan in ('L_bases', 'S_bases'):               # bases v3 (8 Nov 2026): base quality filters
+    if _scan in ('L_bases', 'S_bases', 'L_bo', 'S_bd'):   # bases v3 (8 Nov 2026): base quality filters
         _b0, _b1, _b2, _b3 = st.columns([1.2, 1.0, 1.3, 1.5])
         with _b0:
-            st.selectbox('Pattern', ['All patterns'] + _BASES, index=0, key='ms_bpat',
+            st.selectbox('Pattern', ['All patterns'] + (_BO_TYPES if _scan in ('L_bo', 'S_bd') else _BASES), index=0,
+                         key='ms_bpat',
                          help='One base per stock, in this order: cup with handle, double bottom, VCP, high tight flag, '
-                              'ascending base, flat base / tight area (base-on-base when it sits on the prior base), IPO base.')
-        if _scan == 'L_bases':
+                              'ascending base, flat base / tight area (base-on-base when it sits on the prior base, cup '
+                              'with handle when it is the handle of an earlier cup), cup still forming (no handle yet), IPO base.')
+        if _scan in ('L_bases', 'L_bo'):
             with _b1:
                 st.markdown('<div style="height:1.75rem;"></div>', unsafe_allow_html=True)
                 st.checkbox('Hide faulty bases', value=False, key='ms_bnofault',
@@ -1686,6 +1711,7 @@ if _scan_df is not None and len(_scan_df) > 0:
                 + '</div>', unsafe_allow_html=True)
 
     _mask = {'L_all': _m_long, 'S_all': _m_short, 'L_bases': _q_lb, 'L_pb': _q_lp, 'S_bases': _q_sb, 'S_rally': _q_sr,
+             'L_bo': _q_lbo, 'S_bd': _q_sbd,
              'L_dip': _q_ld, 'S_dip': _q_sd}
     if _scan in _mask:
         _v = _sd[_mask[_scan]]
@@ -1706,12 +1732,18 @@ if _scan_df is not None and len(_scan_df) > 0:
             _v = _v.assign(_dd_mode='trig', _k=_vn(f'{_p}_days') * 1000 - _vn(f'{_p}_rvol').fillna(0)) \
                    .sort_values('_k', na_position='last')
     elif _scan == 'L_bases':
-        _rk = pd.to_numeric(_v['base_state'].map({'Broke out today': 3, 'Near pivot': 2, 'In base': 1}), errors='coerce').fillna(0)   # 8 Nov: numeric even when the filters leave 0 rows (empty str dtype)
+        _rk = pd.to_numeric(_v['base_state'].map({'Near pivot': 2, 'In base': 1}), errors='coerce').fillna(0)   # 8 Nov: numeric even when the filters leave 0 rows (empty str dtype)
         _bq = pd.to_numeric(_v['base_q'], errors='coerce').fillna(0) if 'base_q' in _v.columns else 0   # 8 Nov: quality next
-        _v = _v.assign(_k=_rk * 1000 + _bq * 20 + pd.to_numeric(_v['base_dist_pct'], errors='coerce').fillna(-9) * 100) \
-               .sort_values('_k', ascending=False)
+        _bda = (pd.to_numeric(_v['base_dist_atr'], errors='coerce') if 'base_dist_atr' in _v.columns
+                else pd.to_numeric(_v['base_dist_pct'], errors='coerce') * 30).fillna(-99)    # v4: distance in ATR
+        _v = _v.assign(_k=_rk * 1000 + _bq * 20 + _bda.clip(-19, 0)).sort_values('_k', ascending=False)
+    elif _scan in ('L_bo', 'S_bd'):                     # v4: newest breakout first, then the least extended
+        _dsc = pd.to_numeric(_v['base_days_since_bo' if _scan == 'L_bo' else 'sb_days_since'], errors='coerce').fillna(9)
+        _ext = pd.to_numeric(_v['base_dist_atr' if _scan == 'L_bo' else 'sb_dist_atr'], errors='coerce') \
+            if ('base_dist_atr' if _scan == 'L_bo' else 'sb_dist_atr') in _v.columns else pd.Series(0, index=_v.index)
+        _v = _v.assign(_k=_dsc * 100 + _ext.abs().fillna(9).clip(0, 99)).sort_values('_k', ascending=True)
     elif _scan == 'S_bases':
-        _rk = pd.to_numeric(_v['sb_state'].map({'Broke down today': 3, 'Near breakdown': 2, 'In base': 1}), errors='coerce').fillna(0)
+        _rk = pd.to_numeric(_v['sb_state'].map({'Near breakdown': 2, 'In base': 1}), errors='coerce').fillna(0)
         _v = _v.assign(_k=_rk * 1000 - pd.to_numeric(_v['sb_dist_pct'], errors='coerce').fillna(9) * 100) \
                .sort_values('_k', ascending=False)
     elif _scan in ('S_rally', 'S_cold', 'S_all'):
@@ -1739,8 +1771,10 @@ if _scan_df is not None and len(_scan_df) > 0:
             'Momentum = 50-day SMA slope over 5 sessions: Weak ≤ −0.5%, Falling ≤ 0, '
             'Building ≤ +0.5 (Fading if it came down from above +0.5 in the last 11 sessions), Persistent above. '
             '5-day: dip ≤ −2%, pullback ≤ −3%, sharp ≤ −4%. Setup: PB 20d / 50d = pullback to a rising SMA (long), '
-            'Rally 20d / 50d = rally to a falling SMA (short). Base / pivot on the short scans = bear base (↓) and '
-            'the breakdown level. Earnings in orange = within 7 days. '
+            'Rally 20d / 50d = rally to a falling SMA (short). Base / pivot: pattern, weeks, distance to the pivot in '
+            'ATR(14) (near = within 1.5 ATR), pivot, quality Q and faults; on Breakouts: days since, breakout volume, '
+            'close location of the breakout day, ATR above the pivot (orange beyond 1.5 = extended) and the next '
+            'overhead pivot high. On the short scans = bear base (↓) and the breakdown level. Earnings in orange = within 7 days. '
             'Squeeze = Bollinger inside Keltner on daily bars: Bollinger (20, 2.0) inside Keltner (SMA 20 ± k × average true range 20), '
             'High k = 1.0, Mid 1.5, Low 2.0; days = consecutive sessions in a squeeze; Fired ↑/↓ = out of the squeeze today, '
             'by momentum sign; the square is the momentum colour (aqua &gt; 0 rising, blue &gt; 0 falling, red &lt; 0 falling, yellow &lt; 0 rising). '
