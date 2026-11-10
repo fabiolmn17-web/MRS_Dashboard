@@ -100,6 +100,27 @@ def main():
     except Exception as e:
         print(f'  Forward log skipped: {e}')
 
+    # 3c. Allocation rule forward log (allocation.py, 10 Nov 2026). Never blocks the update.
+    try:
+        import allocation
+        al_states = allocation.build(allocation.fetch())
+        if al_states:
+            arow = allocation.log_row(al_states)
+            d0 = max(s_['date'] for s_ in al_states.values())
+            mask = pd.to_datetime(hist['date']).dt.normalize() == pd.Timestamp(d0).normalize()
+            if mask.any():
+                for k, v in arow.items():
+                    if k not in hist.columns:
+                        hist[k] = np.nan
+                    if isinstance(v, str):
+                        hist[k] = hist[k].astype(object)
+                    hist.loc[mask, k] = v
+                print(f"  Allocation log {pd.Timestamp(d0).date()}: " + ' | '.join(f'{k}={v}' for k, v in arow.items()))
+            else:
+                print(f'  Allocation log skipped: session {pd.Timestamp(d0).date()} not in history')
+    except Exception as e:
+        print(f'  Allocation log skipped: {e}')
+
     # 4. Save
     pipeline.save_history(hist, HIST_PATH)
     print(f'\n  Saved {len(hist)} rows to {HIST_PATH.name}')

@@ -31,6 +31,7 @@ import rotation_view
 import rs_labels
 import market_state
 import risk_panel
+import allocation
 import scan_view
 import heat_score
 import chart_view
@@ -43,7 +44,7 @@ try:
     _PROC_START = os.stat('/proc/self').st_ctime
 except Exception:
     _PROC_START = None
-for _m in (pipeline, rs_labels, risk_dial, sector_view, rotation_view, market_state, risk_panel, scan_view,
+for _m in (pipeline, rs_labels, risk_dial, sector_view, rotation_view, market_state, risk_panel, allocation, scan_view,
            chart_view, watchlist, heat_score):
     try:
         _mt = os.path.getmtime(_m.__file__)
@@ -133,6 +134,16 @@ def load_risk_inputs(etfs: tuple):
     except Exception as e:
         print(f'[risk panel] fetch error: {e}')
         return None, None, None
+
+
+@st.cache_data(ttl=3 * 3600, show_spinner=False)
+def load_alloc_inputs():
+    """Allocation rule card (10 Nov 2026): SPY and QQQ daily OHLC, not dividend-adjusted, full history. Cached 3 hours."""
+    try:
+        return allocation.fetch()
+    except Exception as e:
+        print(f'[allocation] fetch error: {e}')
+        return {}
 
 
 @st.cache_data(ttl=3600)
@@ -443,6 +454,8 @@ with st.sidebar:
     st.sidebar.caption('Clears cache and reloads CSV from disk.')
     show_risk_panel = st.sidebar.toggle('Risk today panel', value=True, key='show_risk_panel',
                                         help='Pedal, today\'s state, effective bets, insurance cost, book volatility guide (v5).')
+    show_alloc = st.sidebar.toggle('Allocation rule card', value=True, key='show_alloc',
+                                   help='SPY / QQQ rebound + breakout tickets (in-sample rule; forward tracking from 10 Nov 2026).')
 
     # ── Zero gamma: InsiderFinance (scored) vs Gamma Live 40d (shadow) ────────────────────────────────────────
     _gst = gamma_shadow_table(hist, gshadow)
@@ -809,6 +822,20 @@ if st.session_state.get('show_risk_panel', True):
     except Exception as _rp_err:
         print(f'[risk panel] {_rp_err}')
         st.caption('Risk today panel could not be built this time.')
+
+# ── Allocation rule card (10 Nov 2026): SPY / QQQ rebound + breakout tickets ────────────────────────
+if st.session_state.get('show_alloc', True):
+    try:
+        with st.spinner('Loading the allocation rule…'):
+            _al_data = load_alloc_inputs()
+        _al_states = allocation.build(_al_data) if _al_data else {}
+        if _al_states:
+            st.markdown(allocation.card_html(_al_states), unsafe_allow_html=True)
+        else:
+            st.caption('Allocation rule card: SPY / QQQ history not available right now.')
+    except Exception as _al_err:
+        print(f'[allocation] {_al_err}')
+        st.caption('Allocation rule card could not be built this time.')
 
 try:
     _ld_asof = str(_ind_df['as_of'].iloc[0]) if _ind_df is not None and 'as_of' in _ind_df.columns else None
