@@ -824,18 +824,22 @@ if st.session_state.get('show_risk_panel', True):
         st.caption('Risk today panel could not be built this time.')
 
 # ── Allocation rule card (10 Nov 2026): SPY / QQQ rebound + breakout tickets ────────────────────────
+#    The SPY state also feeds the stock-entry guide line on the scanner (computed even when the card is hidden).
+_al_states = {}
+try:
+    with st.spinner('Loading the allocation rule…'):
+        _al_data = load_alloc_inputs()
+    _al_states = allocation.build(_al_data) if _al_data else {}
+    _al_g = allocation.entry_guide(_al_states)
+    st.session_state['_alloc_spy_in'] = (_al_g[0] if _al_g else None)
+except Exception as _al_err:
+    print(f'[allocation] {_al_err}')
+    st.session_state['_alloc_spy_in'] = None
 if st.session_state.get('show_alloc', True):
-    try:
-        with st.spinner('Loading the allocation rule…'):
-            _al_data = load_alloc_inputs()
-        _al_states = allocation.build(_al_data) if _al_data else {}
-        if _al_states:
-            st.markdown(allocation.card_html(_al_states), unsafe_allow_html=True)
-        else:
-            st.caption('Allocation rule card: SPY / QQQ history not available right now.')
-    except Exception as _al_err:
-        print(f'[allocation] {_al_err}')
-        st.caption('Allocation rule card could not be built this time.')
+    if _al_states:
+        st.markdown(allocation.card_html(_al_states), unsafe_allow_html=True)
+    else:
+        st.caption('Allocation rule card: SPY / QQQ history not available right now.')
 
 try:
     _ld_asof = str(_ind_df['as_of'].iloc[0]) if _ind_df is not None and 'as_of' in _ind_df.columns else None
@@ -1755,6 +1759,21 @@ if _scan_df is not None and len(_scan_df) > 0:
                 + ('' if 'pb_setup' in _scan_df.columns or _scan != 'L_pb' else
                    ' <span style="color:#e3b48e;">20-day pullbacks arrive with the next nightly scan (50-day only for now).</span>')
                 + '</div>', unsafe_allow_html=True)
+    # Stock-entry guide from the SPY allocation rule (10 Nov 2026, exploratory)
+    _al_in = st.session_state.get('_alloc_spy_in')
+    if _al_in is not None and _SCANS[_scan][2] == 'long':
+        if _scan == 'L_dip':
+            _gl_c, _gl_t = '#85cac5', ('SPY rule ' + ('IN' if _al_in else 'OUT') + ': Deep dip entries allowed '
+                                        '(stock Deep dips averaged +0.15R with the rule IN, +0.10R with it OUT).')
+        elif _al_in:
+            _gl_c, _gl_t = '#85cac5', 'SPY rule IN: continuation entries at normal size.'
+        else:
+            _gl_c, _gl_t = '#f4a062', ('SPY rule OUT: no new base / pivot / breakout entries, or quarter size. These setups '
+                                        'averaged −0.06R (pivot) and −0.14R (breakout) per trade with the rule OUT, against '
+                                        '+0.10R / +0.06R with it IN.')
+        st.markdown(f'<div style="font-size:0.76rem;color:#f3ece2;border-left:3px solid {_gl_c};padding:2px 8px;'
+                    f'margin:-2px 0 8px 0;background:#0d0d0d;">{_gl_t} <span style="color:#6e675f;">Exploratory, in-sample; '
+                    f'logged forward.</span></div>', unsafe_allow_html=True)
 
     _mask = {'L_all': _m_long, 'S_all': _m_short, 'L_bases': _q_lb, 'L_pb': _q_lp, 'S_bases': _q_sb, 'S_rally': _q_sr,
              'L_bo': _q_lbo, 'S_bd': _q_sbd,

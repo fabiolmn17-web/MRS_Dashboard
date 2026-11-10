@@ -141,15 +141,17 @@ def state(ohlc: pd.DataFrame, ticker: str) -> dict:
                     pnl=float(c[-1] / t['entry'] - 1), days=n - 1 - t['i'])
 
     A, B = ticket(tA, 'sma50'), ticket(tB, 'ema21')
-    # sell-off status for the rebound trigger
-    E = d['E'].values; inep = False; used = False
+    # sell-off status for the rebound trigger: current episode, its start, and whether its entry was taken
+    E = d['E'].values; inep = False; ep_start = None
     for i, e in enumerate(E):
         if not np.isfinite(e):
             continue
         if not inep and e <= -1:
-            inep, used = True, True
+            inep, ep_start = True, i
         elif inep and e >= 0:
-            inep, used = False, False
+            inep, ep_start = False, None
+    ep_taken = bool(inep and any(t['i'] == ep_start for t in tA))
+    used = inep
     rb_level = float(last['sma50'] - last['atr14'])            # close at or below this (approx: SMA and ATR move tomorrow)
     bo_level = float(d['high'].iloc[-21:].max())                # close above this triggers tomorrow
     r = daily_returns(d, tA, tB)
@@ -157,6 +159,7 @@ def state(ohlc: pd.DataFrame, ticker: str) -> dict:
     return dict(ticker=ticker, date=d.index[-1], close=float(c[-1]), E=float(last['E']), sma50=float(last['sma50']),
                 ema21=float(last['ema21']), atr14=float(last['atr14']), A=A, B=B, position=A['open'] or B['open'],
                 in_selloff=inep, rb_used=used, rb_level=rb_level, bo_level=bo_level,
+                ep_start=(d.index[ep_start] if ep_start is not None else None), ep_taken=ep_taken,
                 live_rule=float((1 + live).prod() - 1) if len(live) else np.nan,
                 live_bh=float((1 + bh).prod() - 1) if len(bh) else np.nan, live_days=len(live),
                 hist=d.iloc[-130:][['close', 'sma50', 'ema21']], expo_series=_exposure(d, tA, tB).iloc[-130:],
@@ -185,93 +188,135 @@ def log_row(states: dict) -> dict:
     return row
 
 
-# ── card (same look as the Risk today panel) ───────────────────────────────────────
+# ── entry guide for stock setups (exploratory, 10 Nov 2026) ─────────────────────
+GUIDE = {
+    True: ('IN', TEAL, 'Continuation setups (bases, pivots, breakouts): normal size. Deep dip: normal size.'),
+    False: ('OUT', ORANGE, 'Continuation setups (bases, pivots, breakouts): no new entries, or quarter size. '
+                           'Deep dip: allowed. Open risk: at most half the ladder cap.'),
+}
+GUIDE_EVIDENCE = ('Stock trades 2008-2026 by SPY rule state on the entry day, mean R per trade: base breakout +0.06 IN / '
+                  '-0.14 OUT; mid-base pivot +0.10 / -0.06; Deep dip +0.15 / +0.10. Exploratory, in-sample; logged forward.')
+
+
+def entry_guide(states: dict):
+    """(spy_in, label, colour, text) or None. Uses the SPY state only."""
+    s = states.get('SPY')
+    if not s:
+        return None
+    lab, col, txt = GUIDE[bool(s['position'])]
+    return bool(s['position']), lab, col, txt
+
+
+def guide_html(states: dict, compact: bool = False) -> str:
+    g = entry_guide(states)
+    if not g:
+        return ''
+    _, lab, col, txt = g
+    return (f'<div title="{_e(GUIDE_EVIDENCE)}" style="font-size:0.78rem;color:#f3ece2;line-height:1.35;'
+            f'border-left:3px solid {col};padding:3px 8px;margin:{"0 0 6px 0" if compact else "0 0 8px 0"};background:#0d0d0d;">'
+            f'<b style="color:{col};">Stock entries · SPY rule {lab}</b> — {txt} '
+            f'<span style="color:#6e675f;">exploratory</span></div>')
+
+
+# ── card (compact: one line per ticker) ───────────────────────────────────────────
 CSS = ('<style>.al{background:#121212;border:1px solid #2a2724;border-left:3px solid #85cac5;border-radius:6px;'
-       'padding:12px 16px 10px 16px;margin:2px 0 14px 0;}'
-       '.al .k{font-size:0.70rem;letter-spacing:0.12em;text-transform:uppercase;color:#85cac5;font-weight:700;margin-bottom:10px;}'
-       '.al .row{display:grid;grid-template-columns:230px 1fr 1fr 340px;gap:12px;margin-bottom:10px;}'
-       '.al .tile{background:#0d0d0d;border:1px solid #24211e;border-radius:6px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;}'
-       '.al .lab{font-size:0.66rem;letter-spacing:0.12em;text-transform:uppercase;color:#a89f95;}'
-       '.al .big{font-size:1.6rem;font-weight:800;line-height:1.0;}'
-       '.al .sub{font-size:0.78rem;color:#a89f95;line-height:1.35;}'
-       '.al .act{font-size:0.82rem;color:#f3ece2;line-height:1.35;}'
+       'padding:8px 12px 6px 12px;margin:2px 0 12px 0;}'
+       '.al .k{font-size:0.66rem;letter-spacing:0.12em;text-transform:uppercase;color:#85cac5;font-weight:700;margin-bottom:6px;}'
+       '.al .row{display:grid;grid-template-columns:96px 1fr 1fr 230px;gap:10px;align-items:center;'
+       'border-top:1px solid #24211e;padding:5px 0;}'
+       '.al .pill{font-size:1.05rem;font-weight:800;}'
+       '.al .t{font-size:0.66rem;letter-spacing:0.10em;text-transform:uppercase;color:#a89f95;}'
+       '.al .tx{font-size:0.78rem;color:#f3ece2;line-height:1.3;}'
+       '.al .sub{font-size:0.72rem;color:#a89f95;line-height:1.3;}'
        '.al .num{font-variant-numeric:tabular-nums;}'
-       '.al .chip{display:inline-block;font-size:0.62rem;letter-spacing:0.08em;text-transform:uppercase;padding:1px 6px;border-radius:3px;'
-       'border:1px solid #6e675f;color:#a89f95;margin-left:6px;}'
        '@media (max-width:900px){.al .row{grid-template-columns:1fr;}}</style>')
 
 
-def _spark(s: dict, w=320, h=86) -> str:
+def _spark(s: dict, w=230, h=34) -> str:
     hst = s['hist'].dropna(); ex = s['expo_series'].reindex(hst.index).fillna(0).values
     if len(hst) < 5:
         return ''
     lo = float(hst.min().min()); hi = float(hst.max().max()); span = (hi - lo) or 1
-    X = lambda i: 2 + i * (w - 4) / (len(hst) - 1)
-    Y = lambda v: 4 + (hi - v) * (h - 8) / span
-    bars = ''.join(f'<rect x="{X(i) - 0.5 * (w - 4) / len(hst):.1f}" y="0" width="{(w - 4) / len(hst) + 0.3:.1f}" height="{h}" fill="#132322"/>'
+    X = lambda i: 1 + i * (w - 2) / (len(hst) - 1)
+    Y = lambda v: 2 + (hi - v) * (h - 4) / span
+    bw = (w - 2) / len(hst)
+    bars = ''.join(f'<rect x="{X(i) - bw / 2:.1f}" y="0" width="{bw + 0.3:.1f}" height="{h}" fill="#132322"/>'
                    for i in range(len(hst)) if ex[i] > 0)
+
     def line(col, color, sw, dash=''):
         pts = ' '.join(f'{X(i):.1f},{Y(v):.1f}' for i, v in enumerate(hst[col].values))
         da = f' stroke-dasharray="{dash}"' if dash else ''
         return f'<polyline points="{pts}" fill="none" stroke="{color}" stroke-width="{sw}"{da}/>'
-    marks = ''
-    for t, col in ((s['A'], ORANGE), (s['B'], '#7fa7d9')):
-        if t['open'] and lo <= t['stop'] <= hi:
-            marks += f'<line x1="2" x2="{w - 2}" y1="{Y(t["stop"]):.1f}" y2="{Y(t["stop"]):.1f}" stroke="{col}" stroke-dasharray="3,3" stroke-width="1"/>'
-    return (f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}" role="img" aria-label="last 6 months">{bars}'
-            f'{line("sma50", COPPER, 1.2)}{line("ema21", MUTED, 1, "2,2")}{line("close", INK, 1.5)}{marks}</svg>'
-            f'<div class="sub">6 months · close (white), 50-day (copper), 21 EMA (dotted), shaded = in the rule · dashed = stops</div>')
+    marks = ''.join(f'<line x1="1" x2="{w - 1}" y1="{Y(t["stop"]):.1f}" y2="{Y(t["stop"]):.1f}" stroke="{col}" '
+                    f'stroke-dasharray="3,3" stroke-width="1"/>'
+                    for t, col in ((s['A'], ORANGE), (s['B'], '#7fa7d9')) if t['open'] and lo <= t['stop'] <= hi)
+    return (f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}" role="img" aria-label="6 months">'
+            f'<title>6 months: close (white), 50-day (copper), 21 EMA (dotted); shaded = in the rule; dashed = stops</title>'
+            f'{bars}{line("sma50", COPPER, 1.1)}{line("ema21", MUTED, 0.9, "2,2")}{line("close", INK, 1.3)}{marks}</svg>')
 
 
-def _ticket_html(name: str, t: dict, ma_lbl: str, trig: str) -> str:
+def _open_txt(t: dict, ma_lbl: str) -> str:
+    pc = TEAL if t['pnl'] >= 0 else ORANGE
+    arm = (f'exit {t["run"]}/2 closes below the {ma_lbl} ({t["ma"]:.2f})' if t['armed'] else
+           f'exit not armed until a close above the {ma_lbl} ({t["ma"]:.2f})')
+    return (f'since {pd.Timestamp(t["entry_date"]):%d %b} at <b class="num">{t["entry"]:.2f}</b> '
+            f'<b class="num" style="color:{pc};">{t["pnl"] * 100:+.1f}%</b> · stop <b class="num">{t["stop"]:.2f}</b> '
+            f'({t["stop_dist"] * 100:.1f}% away) · {arm}')
+
+
+def _last_txt(t: dict) -> str:
+    if t.get('last_exit') is None:
+        return ''
+    rc = TEAL if t['last_ret'] >= 0 else ORANGE
+    return (f' <span class="sub">Last: {pd.Timestamp(t["last_entry"]):%d %b} → {pd.Timestamp(t["last_exit"]):%d %b} '
+            f'<b class="num" style="color:{rc};">{t["last_ret"] * 100:+.1f}%</b> ({t["last_why"]}).</span>')
+
+
+def _rebound_txt(s: dict) -> str:
+    t = s['A']
     if t['open']:
-        arm = (f'Exit armed: <b class="num">{t["run"]}/2</b> closes below the {ma_lbl} ({t["ma"]:.2f})' if t['armed'] else
-               f'Exit not armed until a close above the {ma_lbl} ({t["ma"]:.2f}); only the stop protects')
-        pc = TEAL if t['pnl'] >= 0 else ORANGE
-        return (f'<div class="tile"><div class="lab">{name} · <span style="color:{TEAL};">open</span></div>'
-                f'<div class="act">Since {pd.Timestamp(t["entry_date"]):%d %b %Y} at <b class="num">{t["entry"]:.2f}</b> · '
-                f'<b class="num" style="color:{pc};">{t["pnl"] * 100:+.1f}%</b> · {t["days"]} sessions</div>'
-                f'<div class="act">Stop <b class="num">{t["stop"]:.2f}</b> <span class="sub">({t["stop_dist"] * 100:.1f}% away)</span></div>'
-                f'<div class="sub">{arm}.</div></div>')
-    le = t.get('last_exit')
-    last = ''
-    if le is not None:
-        rc = TEAL if t['last_ret'] >= 0 else ORANGE
-        last = (f'<div class="sub">Last trade {pd.Timestamp(t["last_entry"]):%d %b} → {pd.Timestamp(le):%d %b %Y}: '
-                f'<b class="num" style="color:{rc};">{t["last_ret"] * 100:+.1f}%</b> ({t["last_why"]}).</div>')
-    return (f'<div class="tile"><div class="lab">{name} · <span style="color:{DIM};">closed</span></div>'
-            f'<div class="act">{trig}</div>{last}</div>')
+        return _open_txt(t, '50-day')
+    if s['in_selloff'] and s['ep_start'] is not None:
+        st = pd.Timestamp(s['ep_start'])
+        if s['ep_taken']:
+            why = f'this sell-off (from {st:%d %b}) already gave its entry'
+        else:
+            why = (f'this sell-off started {st:%d %b} while the previous rebound trade was still open, so it gives no entry '
+                   f'(one per sell-off)')
+        return (f'Waiting: {why}. Resets on a close above the 50-day (<b class="num">{s["sma50"]:.2f}</b>), '
+                f'then a new close 1 ATR below it.' + _last_txt(t))
+    return (f'Buys on a close at or below about <b class="num">{s["rb_level"]:.2f}</b> (50-day − 1 ATR; now '
+            f'{s["E"]:+.2f} ATR).' + _last_txt(t))
+
+
+def _breakout_txt(s: dict) -> str:
+    t = s['B']
+    if t['open']:
+        return _open_txt(t, '21 EMA')
+    return f'Buys on a close above <b class="num">{s["bo_level"]:.2f}</b> (21-session high).' + _last_txt(t)
 
 
 def card_html(states: dict) -> str:
-    h = CSS + '<div class="al"><div class="k">Allocation rule · rebound + breakout tickets (in-sample, forward tracking from 10 Nov 2026)</div>'
+    h = (CSS + '<div class="al"><div class="k">Allocation rule · SPY / QQQ · in-sample, forward tracking from 10 Nov 2026</div>'
+         + guide_html(states, compact=True))
     for tk, s in states.items():
         pos_c = TEAL if s['position'] else DIM
-        n_open = int(s['A']['open']) + int(s['B']['open'])
         ref = REF.get(tk, {})
-        live = (f'Since 10 Nov: rule <b class="num">{s["live_rule"] * 100:+.1f}%</b> vs {tk} <b class="num">{s["live_bh"] * 100:+.1f}%</b>'
-                if s['live_days'] else 'Forward tracking starts after 10 Nov 2026.')
-        caution = (f'<div class="sub" style="color:#f8d6b4;">{_e(CAUTION[tk])}</div>' if tk in CAUTION else '')
-        if s['rb_used'] and s['in_selloff']:
-            rb_trig = (f'This sell-off already gave its rebound entry. Resets on a close above the 50-day '
-                       f'(<b class="num">{s["sma50"]:.2f}</b>).')
-        else:
-            rb_trig = (f'Buys on a close at or below about <b class="num">{s["rb_level"]:.2f}</b> '
-                       f'(50-day − 1 ATR; now {s["E"]:+.2f} ATR).')
-        bo_trig = f'Buys on a close above <b class="num">{s["bo_level"]:.2f}</b> (21-session high).'
-        h += (f'<div class="row"><div class="tile"><div class="lab">{tk}</div>'
-              f'<div class="big" style="color:{pos_c};">{"IN" if s["position"] else "OUT"}</div>'
-              f'<div class="sub">{"100% invested" if s["position"] else "in cash"} · {n_open} ticket{"s" if n_open != 1 else ""} open</div>'
-              f'<div class="sub">{live}</div>'
-              + (f'<div class="sub">Backtest {ref["period"]}: {ref["cagr"]:.1f}%/yr, max DD {ref["dd"]}%, Sharpe {ref["sh"]:.2f} '
-                 f'vs buy-and-hold {ref["bh_cagr"]:.1f}%, {ref["bh_dd"]}%, {ref["bh_sh"]:.2f} · {ref["expo"]}% invested '
-                 f'<span class="chip">in-sample</span></div>' if ref else '')
-              + f'{caution}</div>'
-              f'{_ticket_html("A · Rebound", s["A"], "50-day", rb_trig)}'
-              f'{_ticket_html("B · Breakout", s["B"], "21 EMA", bo_trig)}'
-              f'<div class="tile">{_spark(s)}</div></div>')
-    h += ('<div class="sub">Check after the close. Entries and MA exits are at the close; stops are resting orders. '
-          'A stop-out costs about 2 ATR(10) of the allocated capital (3–5% on SPY): size it as a core allocation, not as a swing trade.</div></div>')
+        tip = (f'Backtest {ref["period"]} (in-sample): {ref["cagr"]:.1f}%/yr, max DD {ref["dd"]}%, Sharpe {ref["sh"]:.2f}, '
+               f'{ref["expo"]}% invested; buy-and-hold {ref["bh_cagr"]:.1f}%, {ref["bh_dd"]}%, {ref["bh_sh"]:.2f}.' if ref else '')
+        if tk in CAUTION:
+            tip += ' ' + CAUTION[tk]
+        live = (f'since 10 Nov {s["live_rule"] * 100:+.1f}% vs {s["live_bh"] * 100:+.1f}%' if s['live_days'] else 'tracking from 10 Nov')
+        warn = ' <span style="color:#f8d6b4;" title="' + _e(CAUTION[tk]) + '">⚠</span>' if tk in CAUTION else ''
+        h += (f'<div class="row"><div title="{_e(tip)}"><span class="t">{tk}</span>{warn}<br>'
+              f'<span class="pill" style="color:{pos_c};">{"IN" if s["position"] else "OUT"}</span>'
+              f'<div class="sub">{live}</div></div>'
+              f'<div class="tx"><span class="t">A · Rebound</span> {_rebound_txt(s)}</div>'
+              f'<div class="tx"><span class="t">B · Breakout</span> {_breakout_txt(s)}</div>'
+              f'<div>{_spark(s)}</div></div>')
+    h += ('<div class="sub" style="border-top:1px solid #24211e;padding-top:4px;">After the close: entries and MA exits at the close, '
+          'stops as resting orders. 100% of the allocated capital while a ticket is open; a stop-out costs about 2 ATR(10) '
+          '(3–5% on SPY). Hover a ticker for the backtest.</div></div>')
     return h.replace('\n', ' ')
 
 
