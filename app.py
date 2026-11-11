@@ -728,12 +728,17 @@ try:
         _mst = str(_scan_df['mkt_state'].iloc[0])
         _qst = str(_scan_df['qqq_state'].iloc[0]) if 'qqq_state' in _scan_df.columns else ''
         if _mst and _mst not in ('nan', 'None'):
-            _mcol = ('#85cac5' if _mst.startswith(('Confirmed', 'Uptrend')) else '#f4a062' if _mst == 'Correction'
-                     else '#e3b48e')
+            # v5 labels (11 Nov 2026): teal = follow-through / uptrend / above the range; orange = correction;
+            # copper = range, below the range low, pullback
+            _mcol = ('#85cac5' if _mst.startswith(('Confirmed', 'Uptrend', 'Follow-through', 'Above'))
+                     else '#f4a062' if _mst.startswith('Correction') else '#e3b48e')
             _qtxt = '' if _qst in ('', 'nan', 'None') else f' · QQQ {_esc(_qst)}'
-            _changes.append(f'<span title="Market state from the nightly scan. Correction = SPY 8%+ below its '
-                            f'52-week high; follow-through day (FTD) = day 4+ of a rally attempt, up 1.25%+ on higher '
-                            f'volume (common convention, assumed); fails if the rally low is undercut. Descriptive, untested.">'
+            _changes.append(f'<span title="Market state from the nightly scan. Correction = close 8%+ below the '
+                            f'52-week high; rally attempt day 1 = first up close after the low; follow-through day = '
+                            f'day 4+ of the attempt, up 1.25%+ on higher volume (common convention, assumed), shown for '
+                            f'about 3 months. After that: Range = longest stretch of 40+ sessions within a 10% band '
+                            f'(measured to a week ago); Above / Below = close outside it; Uptrend / Pullback when there '
+                            f'is no range. Each label ends with the level that changes the state. Descriptive, untested.">'
                             f'Market: <b style="color:{_mcol};">SPY {_esc(_mst)}</b>{_qtxt}</span>')
 except Exception:
     pass

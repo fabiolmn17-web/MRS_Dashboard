@@ -504,11 +504,97 @@ def follow_through(m: Optional[pd.DataFrame]) -> dict:
     return out
 
 
+# v5 (11 Nov 2026): market label in plain states. A follow-through day older than FTD_FRESH sessions no longer reads
+# "Confirmed uptrend": the label then describes what price has done since (range / breakout / uptrend / pullback).
+FTD_FRESH = 63           # a follow-through day counts as "fresh" for ~3 months
+RANGE_BAND = 0.10        # range = longest stretch whose high / low stay within 10% of each other ...
+RANGE_MIN = 40           # ... lasting at least 40 sessions ...
+RANGE_LAG = 5            # ... measured up to 5 sessions ago, so a breakout stays visible for a week
+
+
+def _px(x: float) -> str:
+    return f'{x:,.1f}'
+
+
+def find_range(h: np.ndarray, l: np.ndarray, end: int):
+    """Longest stretch ending at index `end` (inclusive) whose high / low span is <= RANGE_BAND.
+    Returns (start index, range high, range low) or None if shorter than RANGE_MIN sessions."""
+    if end < RANGE_MIN - 1:
+        return None
+    hi, lo, i = h[end], l[end], end
+    while i - 1 >= 0:
+        nh, nl = max(hi, h[i - 1]), min(lo, l[i - 1])
+        if nh / nl - 1 > RANGE_BAND:
+            break
+        hi, lo, i = nh, nl, i - 1
+    return (i, float(hi), float(lo)) if end - i + 1 >= RANGE_MIN else None
+
+
+def market_label(m: Optional[pd.DataFrame], ft: Optional[dict] = None) -> Optional[str]:
+    """One plain line for the market state of an index (SPY / QQQ daily OHLCV). Descriptive definitions, untested.
+      Correction  close >= 8% below the 52-week high (rally attempt / follow-through as in follow_through())
+      Fresh       follow-through day within FTD_FRESH sessions: "Follow-through day N sessions ago"
+      Range       inside the range (find_range, measured up to RANGE_LAG sessions ago)
+      Breakout    close above the range high · Range broken down: close below the range low (not yet -8%)
+      Uptrend / pullback  no range: distance from the 52-week high and sessions since it
+    Every label ends with the line that would change the state (correction line, rally low or follow-through low)."""
+    ft = ft if ft is not None else follow_through(m)
+    if m is None or ft.get('state') is None:
+        return None
+    d = m.dropna(subset=['High', 'Low', 'Close'])
+    h, l, c = d['High'].to_numpy(float), d['Low'].to_numpy(float), d['Close'].to_numpy(float)
+    n = len(c)
+    last = n - 1
+    hi52_s = pd.Series(h).rolling(252, min_periods=1).max().to_numpy()
+    hi52 = float(hi52_s[last])
+    dd = 1 - c[last] / hi52
+    corr_line = (1 - FTD_CORR) * hi52
+    st = str(ft['state'])
+    off = f'−{dd * 100:.1f}% from the high' if dd > 0.0005 else 'at the high'
+    if st.startswith('Rally attempt'):
+        k = ft.get('attempt_day') or int(st.split('day ')[-1].rstrip(')'))
+        nxt = ('follow-through possible from day 4' if k < FTD_MIN_DAY else
+               f'follow-through = close +{FTD_MIN_GAIN * 100:.2f}% on higher volume')
+        return (f'Correction ({off}) · rally attempt day {k} · {nxt}'
+                + (f' · fails below {_px(ft["corr_low"])}' if ft.get('corr_low') else ''))
+    if st == 'Correction':
+        return f'Correction ({off}) · no rally attempt yet' + (f' · low {_px(ft["corr_low"])}' if ft.get('corr_low') else '')
+    age = ft.get('ftd_age')
+    if st.startswith('Confirmed') and age is not None and age <= FTD_FRESH:
+        i_f = last - age
+        fail = max(ft.get('corr_low') or 0.0, (1 - FTD_CORR) * float(h[i_f:].max()))
+        when = 'today' if age == 0 else f'{age} session{"s" if age != 1 else ""} ago'
+        return f'Follow-through day {when} ({d.index[i_f]:%d %b}) · {off} · fails below {_px(fail)}'
+    corr_txt = f'correction = close below {_px(corr_line)}'
+    rg = find_range(h, l, last - RANGE_LAG)
+    if rg is not None:
+        i0, rh, rl = rg
+        since = d.index[i0]
+        if c[last] > rh:
+            new_hi = c[last] >= hi52 * 0.999 or h[last] >= hi52
+            return (f'Above its {since:%b}–{d.index[last - RANGE_LAG]:%b} range ({_px(rh)}) · '
+                    + ('new 52-week high' if new_hi else off))
+        if c[last] < rl:
+            return f'Below its range low ({_px(rl)}, range since {since:%b}) · {off} · {corr_txt}'
+        return f'Range since {since:%b} ({_px(rl)}–{_px(rh)}) · {off} · {corr_txt}'
+    i_hi = int(np.where(h == hi52_s[last])[0][-1]) if (h == hi52_s[last]).any() else last
+    ago = last - i_hi
+    when = 'today' if ago == 0 else f'{ago} session{"s" if ago != 1 else ""} ago'
+    if dd <= 0.03:
+        return f'Uptrend · new high {when} · {off}'
+    return f'Pullback · {off} (high {when}) · {corr_txt}'
+
+
 def market_fields(spy: Optional[pd.DataFrame], qqq: Optional[pd.DataFrame] = None) -> dict:
-    """MKT_FIELDS for the scan (constant columns) from SPY and QQQ."""
+    """MKT_FIELDS for the scan (constant columns) from SPY and QQQ. v5 (11 Nov 2026): mkt_state / qqq_state carry
+    market_label() (plain states); the follow-through columns are unchanged."""
     s, q = follow_through(spy), follow_through(qqq)
-    return dict(mkt_state=s['state'], ftd_date=s['ftd_date'], ftd_age=s['ftd_age'], mkt_dd=s['dd'],
-                qqq_state=q['state'], qqq_ftd_date=q['ftd_date'], qqq_ftd_age=q['ftd_age'])
+    try:
+        sl, ql = market_label(spy, s), market_label(qqq, q)
+    except Exception:
+        sl, ql = None, None
+    return dict(mkt_state=sl or s['state'], ftd_date=s['ftd_date'], ftd_age=s['ftd_age'], mkt_dd=s['dd'],
+                qqq_state=ql or q['state'], qqq_ftd_date=q['ftd_date'], qqq_ftd_age=q['ftd_age'])
 
 
 def _mdd_fn(mh, ml):
