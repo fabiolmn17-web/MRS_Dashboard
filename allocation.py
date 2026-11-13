@@ -351,8 +351,8 @@ def _chart(s: dict, w=470, h=150) -> str:
 
 
 def card_html(states: dict) -> str:
-    h = (CSS + '<div class="al"><div class="k">Allocation rule · SPY / QQQ · in-sample, forward tracking from 10 Nov 2026</div>'
-         + guide_html(states, compact=True))
+    # v6.3 (13 Nov 2026): the stock-entry guide line moved to the Market context card (context_card.py, S2 study).
+    h = (CSS + '<div class="al"><div class="k">Allocation rule · SPY / QQQ · in-sample, forward tracking from 10 Nov 2026</div>')
     for tk, s in states.items():
         tks = _tickets(s)
         pos_c, pos_bg = (TEAL, '#132322') if s['position'] else (MUTED, '#1a1918')

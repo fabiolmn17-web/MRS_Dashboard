@@ -530,6 +530,34 @@ def find_range(h: np.ndarray, l: np.ndarray, end: int):
     return (i, float(hi), float(lo)) if end - i + 1 >= RANGE_MIN else None
 
 
+# v5.1 (13 Nov 2026): follow-through day low status (FTD study, 12 Nov 2026: SPY 1994-2026 + QQQ 1999-2026, 164 events).
+# If the follow-through day's low is undercut within 4 sessions, the rally failed (traded below the rally low) within 20
+# sessions 42% of the time, against 16% when the low held. Relative volume (vs the 10 sessions before) is shown for
+# information only: low-volume follow-through days were not reliably different (p = 0.33). Exploratory.
+FTD_LOW_WINDOW = 4
+
+
+def _ftd_rvol(d, i_f) -> str:
+    if 'Volume' not in d.columns or i_f < 10:
+        return ''
+    v = d['Volume'].to_numpy(float)
+    base = np.nanmean(v[i_f - 10:i_f])
+    return f', RVOL {v[i_f] / base:.2f}' if np.isfinite(base) and base > 0 and np.isfinite(v[i_f]) else ''
+
+
+def _ftd_low_status(l, i_f, last) -> str:
+    low = float(l[i_f])
+    end = min(last, i_f + FTD_LOW_WINDOW)
+    for k in range(i_f + 1, end + 1):
+        if l[k] < low:
+            return (f'its low {_px(low)} undercut on day {k - i_f} (after an undercut, rallies failed within 20 sessions '
+                    f'42% of the time; 16% when the low held)')
+    if last - i_f >= FTD_LOW_WINDOW:
+        return f'its low {_px(low)} held for {FTD_LOW_WINDOW} sessions (rallies then failed 16% of the time, 42% after an undercut)'
+    return f'its low {_px(low)} holding, day {last - i_f} of {FTD_LOW_WINDOW}'
+
+
+
 def market_label(m: Optional[pd.DataFrame], ft: Optional[dict] = None) -> Optional[str]:
     """One plain line for the market state of an index (SPY / QQQ daily OHLCV). Descriptive definitions, untested.
       Correction  close >= 8% below the 52-week high (rally attempt / follow-through as in follow_through())
@@ -564,7 +592,8 @@ def market_label(m: Optional[pd.DataFrame], ft: Optional[dict] = None) -> Option
         i_f = last - age
         fail = max(ft.get('corr_low') or 0.0, (1 - FTD_CORR) * float(h[i_f:].max()))
         when = 'today' if age == 0 else f'{age} session{"s" if age != 1 else ""} ago'
-        return f'Follow-through day {when} ({d.index[i_f]:%d %b}) · {off} · fails below {_px(fail)}'
+        return (f'Follow-through day {when} ({d.index[i_f]:%d %b}{_ftd_rvol(d, i_f)}) · {_ftd_low_status(l, i_f, last)} · '
+                f'{off} · fails below {_px(fail)}')
     corr_txt = f'correction = close below {_px(corr_line)}'
     rg = find_range(h, l, last - RANGE_LAG)
     if rg is not None:

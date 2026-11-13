@@ -32,6 +32,7 @@ import rs_labels
 import market_state
 import risk_panel
 import allocation
+import context_card
 import scan_view
 import heat_score
 import chart_view
@@ -738,7 +739,7 @@ try:
                             f'day 4+ of the attempt, up 1.25%+ on higher volume (common convention, assumed), shown for '
                             f'about 3 months. After that: Range = longest stretch of 40+ sessions within a 10% band '
                             f'(measured to a week ago); Above / Below = close outside it; Uptrend / Pullback when there '
-                            f'is no range. Each label ends with the level that changes the state. Descriptive, untested.">'
+                            f'is no range. Each label ends with the level that changes the state. Follow-through day low (13 Nov 2026, FTD study, SPY + QQQ 1994-2026, 164 events, exploratory): if it is undercut within 4 sessions, the rally failed within 20 sessions 42% of the time, against 16% when it held; RVOL is shown for information (no reliable difference). Descriptive, untested.">'
                             f'Market: <b style="color:{_mcol};">SPY {_esc(_mst)}</b>{_qtxt}</span>')
 except Exception:
     pass
@@ -812,6 +813,26 @@ st.markdown(market_state.decision_strip_html(
 # ══════════════════════════════════════════════════════════════════════════════
 # WHERE TO LOOK: leaders to buy (industries first), rotation, scanner
 # ══════════════════════════════════════════════════════════════════════════════
+# ── Market context card (v6.3, 13 Nov 2026): regime → SPY phase → setups (context_card.py) ───────────
+#    The SPY / QQQ allocation state is computed here (it used to be computed under the risk panel) so the card can sit
+#    on top; the allocation card further down only renders it. Evidence: studies S1 / S2 (12 Nov 2026), exploratory.
+_al_states = {}
+try:
+    with st.spinner('Loading the allocation rule…'):
+        _al_data = load_alloc_inputs()
+    _al_states = allocation.build(_al_data) if _al_data else {}
+    _al_g = allocation.entry_guide(_al_states)
+    st.session_state['_alloc_spy_in'] = (_al_g[0] if _al_g else None)
+except Exception as _al_err:
+    print(f'[allocation] {_al_err}')
+    st.session_state['_alloc_spy_in'] = None
+st.session_state['_ctx'] = (reg, _deep, _al_states.get('SPY'))
+st.session_state['_ctx_chase'] = bool(_al_states.get('SPY')) and context_card.chasing(_al_states.get('SPY'))
+try:
+    st.markdown(context_card.card_html(reg, _deep, _al_states.get('SPY')), unsafe_allow_html=True)
+except Exception as _cx_err:
+    print(f'[context card] {_cx_err}')
+
 # ── Risk today panel (v5): pedal, today's state, effective bets, insurance cost, vol guide ──────────
 if st.session_state.get('show_risk_panel', True):
     try:
@@ -830,16 +851,7 @@ if st.session_state.get('show_risk_panel', True):
 
 # ── Allocation rule card (10 Nov 2026): SPY / QQQ rebound + breakout tickets ────────────────────────
 #    The SPY state also feeds the stock-entry guide line on the scanner (computed even when the card is hidden).
-_al_states = {}
-try:
-    with st.spinner('Loading the allocation rule…'):
-        _al_data = load_alloc_inputs()
-    _al_states = allocation.build(_al_data) if _al_data else {}
-    _al_g = allocation.entry_guide(_al_states)
-    st.session_state['_alloc_spy_in'] = (_al_g[0] if _al_g else None)
-except Exception as _al_err:
-    print(f'[allocation] {_al_err}')
-    st.session_state['_alloc_spy_in'] = None
+#    (v6.3, 13 Nov 2026: the SPY state is now computed above, with the Market context card.)
 if st.session_state.get('show_alloc', True):
     if _al_states:
         st.markdown(allocation.card_html(_al_states), unsafe_allow_html=True)
@@ -1586,7 +1598,7 @@ if _scan_df is not None and len(_scan_df) > 0:
     _q_sr = _m_short & (_rls != '')
     # 8 Nov 2026: Deep dip = a live trigger on the 200 or 250 SMA (Deep_Dip study rules): the 20 closes before all above
     # the SMA, then an undercut (low below, close back above) or a reclaim after 1-5 closes below, in the last 3
-    # sessions, with no close back below and the stop (trigger close - 2 ATR(10), 9 Nov 2026) not hit. 'Watch' = 20 closes above
+    # sessions, with no close back below and the stop (trigger close - 2 ATR(14), 12 Nov 2026; was ATR(10)) not hit. 'Watch' = 20 closes above
     # and now within 1 ATR above the SMA (no trigger yet). Deep rip = the mirror. Plus the 21-session slope of the
     # trigger SMA (select) and >= 25% above the 52-week low (long) / below the 52-week high (short).
     _dsl = None   # 9 Nov 2026: slope filter removed (audit v2: no measurable difference, within +-0.04R)
@@ -1636,7 +1648,7 @@ if _scan_df is not None and len(_scan_df) > 0:
                    '1 ATR above it: no trigger yet. Closest first.') if _dwatch else
                   ('Triggers today or yesterday (Deep Dip study rules): the 20 closes before all above the 200 or 250 '
                    'SMA, then an UNDERCUT (low below, close back above) or a RECLAIM after 1-5 closes below (the study used 1-3; 5 gives a wider list). Still live: '
-                   'no close back below since and the stop (trigger close − 2 ATR(10)) not hit. Any scanned stock, '
+                   'no close back below since and the stop (trigger close − 2 ATR(14)) not hit. Any scanned stock, '
                    '≥ 25% above the 52-week low. Setup column: trigger, days ago, stop and 1R %, trigger-day RVOL, ↑21 = '
                    'back above the 21 EMA. Newest first. Evidence (stocks 2009-26, Provisional): in MILD RISK-OFF / '
                    'RISK-OFF the trigger beat a random entry in the same band by +0.09R (95% CI +0.01 to +0.17), but only '
@@ -1764,21 +1776,16 @@ if _scan_df is not None and len(_scan_df) > 0:
                 + ('' if 'pb_setup' in _scan_df.columns or _scan != 'L_pb' else
                    ' <span style="color:#e3b48e;">20-day pullbacks arrive with the next nightly scan (50-day only for now).</span>')
                 + '</div>', unsafe_allow_html=True)
-    # Stock-entry guide from the SPY allocation rule (10 Nov 2026, exploratory)
-    _al_in = st.session_state.get('_alloc_spy_in')
-    if _al_in is not None and _SCANS[_scan][2] == 'long':
-        if _scan == 'L_dip':
-            _gl_c, _gl_t = '#85cac5', ('SPY rule ' + ('IN' if _al_in else 'OUT') + ': Deep dip entries allowed '
-                                        '(stock Deep dips averaged +0.15R with the rule IN, +0.10R with it OUT).')
-        elif _al_in:
-            _gl_c, _gl_t = '#85cac5', 'SPY rule IN: continuation entries at normal size.'
-        else:
-            _gl_c, _gl_t = '#f4a062', ('SPY rule OUT: no new base / pivot / breakout entries, or quarter size. These setups '
-                                        'averaged −0.06R (pivot) and −0.14R (breakout) per trade with the rule OUT, against '
-                                        '+0.10R / +0.06R with it IN.')
-        st.markdown(f'<div style="font-size:0.76rem;color:#f3ece2;border-left:3px solid {_gl_c};padding:2px 8px;'
-                    f'margin:-2px 0 8px 0;background:#0d0d0d;">{_gl_t} <span style="color:#6e675f;">Exploratory, in-sample; '
-                    f'logged forward.</span></div>', unsafe_allow_html=True)
+    # v6.3 (13 Nov 2026): one context line from the Market context card (regime → SPY phase → setups), long scans only.
+    #    Replaces the 10 Nov SPY-rule guide (base / breakout IN vs OUT), superseded by the S2 study.
+    _cx = st.session_state.get('_ctx')
+    if _cx and _cx[2] and _SCANS[_scan][2] == 'long':
+        _cxh = context_card.scanner_hint(*_cx)
+        if _cxh:
+            st.markdown(f'<div style="font-size:0.76rem;color:#f3ece2;border-left:3px solid {_cxh[0]};padding:2px 8px;'
+                        f'margin:-2px 0 8px 0;background:#0d0d0d;">{_html_mod.escape(_cxh[1])} '
+                        f'<span style="color:#6e675f;">Provisional (studies S1 / S2, in-sample); see the Market context card.'
+                        f'</span></div>', unsafe_allow_html=True)
 
     _mask = {'L_all': _m_long, 'S_all': _m_short, 'L_bases': _q_lb, 'L_pb': _q_lp, 'S_bases': _q_sb, 'S_rally': _q_sr,
              'L_bo': _q_lbo, 'S_bd': _q_sbd,
@@ -1825,7 +1832,7 @@ if _scan_df is not None and len(_scan_df) > 0:
     if _v.empty:
         st.info('No stocks match the selected filters.')
     else:
-        _shown = _v.head(600)                          # 7 Nov 2026: whole momentum / short list (~450)
+        _shown = _v.head(600).assign(_chase=st.session_state.get('_ctx_chase', False))   # v6.3: breakout 'chasing' tag
         _scan_table_and_chart(scan_view.build_html(_shown, _sec_label, _sec_score, _leader_hold, YF_TO_SECTOR,
                                                    clickable=True),
                               list(_shown['ticker'].astype(str)), min(760, 64 + 32 * len(_shown)))

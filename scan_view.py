@@ -180,7 +180,7 @@ def depth_chip(r) -> str:
     return f' <span title="{_e(tip)}">{chip(f"{x:+.1f} ATR", col, bold)}</span>'
 
 
-def setup_cell(r):
+def _setup_cell_raw(r):
     """7 Nov 2026: pullback to a rising 20 / 50-day SMA (long) or rally to a falling one (short), from momentum.py."""
     mode = _s(r.get('_dd_mode'))
     if mode:                                 # 8 Nov 2026: Deep dip / Deep rip triggers and watch list
@@ -208,7 +208,7 @@ def setup_cell(r):
                                     '' if _nan(rv) else f'vol {float(rv):.1f}×', ('↓21' if sh else '↑21') if ab else ''] if x)
         title = (f'{tg} of the {sma} SMA' + ('' if _nan(k) or int(float(k)) == 0 else f' after {int(float(k))} close(s) beyond')
                  + f', {dtxt}. Entry ref = trigger close {r.get(f"{pre}_entry")}; stop = trigger-day '
-                 + ('close + 2 ATR(10)' if sh else 'close − 2 ATR(10)') + '. vol = trigger-day volume ÷ the 10 sessions before.')
+                 + ('close + 2 ATR(14)' if sh else 'close − 2 ATR(14)') + '. vol = trigger-day volume ÷ the 10 sessions before.')
         rank = 10 - (0 if _nan(days) else int(float(days)))
         return (f'<span title="{_e(title)}">{chip(lab, col, True)} <span class="sub">{_e(sub)}</span></span>'
                 + ('' if sh else depth_chip(r))), rank
@@ -306,7 +306,7 @@ def ind_cell(r, etf=''):
     return f'<span title="{title}">{lead}{_e(short)}{rk_txt}{st_txt}</span>', sk
 
 
-def breakout_cell(r):
+def _breakout_cell_raw(r):
     """(html, sort key): today's close above the prior 21-session / 252-session high, with today's volume ratio."""
     b21 = str(r.get('bo21')).lower() == 'true'
     b52 = str(r.get('bo52')).lower() == 'true'
@@ -321,6 +321,51 @@ def breakout_cell(r):
     chips = ((chip('52W', COPPER, True) + ' ' if b52 else '') + (chip('21D', TEAL, True) + ' ' if b21 else '')
              + (f'<span{ptitle}>{chip("PIV", TEAL, True)}</span>' if bpv else ''))
     return chips + vtxt, (2 if b52 else 1 if b21 else 0.5) + (0 if _nan(vr) else min(float(vr), 9) / 10)
+
+
+# ── v6.3 (13 Nov 2026): stop-width grey-out and "chasing" tag (studies S1 / S2, 12 Nov 2026) ──────────────────
+MAX_STOP = 10.0     # % below the entry; Fabio's rule, supported with the 21 EMA exit in S1
+
+
+def stop_width(r):
+    """Stop distance in % of price for the row's setup: the Deep dip stop when there is one (trigger close - 2 ATR(14)),
+    else 2 x ATR(14) % from the scan (atr_pct is a fraction). NaN when unknown."""
+    if _s(r.get('_dd_mode')) and r.get('_side') != 'short':
+        rp = r.get('dd_risk_pct')
+        if not _nan(rp):
+            return float(rp)
+    ap = r.get('atr_pct')
+    return float('nan') if _nan(ap) else 2 * float(ap) * 100
+
+
+def _grey(html, w):
+    tip = (f'Stop 2 ATR(14) = {w:.1f}% below the entry, wider than {MAX_STOP:.0f}%: skip, or size for it. In S1 these '
+           'trades did worse than the rest and than random entries in equally volatile stocks (21 EMA exit).')
+    return (f'<span style="opacity:0.38;" title="{_e(tip)}">{html}</span> '
+            f'<span class="sub" style="color:{DIM};">stop {w:.0f}%</span>')
+
+
+def setup_cell(r):
+    html, rank = _setup_cell_raw(r)
+    w = stop_width(r)
+    if rank and not _nan(w) and w > MAX_STOP:
+        return _grey(html, w), rank - 0.5
+    return html, rank
+
+
+def breakout_cell(r):
+    html, rank = _breakout_cell_raw(r)
+    if not rank:
+        return html, rank
+    w = stop_width(r)
+    if str(r.get('_chase')).lower() == 'true' and r.get('_side') != 'short':
+        html += (' <span title="SPY is in the dip zone or the recovery phase: 21-day breakouts did worse than a random '
+                 'entry then (S2: -0.06R with the rebound ticket open). Deep dips and pullbacks were the better location." '
+                 f'style="font-size:0.62rem;font-weight:700;color:#0a0a0a;background:{COPPER};padding:0 4px;border-radius:3px;">'
+                 'chasing</span>')
+    if not _nan(w) and w > MAX_STOP:
+        return _grey(html, w), rank - 0.5
+    return html, rank
 
 CSS = """
 <style>

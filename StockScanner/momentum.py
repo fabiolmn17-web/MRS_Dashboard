@@ -154,8 +154,8 @@ def deep_dip_fields(df: pd.DataFrame, side: str = 'long', n_above: int = 20, max
       RECLAIM   = 1-5 closes below the SMA, then a close back above (8 Nov 2026: 5, was 3 in the study; wider net,
                   Fabio screens by hand).
     A trigger in the last max_days sessions stays listed while every close since is still above that SMA and the
-    stop (trigger close - 2 ATR(10); 9 Nov 2026: was trigger-day low - 1 ATR(10), no meaningful difference in the stop
-    check, Fabio's rule) has not been hit. If both SMAs trigger on the same bar: '200+250'.
+    stop (trigger close - 2 ATR(14); 12 Nov 2026: was 2 ATR(10), no difference in the stop-width study; 9 Nov 2026: was
+    trigger-day low - 1 ATR(10), no meaningful difference in the stop check, Fabio's rule) has not been hit. If both SMAs trigger on the same bar: '200+250'.
     entry = trigger close; risk_pct = (entry - stop) / entry; rvol = trigger-day volume / mean of the 10 before;
     slope21 = % change of the trigger SMA over 21 sessions (the 200 when both).
     WATCH (no live trigger): the last 20 closes all above the SMA and the close within 1 ATR above it ('Near 200' /
@@ -170,7 +170,7 @@ def deep_dip_fields(df: pd.DataFrame, side: str = 'long', n_above: int = 20, max
             return out
         h, l, c = d['High'].values, d['Low'].values, d['Close'].values
         vol = df['Volume'].reindex(d.index).values if 'Volume' in df.columns else np.full(len(c), np.nan)
-        a10 = _atr_wilder(d, 10).reindex(d.index).values
+        a14 = _atr_wilder(d, 14).reindex(d.index).values   # 12 Nov 2026: ATR(14), was ATR(10) (stop-width study: no difference)
         n = len(c)
         smas = {L: d['Close'].rolling(L).mean().values for L in (200, 250)}
         best = None                                   # (days_ago, [L...], type, k)
@@ -194,7 +194,7 @@ def deep_dip_fields(df: pd.DataFrame, side: str = 'long', n_above: int = 20, max
                         k = 0
                 if typ is None:
                     continue
-                stop = c[i] - s * 2 * a10[i]               # 9 Nov 2026: close -/+ 2 ATR(10) (was low - 1 ATR)
+                stop = c[i] - s * 2 * a14[i]               # 12 Nov 2026: close -/+ 2 ATR(14) (was ATR(10); 9 Nov: was low - 1 ATR)
                 later = slice(i + 1, n)
                 if (x[later] <= 0).any() or ((l[later] <= stop).any() if s > 0 else (h[later] >= stop).any()):
                     continue                          # closed back through the SMA, or stopped out since
@@ -206,7 +206,7 @@ def deep_dip_fields(df: pd.DataFrame, side: str = 'long', n_above: int = 20, max
         if best is not None:
             dago, Ls, typ, k = best
             i = n - 1 - dago
-            stop = c[i] - s * 2 * a10[i]
+            stop = c[i] - s * 2 * a14[i]
             Lr = 200 if 200 in Ls else 250
             sm = smas[Lr]
             v10 = np.nanmean(vol[i-10:i]) if i >= 10 else np.nan
@@ -219,8 +219,8 @@ def deep_dip_fields(df: pd.DataFrame, side: str = 'long', n_above: int = 20, max
             near = []
             for L, sma in smas.items():
                 x = s * (c - sma)
-                if np.isfinite(sma[-1]) and (x[-n_above:] > 0).all() and x[-1] <= a10[-1]:
-                    near.append((x[-1] / a10[-1], L))
+                if np.isfinite(sma[-1]) and (x[-n_above:] > 0).all() and x[-1] <= a14[-1]:
+                    near.append((x[-1] / a14[-1], L))
             if near:
                 near.sort()
                 Ls = sorted(L for _, L in near)
