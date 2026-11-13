@@ -2641,9 +2641,14 @@ except Exception as _hl_err:
 
 # ── Footer ─────────────────────────────────────────────────────────────────────
 last_upd = hist['date'].max()
+try:
+    _APP_VERSION = (Path(__file__).parent / 'VERSION').read_text().strip()
+except Exception:
+    _APP_VERSION = '?'
 st.markdown(
     '<div style="text-align:center;font-size:0.72rem;color:#6e675f;margin-top:24px;">'
     'Epistruct &nbsp;|&nbsp;'
+    'MRS app v' + _APP_VERSION + ' &nbsp;|&nbsp;'
     'Data through ' + last_upd.strftime('%B %d, %Y') + ' &nbsp;|&nbsp;'
     + pipeline.SCORING_VERSION + ' &nbsp;|&nbsp;'
     'Updates daily at 4:30 PM ET'
