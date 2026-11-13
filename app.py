@@ -793,6 +793,7 @@ if _scan_df is not None and _scan_date:
     _sth = (pd.to_datetime(_scan_df['data_through'].iloc[0], errors='coerce')
             if 'data_through' in _scan_df.columns else pd.NaT)
     if pd.notna(_sth) and _sth < pd.Timestamp(last_dt):
+        _health('Scanner', f'prices through {_sth:%b %d}, behind the MRS ({last_dt:%b %d})')
         _fresh.append(f'<span style="color:#f4a062;" title="The scan has prices through {_sth:%b %d}; the MRS is for '
                       f'{last_dt:%b %d}. Re-run the scanner workflow (Actions, Run workflow).">scanner {_sth:%b %d} close: '
                       f'behind the MRS</span>')
@@ -802,6 +803,8 @@ if _scan_df is not None and _scan_date:
 if _ind_df is not None and 'last_bar' in _ind_df.columns:
     _ilb = pd.to_datetime(_ind_df['last_bar'], errors='coerce').max()
     if pd.notna(_ilb):
+        if _ilb < pd.Timestamp(last_dt):
+            _health('Industries', f'prices through {_ilb:%b %d}, behind the MRS ({last_dt:%b %d})')
         _fresh = [f for f in _fresh if not f.startswith('industries ')]
         _fresh.insert(2 if len(_fresh) > 1 else 1,
                       (f'<span style="color:#f4a062;">industries {_ilb:%b %d} close: behind the MRS</span>'
@@ -2626,12 +2629,13 @@ try:
         _health_slot.markdown(
             f'<div style="font-size:0.78rem;color:#f3ece2;border:1px solid #f4a062;border-left:4px solid #f4a062;'
             f'border-radius:4px;background:#2a1c13;padding:5px 10px;margin:-4px 0 10px 0;">'
-            f'<b style="color:#f4a062;">Not loaded this run ({len(_HEALTH)}):</b> {_hl}. '
-            f'<span style="color:#a89f95;">Reload in a few minutes; if it persists, check the GitHub Actions runs.</span>'
+            f'<b style="color:#f4a062;">Data issues this run ({len(_HEALTH)}):</b> {_hl}. '
+            f'<span style="color:#a89f95;">A reload in a few minutes usually clears a fetch failure; a stale or missing '
+            f'nightly file points to the GitHub Actions run.</span>'
             f'</div>', unsafe_allow_html=True)
     else:
         _health_slot.markdown('<div style="font-size:0.70rem;color:#6e675f;margin:-6px 0 8px 0;">'
-                              '✓ All sections loaded this run.</div>', unsafe_allow_html=True)
+                              '✓ All sections loaded and current.</div>', unsafe_allow_html=True)
 except Exception as _hl_err:
     print(f'[health] {_hl_err}')
 

@@ -328,7 +328,7 @@ def _atr_gauge(ext_atr: float, lo=-3.0, hi=3.0) -> str:
 PEDAL_NAME = {'PRESS': 'DIP ZONE', 'NORMAL': 'NORMAL', 'EASE OFF': 'EASE OFF'}   # 'PRESS' kept as the log key
 PEDAL_TXT = {
     'PRESS': ('Wide both ways, not more exposure.',
-              '<b>Take your planned long setups at a level that holds, at your normal planned risk. No extra exposure without a setup; '
+              '<b>Long setups at a level that holds, at normal planned risk. No extra exposure without a setup; '
               'every stop stands.</b><div class="sub" style="margin-top:5px;">Wide both ways, more than the VIX implies: SPY rose '
               '5%+ within 20 sessions on 31% of these days (17% at the same VIX level) but also dropped 7%+ on 27% (14%). '
               'Average return about the same. Waiting for a mechanical support signal (back above −1 ATR, a higher low, VIX '
@@ -338,8 +338,8 @@ PEDAL_TXT = {
                  'Fast drops of 7% or more in 1 of 3 cases (all days 1 in 8), more than the VIX alone implies; industries '
                  'move together (5 positions ≈ 1.5 bets). <b>Fewer positions, partials sooner.</b> Puts have roughly broken '
                  'even here (10% OTM 1.2×, ATM 0.9× their cost), but on too few crashes to rely on.', 'Tested'),
-    'NORMAL': ('No edge from the state in either direction.',
-               'Normal process: <b>your planned setups, normal planned risk, your rules.</b>', None),
+    'NORMAL': ('Normal process.',
+               '<b>Planned setups, normal planned risk, standard rules.</b>', None),   # + the tail sentence (panel_html)
 }
 PEDAL_COL = {'PRESS': TEAL, 'NORMAL': '#cfc6bb', 'EASE OFF': ORANGE}
 
@@ -354,16 +354,32 @@ def insurance_sentence(bandg: str, trend: str, inverted: bool) -> str:
              'change that. Avoid new protection unless a specific position needs it.')
     else:
         s = ('<b>Protection is cheapest here</b> (about 0.3% of SPY a month). It has not paid better here than elsewhere: '
-             'buy it as crash insurance within your ≤1% NLV budget, 3 months out, roll after 1–2 months.')
+             'buy it as crash insurance within a ≤1% NLV budget, 3 months out, roll after 1–2 months.')
     if inverted:
         s += (' <span style="color:#f8d6b4;">VIX curve inverted: VXX has paid only in this state (+10% over 21 sessions '
               'on average, though the median month still lost 2%). Outside it, it has lost about 5% a month.</span>')
     return s
 
 
+def normal_tails(snap: dict) -> str:
+    """13 Nov 2026: one factual sentence for NORMAL comparing today's state with all days (next 20 sessions), so the
+    pedal line and the Today's state tile read the same way."""
+    try:
+        c, a = snap['cell']['cell'], snap['cell']['all']
+        r = max(c['fast'] / a['fast'], c['dn5'] / a['dn5'])
+        w = ('Downside wider than on all days' if r >= 1.3 else 'Downside a little wider than on all days' if r >= 1.1
+             else 'Downside narrower than on all days' if r <= 0.77 else 'Downside in line with all days')
+        return (f'{w} (fast drop of 7%: {c["fast"] * 100:.0f}% vs {a["fast"] * 100:.0f}%; 5% down: '
+                f'{c["dn5"] * 100:.0f}% vs {a["dn5"] * 100:.0f}%).')
+    except Exception:
+        return ''
+
+
 def panel_html(snap: dict) -> str:
     p = snap['pedal']; col = PEDAL_COL[p]
     head, body, evk = PEDAL_TXT[p]
+    if p == 'NORMAL':
+        body += ' ' + normal_tails(snap)
     segs = ''.join(f'<div style="background:{PEDAL_COL[k] if k == p else "#24211e"};"></div>' for k in ('EASE OFF', 'NORMAL', 'PRESS'))
     seg_lbl = ''.join(f'<span style="flex:1;text-align:center;color:{PEDAL_COL[k] if k == p else DIM};font-weight:{700 if k == p else 400};">{PEDAL_NAME[k]}</span>'
                       for k in ('EASE OFF', 'NORMAL', 'PRESS'))
@@ -405,7 +421,7 @@ def panel_html(snap: dict) -> str:
               f'{_ord(int(round(cp * 100)))} percentile since 2008.</div>'
               f'{_meter(snap["rho"], 0.1, 0.9, {"P10": CORR_Q[2], "median": CORR_Q[10], "P90": CORR_Q[18]}, GRAD)}'
               f'<div class="sub">In a stress month this has dropped to about <b style="color:{INK};">{neff_s:.1f} bets</b>.</div>'
-              f'<div class="act"><b>Count names that move together as one position; no more than half of your open '
+              f'<div class="act"><b>Count names that move together as one position; no more than half of the open '
               f'risk in one sector.</b>'
               + (' <span style="color:#f4a062;"><b>Correlation runs highest in this state: treat the book as about 1.5 bets.</b></span>' if flag else '')
               + '</div></div>')

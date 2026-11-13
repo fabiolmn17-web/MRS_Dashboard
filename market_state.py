@@ -35,16 +35,16 @@ EVIDENCE = {
 }
 
 BAND_ACTION = {
-    'RISK-ON':       '<b>Small swings both ways.</b> Normal size. Big runs are rare: take profits at your targets.',
+    'RISK-ON':       '<b>Small swings both ways.</b> Normal size. Big runs are rare: profits are taken at the targets.',
     'MILD RISK-ON':  '<b>Fairly calm.</b> Normal size.',
     'NEUTRAL':       '<b>Average swings.</b> Normal size.',
-    'MILD RISK-OFF': ('<b>Swings about as wide as NEUTRAL;</b> the widening comes in RISK-OFF. Your stop stays where '
+    'MILD RISK-OFF': ('<b>Swings about as wide as NEUTRAL;</b> the widening comes in RISK-OFF. The stop stays where '
                       'the setup is wrong.'),
     'RISK-OFF':      ('<b>Widest swings, up and down.</b> No extra room for the stop: it sits where the setup is wrong, '
-                      'and if it is hit you are out. Time the entry well and the upside is large: let winners run. '
+                      'and a hit stop ends the trade. A well-timed entry has the most upside here: winners run. '
                       '<b>Not a sell signal.</b>'),
 }
-REGIME_SUB = ('The MRS tells you how wide the next weeks can be, not which way: RISK-OFF has not had a worse '
+REGIME_SUB = ('The MRS measures how wide the next weeks can be, not which way: RISK-OFF has not had a worse '
               'average return than RISK-ON.')
 
 
@@ -511,7 +511,7 @@ def avoid_html(lag: pd.DataFrame, hold_df: pd.DataFrame = None) -> str:
     h += ('<div class="note" style="font-size:0.80rem;color:#f3ece2;margin-top:6px;"><b>Use: outside RISK-OFF these '
           'industries lagged SPY by about 1 pp a month: don\'t buy them for a catch-up. In RISK-OFF they rebounded with the '
           'market (+0.7 pp vs SPY a month) and outright shorts lost 2.7% a month, with a ≥5% squeeze in 56% of months: '
-          'no shorts from this list in RISK-OFF; elsewhere only with your own setup and a tight stop.</b></div>')
+          'no shorts from this list in RISK-OFF; elsewhere only with a setup of its own and a tight stop.</b></div>')
     h += _how('How this list is built and what is tested',
               'Industry ETFs, held labels. On the list: structural laggard (−1.5) whose RS 1M is not positive, or '
               'underperforming (−0.5) with 3M weaker than 6M (1Y−, 6M+, 3M−). Sorted weakest RS 3M first. Weakest holdings = top-10 holdings with RS '
