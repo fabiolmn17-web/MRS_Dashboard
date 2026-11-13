@@ -58,7 +58,10 @@ def spy_states(spy: pd.DataFrame, mrs: pd.Series, label_fn) -> pd.DataFrame:
     s.index = pd.to_datetime(s.index).tz_localize(None).normalize() if getattr(s.index, 'tz', None) else pd.to_datetime(s.index).normalize()
     c, h, l = s['close'], s['high'], s['low']
     tr = pd.concat([h - l, (h - c.shift()).abs(), (l - c.shift()).abs()], axis=1).max(axis=1)
-    atr = tr.rolling(14).mean()
+    # 13 Nov 2026 (audit, Fabio): Wilder ATR(14), the same as the scanner, the allocation tickets and the Ext·Mom
+    # indicator (was a simple 14-day mean). Re-check on SPY 2008-26: E < -1 on 948 days vs 940; 5%+ up in 20 sessions
+    # 28% vs 29%, fast drop of 7% 27% vs 27%; 44 of 4,746 days change side of -1 ATR. The pedal text stays.
+    atr = tr.ewm(alpha=1 / 14, adjust=False).mean()
     sma = c.rolling(50).mean()
     m = mrs.copy(); m.index = pd.to_datetime(m.index).normalize()
     sc = m.reindex(s.index).ffill()
@@ -316,16 +319,16 @@ def _atr_gauge(ext_atr: float, lo=-3.0, hi=3.0) -> str:
               f'border-left:7px solid transparent;border-right:7px solid transparent;border-top:9px solid {INK};"></div>'
               f'<div style="position:absolute;left:{xv:.1f}%;top:-2px;bottom:-2px;width:3px;margin-left:-1px;background:{INK};"></div>')
     g += '</div><div style="position:relative;height:14px;font-size:0.66rem;color:#8a8279;">'
-    g += (f'<span style="position:absolute;left:{z / 2:.1f}%;transform:translateX(-50%);top:2px;color:{TEAL};">rebound window</span>'
+    g += (f'<span style="position:absolute;left:{z / 2:.1f}%;transform:translateX(-50%);top:2px;color:{TEAL};">dip zone</span>'
           f'<span style="position:absolute;left:{_x(0, lo, hi):.1f}%;transform:translateX(-50%);top:2px;">50-day</span>'
           f'<span style="position:absolute;right:0;top:2px;">+3 ATR</span>')
     return g + '</div>'
 
 
-PEDAL_NAME = {'PRESS': 'REBOUND WINDOW', 'NORMAL': 'NORMAL', 'EASE OFF': 'EASE OFF'}   # 'PRESS' kept as the log key
+PEDAL_NAME = {'PRESS': 'DIP ZONE', 'NORMAL': 'NORMAL', 'EASE OFF': 'EASE OFF'}   # 'PRESS' kept as the log key
 PEDAL_TXT = {
     'PRESS': ('Wide both ways, not more exposure.',
-              '<b>Take long A-setups at a level that holds, at your normal planned risk. No extra exposure without a setup; '
+              '<b>Take your planned long setups at a level that holds, at your normal planned risk. No extra exposure without a setup; '
               'every stop stands.</b><div class="sub" style="margin-top:5px;">Wide both ways, more than the VIX implies: SPY rose '
               '5%+ within 20 sessions on 31% of these days (17% at the same VIX level) but also dropped 7%+ on 27% (14%). '
               'Average return about the same. Waiting for a mechanical support signal (back above −1 ATR, a higher low, VIX '
@@ -336,7 +339,7 @@ PEDAL_TXT = {
                  'move together (5 positions ≈ 1.5 bets). <b>Fewer positions, partials sooner.</b> Puts have roughly broken '
                  'even here (10% OTM 1.2×, ATM 0.9× their cost), but on too few crashes to rely on.', 'Tested'),
     'NORMAL': ('No edge from the state in either direction.',
-               'Normal process: <b>A-setups, normal planned risk, your rules.</b>', None),
+               'Normal process: <b>your planned setups, normal planned risk, your rules.</b>', None),
 }
 PEDAL_COL = {'PRESS': TEAL, 'NORMAL': '#cfc6bb', 'EASE OFF': ORANGE}
 
@@ -377,7 +380,7 @@ def panel_html(snap: dict) -> str:
           f'<div class="seg">{segs}</div><div style="display:flex;font-size:0.66rem;letter-spacing:0.05em;margin-top:-4px;">{seg_lbl}</div>'
           f'<div class="act"><b>{head}</b> {body}</div>'
           f'<div class="sub" style="margin-top:2px;">SPY vs its 50-day: <b class="num" style="color:{INK};">{snap["ext_atr"]:+.2f} ATR</b>. '
-          f'Rebound window below −1 ATR.{ep_txt}</div>{_atr_gauge(snap["ext_atr"])}'
+          f'Dip zone (rebound window) below −1 ATR.{ep_txt}</div>{_atr_gauge(snap["ext_atr"])}'
           f'<div class="sub">{ease_txt}</div></div>')
     # 2. Today's state
     cs = snap['cell']; c, a = cs['cell'], cs['all']

@@ -46,7 +46,11 @@ jobs:
         run: |
           git config user.name  "MRS Bot"
           git config user.email "mrs-bot@epistruct.com"
-          git add StockScanner/output/scan_results.csv
+          # 13 Nov 2026: -A also adds / removes scan_coverage_low.txt (the scanner keeps the previous scan when a run
+          # covers far fewer stocks, and writes that flag for the dashboard)
+          git add -A StockScanner/output/scan_results.csv
+          [ -e StockScanner/output/scan_coverage_low.txt ] && git add StockScanner/output/scan_coverage_low.txt
+          git ls-files --error-unmatch StockScanner/output/scan_coverage_low.txt >/dev/null 2>&1 && git add -A StockScanner/output/scan_coverage_low.txt
           git diff --staged --quiet || git commit -m "scanner: $(date +%Y-%m-%d)"
           git pull --rebase --autostash || true
           git push

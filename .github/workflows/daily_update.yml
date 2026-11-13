@@ -38,4 +38,7 @@ jobs:
           git config user.email "mrs-bot@epistruct.com"
           git add mrs_history.csv
           git diff --staged --quiet || git commit -m "MRS daily update $(date +'%Y-%m-%d')"
+          # 13 Nov 2026 (audit): take any commit that landed meanwhile (scanner, industry, gamma shadow, Fabio's
+          # pushes) before pushing, as scanner.yml does; without it the push was rejected and the day's row lost.
+          git pull --rebase --autostash
           git push

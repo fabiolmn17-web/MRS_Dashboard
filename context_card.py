@@ -1,17 +1,19 @@
 """
-context_card.py — "Market context" card (MRS v6.3, 13 Nov 2026)
-================================================================
-One card that unifies the three context levels, in this order:
-  1. Regime   — MRS band (and the DEEP RISK-OFF flag): how much risk, how active.
-  2. SPY phase — one track that merges the rebound window and the allocation tickets:
-       DIP ZONE  SPY close at least 1 ATR(14) below its 50-day SMA (the rebound window; Ticket A buys here)
+context_card.py — "Market context" card (MRS v6.3.1, 13 Nov 2026)
+===================================================================
+One card, one job: WHAT HAS PAID in today's exact state and WHERE TO LOOK. It does not size positions: how much risk
+belongs to the pedal (Risk today panel). Three context levels:
+  1. Regime side — MRS band: risk-off side (score < -0.5, incl. DEEP) vs neutral / risk-on side.
+  2. SPY phase — one track that merges the dip zone (= the pedal's rebound window) and the allocation tickets:
+       DIP ZONE  SPY close at least 1 ATR(14) below its 50-day SMA (Ticket A buys the first such close per sell-off)
        RECOVERY  Ticket A (rebound) open, SPY back above the dip zone
        TREND     Ticket B (21-day breakout) open, no rebound ticket
        OUT       no ticket open
-  3. Setup focus — what has worked in that phase, plus the trade management that held in every setup.
-Evidence: Setups x market state study S2 (12 Nov 2026, stocks 2009-26, today's list = survivorship-biased) and the
-Deep dip stop-width study S1. The four phases were defined AFTER S2 (exploratory): the card guides, it is not a tested
-rule. Numbers: mean R per trade, stop 2 ATR(14), target 2R then trail the 21 EMA, unless stated.
+     The distance to the 50-day is the pedal's own number when the app passes it in (one number on the page).
+  3. The cell (regime side x phase): mean R per trade of the setups and of a random entry in that cell, then the setup
+     focus for the phase and the trade management that held in every setup.
+Evidence: Setups x market state study S2 (12 Nov 2026, stocks 2009-26, today's list = survivorship-biased), stop
+2 ATR(14), 2R then trail the 21 EMA. The phases and cells were drawn AFTER S2: exploratory, not tested rules.
 """
 import html as _html
 
@@ -19,78 +21,102 @@ TEAL, TEAL_M, ORANGE, COPPER, INK, MUTED, DIM = '#85cac5', '#649995', '#f4a062',
 PHASES = ['DIP ZONE', 'RECOVERY', 'TREND', 'OUT']
 CHASE_PHASES = ('DIP ZONE', 'RECOVERY')          # breakouts lag in these phases ("chasing" tag on the scanner)
 
+# S2 cross-tab (exploratory): mean R per trade, stop 2 ATR(14), 2R then trail the 21 EMA.
+# dd = Deep dip, p50 = 50-day pullback, bo = 21-day breakout, rnd = random uptrend entry; n_dd = Deep dip trades.
+CELL = {
+    ('OFF', 'DIP ZONE'): dict(dd=0.38, p50=0.42, bo=0.25, rnd=0.41, n_dd=10091),
+    ('ON', 'DIP ZONE'): dict(dd=0.02, p50=-0.01, bo=0.27, rnd=0.27, n_dd=476),
+    ('OFF', 'RECOVERY'): dict(dd=0.37, p50=0.38, bo=0.30, rnd=0.39, n_dd=4037),
+    ('ON', 'RECOVERY'): dict(dd=0.15, p50=0.09, bo=0.08, rnd=0.12, n_dd=5803),
+    ('OFF', 'TREND'): dict(dd=0.44, p50=0.32, bo=0.26, rnd=0.19, n_dd=1370),
+    ('ON', 'TREND'): dict(dd=0.26, p50=0.19, bo=0.17, rnd=0.21, n_dd=3319),
+    ('OFF', 'OUT'): dict(dd=0.13, p50=0.17, bo=0.10, rnd=0.17, n_dd=2803),
+    ('ON', 'OUT'): dict(dd=0.15, p50=0.11, bo=0.18, rnd=0.18, n_dd=1526),
+}
+BEST = ('OFF', 'DIP ZONE')
+SMALL_N = 1000
+
 
 def _e(s):
     return _html.escape(str(s), quote=True)
 
 
-def _sg(x):
-    return f'{x:+.1f}'.replace('-', '−')
+def _sg(x, d=1):
+    return f'{x:+.{d}f}'.replace('-', '−')
 
 
-def phase(s: dict):
-    """Phase of SPY from allocation.state(). Returns (phase, one-line detail) or (None, '') without data."""
+def side(band: str) -> str:
+    return 'OFF' if 'OFF' in (band or '').upper() else 'ON'
+
+
+def phase(s: dict, ext=None):
+    """Phase of SPY from allocation.state(); ext = the pedal's distance to the 50-day in ATR (preferred when given,
+    so the page shows one number). Returns (phase, one-line detail) or (None, '') without data."""
     if not s:
         return None, ''
-    E, A, B = s.get('E'), s.get('A', {}), s.get('B', {})
+    E = ext if ext is not None and ext == ext else s.get('E')
+    A, B = s.get('A', {}), s.get('B', {})
     sma, c = s.get('sma50'), s.get('close')
     if E is not None and E <= -1:
         if A.get('open'):
             tk = 'Ticket A open'
-        elif s.get('in_selloff') and not A.get('open'):
+        elif s.get('in_selloff'):
             why = ('this sell-off already used its rebound entry' if s.get('ep_taken') else
                    'this sell-off began while the previous rebound trade was open')
             tk = f'Ticket A locked: {why}; it re-arms after a close above the 50-day ({sma:.2f})'
         else:
             tk = 'Ticket A buys at this close'
-        return 'DIP ZONE', f'SPY {_sg(E)} ATR from its 50-day (rebound window). {tk}.'
+        return 'DIP ZONE', f'SPY {_sg(E, 2)} ATR from its 50-day (the pedal\'s rebound window). {tk}.'
     if A.get('open'):
-        return 'RECOVERY', (f'Ticket A (rebound) open since {A["entry_date"]:%d %b}; exit on 2 closes below the 50-day '
-                            f'({A["ma"]:.2f}).')
+        return 'RECOVERY', (f'SPY {_sg(E, 2)} ATR from its 50-day. Ticket A (rebound) open since {A["entry_date"]:%d %b}; '
+                            f'exit on 2 closes below the 50-day ({A["ma"]:.2f}).')
     if B.get('open'):
-        return 'TREND', (f'Ticket B (21-day breakout) open since {B["entry_date"]:%d %b}; exit on 2 closes below the '
-                         f'21 EMA ({B["ma"]:.2f}).')
+        return 'TREND', (f'SPY {_sg(E, 2)} ATR from its 50-day. Ticket B (21-day breakout) open since '
+                         f'{B["entry_date"]:%d %b}; exit on 2 closes below the 21 EMA ({B["ma"]:.2f}).')
     nxt = [f'breakout buy above {s["bo_level"]:.2f} ({_sg((s["bo_level"] / c - 1) * 100)}%)']
     if s.get('in_selloff'):
         nxt.insert(0, f'rebound re-arms after a close above the 50-day {sma:.2f} ({_sg((sma / c - 1) * 100)}%)')
     else:
         nxt.insert(0, f'dip zone below about {s["rb_level"]:.2f} ({_sg((s["rb_level"] / c - 1) * 100)}%)')
-    return 'OUT', f'SPY {_sg(E)} ATR from its 50-day, no ticket open. Next: ' + '; '.join(nxt) + '.'
+    return 'OUT', f'SPY {_sg(E, 2)} ATR from its 50-day, no ticket open. Next: ' + '; '.join(nxt) + '.'
 
 
-def regime(band: str, deep: str = ''):
-    """(level text, colour, short tag) for the MRS band."""
-    b = (band or '').upper()
+def cell_line(band: str, deep: str, ph: str):
+    """(text, colour) for the regime x phase cell."""
+    sd = side(band)
+    c = CELL.get((sd, ph))
+    if c is None:
+        return 'SPY phase not available right now.', MUTED
+    lo, hi = min(c['dd'], c['p50'], c['bo']), max(c['dd'], c['p50'], c['bo'])
+    who = 'Risk-off side' if sd == 'OFF' else 'Neutral / risk-on side'
+    txt = (f'{who} + {ph}: longs averaged {_sg(lo, 2)} to {_sg(hi, 2)}R per trade (Deep dip {_sg(c["dd"], 2)}, '
+           f'50-day pullback {_sg(c["p50"], 2)}, breakout {_sg(c["bo"], 2)}; random entry {_sg(c["rnd"], 2)}).')
+    if c['n_dd'] < SMALL_N:
+        txt += f' Few cases on this side ({c["n_dd"]} Deep dips): treat as anecdotal.'
+    if (sd, ph) != BEST:
+        b = CELL[BEST]
+        txt += (f' For scale: the strongest cell is risk-off side + dip zone ({_sg(min(b["dd"], b["p50"]), 2)} to '
+                f'{_sg(max(b["dd"], b["p50"]), 2)}R).')
     if deep == 'DEEP RISK-OFF':
-        return ('Size down. Payoffs for longs are high here, but swings are wide and every setup did worse than a '
-                'random entry (+0.20 to +0.26R against +0.28R). Cut risk, don\'t sell on it.', ORANGE, 'DEEP RISK-OFF')
-    if 'OFF' in b:
-        return ('Be active. Longs started on the risk-off side paid about twice what they paid in Neutral / Risk-On '
-                '(any uptrend stock, 2R target: +0.26 to +0.27R against +0.11 to +0.13R per trade).', TEAL, b)
-    return ('Be selective, normal size. Longs paid about half the risk-off result here (+0.11 to +0.13R per trade, '
-            '2R target) and big runs were rarer.', COPPER, b or '—')
+        txt += ' In DEEP RISK-OFF every setup did worse than a random entry.'
+    col = TEAL if hi >= 0.30 else COPPER
+    return txt, col
 
 
 FOCUS = {
-    'DIP ZONE': ('Deep dips and reclaims of the 50-day. Skip breakouts: they lagged (+0.25R against +0.37 to +0.40R '
-                 'for Deep dips, 50-day pullbacks and random entries).', TEAL),
-    'RECOVERY': ('Deep dips and pullbacks first (+0.18 to +0.24R). Breakouts lag (+0.14R, below a random entry).', TEAL),
-    'TREND': ('Deep dips did best (+0.32R against +0.21R for a random entry, the only setup above random). Pullbacks '
-              'and breakouts about random (+0.19 to +0.22R).', TEAL),
-    'OUT': ('No setup has an edge here (all about +0.14R, at or below a random entry). Only the strongest names, '
-            'smaller size.', COPPER),
+    'DIP ZONE': 'Deep dips and reclaims of the 50-day. Skip breakouts: they lagged in this phase.',
+    'RECOVERY': 'Deep dips and pullbacks first; breakouts lag.',
+    'TREND': 'Deep dips did best; pullbacks and breakouts about random.',
+    'OUT': 'No setup beat a random entry here: only the strongest names.',
 }
 RISK = ('Stop 2 ATR(14), at most 10% below the entry (breakouts: under the 5-day low). Take 2R, then trail the '
-        '21 EMA (first close below it).')
+        '21 EMA (first close below it). How much risk: see the pedal below.')
 PICK = 'Choose the name by leadership (sector, industry, RS); the setup only sets the entry and the stop.'
-EVIDENCE = ('S2, 12 Nov 2026: 210K stock trades 2009-26 (today\'s list: survivorship-biased), stop 2 ATR(14), 2R then '
-            'trail the 21 EMA, mean R per trade. DIP ZONE: Deep dip +0.37, 50-day pullback +0.40, 21 EMA pullback +0.34, '
-            '21-day breakout +0.25, random +0.40. RECOVERY: +0.24 / +0.21 / +0.18 / +0.14, random +0.19. TREND: +0.32 / '
-            '+0.22 / +0.21 / +0.19, random +0.21. OUT: +0.14 / +0.15 / +0.14 / +0.14, random +0.18. Regime (2R target, '
-            'random uptrend entries): MILD RISK-OFF +0.26, RISK-OFF +0.27, NEUTRAL +0.11, RISK-ON +0.13, DEEP +0.28 '
-            '(setups +0.20 to +0.26). Tested in S2: no setup beat random in the same SPY state; breakouts were below '
-            'random while the rebound ticket was open (-0.06R). The four phases were drawn after S2: exploratory. '
-            'Stops and exits: S1 / S2 (1.5 ATR costs about 0.05R; 2R then trail beat a plain 2R by +0.03 to +0.08R).')
+EVIDENCE = ('S2, 12 Nov 2026: 210K stock trades 2009-26 (today\'s list: survivorship-biased, which flatters buying in '
+            'sell-offs most), stop 2 ATR(14), 2R then trail the 21 EMA, mean R per trade. Cells = MRS side (risk-off: '
+            'score < -0.5) x SPY phase; phases and cells drawn after S2: exploratory. Tested in S2: no setup beat a random '
+            'uptrend entry in the same SPY allocation state; breakouts were below random while the rebound ticket was '
+            'open (-0.06R). Stops / exits: 1.5 ATR cost about 0.05R; 2R then trail beat a plain 2R by +0.03 to +0.08R.')
 
 CSS = ('<style>.cx{background:#121212;border:1px solid #2a2724;border-left:3px solid #e3b48e;border-radius:6px;'
        'padding:8px 12px 8px 12px;margin:2px 0 12px 0;}'
@@ -104,45 +130,45 @@ CSS = ('<style>.cx{background:#121212;border:1px solid #2a2724;border-left:3px s
        'border:1px solid #2a2724;color:#6e675f;background:#0d0d0d;}'
        '.cx .ar{color:#3a3632;font-size:0.8rem;padding-top:1px;}'
        '@media (max-width:900px){.cx .row{grid-template-columns:1fr;}}</style>')
+LABEL = {'DIP ZONE': 'DIP ZONE · rebound window'}
 
 
-def card_html(band: str, deep: str, spy_state: dict) -> str:
-    rtxt, rcol, rtag = regime(band, deep)
-    ph, pdet = phase(spy_state)
+def card_html(band: str, deep: str, spy_state: dict, ext=None) -> str:
+    ph, pdet = phase(spy_state, ext)
     track = ''
     for i, p in enumerate(PHASES):
         on = p == ph
         col = (TEAL if p != 'OUT' else COPPER) if on else None
         style = f' style="color:#0a0a0a;background:{col};border-color:{col};"' if on else ''
-        track += f'<span class="st"{style}>{p}</span>' + ('<span class="ar">→</span>' if i < len(PHASES) - 1 else '')
-    ftxt, fcol = FOCUS.get(ph, ('SPY phase not available right now.', MUTED))
-    return (CSS + f'<div class="cx" title="{_e(EVIDENCE)}"><div class="k">Market context · regime → SPY phase → setups '
-            f'· provisional (hover for the numbers)</div>'
-            f'<div class="row"><div class="t">1 · Regime</div><div class="tx"><b style="color:{rcol};">{_e(rtag)}</b> — '
-            f'{_e(rtxt)}</div></div>'
-            f'<div class="row"><div class="t">2 · SPY phase</div><div><div class="trk">{track}</div>'
+        track += (f'<span class="st"{style}>{LABEL.get(p, p)}</span>'
+                  + ('<span class="ar">→</span>' if i < len(PHASES) - 1 else ''))
+    ctxt, ccol = cell_line(band, deep, ph) if ph else ('SPY phase not available right now.', MUTED)
+    tag = (deep if deep in ('DEEP RISK-OFF', 'DEEP RISK-ON') else (band or '—')).upper()
+    ftxt = FOCUS.get(ph, '')
+    return (CSS + f'<div class="cx" title="{_e(EVIDENCE)}"><div class="k">Market context · what has paid in this state '
+            f'and where to look · provisional (hover for the evidence)</div>'
+            f'<div class="row"><div class="t">SPY phase</div><div><div class="trk">{track}</div>'
             f'<div class="sub">{_e(pdet)}</div></div></div>'
-            f'<div class="row"><div class="t">3 · Setups</div><div class="tx"><b style="color:{fcol};">{_e(ph or "—")}:</b> '
-            f'{_e(ftxt)}<div class="sub" style="margin-top:2px;">{_e(PICK)}</div></div></div>'
-            f'<div class="row"><div class="t">Risk</div><div class="tx">{_e(RISK)}</div></div>'
-            f'<div class="sub" style="border-top:1px solid #24211e;padding-top:4px;">The trade stays discretionary: this '
-            f'card says when longs have paid and where to look first. Phases and figures are in-sample and exploratory '
-            f'(stocks 2009-26, survivorship-biased); logged forward from 13 Nov 2026.</div></div>').replace('\n', ' ')
+            f'<div class="row"><div class="t">This state</div><div class="tx"><b style="color:{ccol};">{_e(tag)} · '
+            f'{_e(ph or "—")}</b> — {_e(ctxt)}</div></div>'
+            f'<div class="row"><div class="t">Where to look</div><div class="tx">{_e(ftxt)}'
+            f'<div class="sub" style="margin-top:2px;">{_e(PICK)}</div></div></div>'
+            f'<div class="row"><div class="t">Trade management</div><div class="tx">{_e(RISK)}</div></div>'
+            f'<div class="sub" style="border-top:1px solid #24211e;padding-top:4px;">The trade stays discretionary. '
+            f'Cells and phases are in-sample and exploratory (stocks 2009-26, survivorship-biased); logged forward from '
+            f'13 Nov 2026.</div></div>').replace('\n', ' ')
 
 
-def scanner_hint(band: str, deep: str, spy_state: dict):
+def scanner_hint(band: str, deep: str, spy_state: dict, ext=None):
     """(colour, text) for the line above the scan pills, or None."""
-    ph, _ = phase(spy_state)
+    ph, _ = phase(spy_state, ext)
     if ph is None:
         return None
-    _, rcol, rtag = regime(band, deep)
-    short = {'DIP ZONE': 'Deep dips and 50-day reclaims first; breakouts are chasing.',
-             'RECOVERY': 'Deep dips and pullbacks first; breakouts lag.',
-             'TREND': 'Deep dips did best; pullbacks and breakouts about random.',
-             'OUT': 'No setup edge: only the strongest names, smaller size.'}[ph]
-    return rcol, (f'{rtag} · SPY {ph} — {short} Stop 2 ATR(14), max 10%; take 2R, then trail the 21 EMA. '
-                  f'Grey setup = stop wider than 10%.')
+    _, ccol = cell_line(band, deep, ph)
+    tag = (deep if deep in ('DEEP RISK-OFF', 'DEEP RISK-ON') else (band or '')).upper()
+    return ccol, (f'{tag} · SPY {ph} — {FOCUS[ph]} Stop 2 ATR(14), max 10%; take 2R, then '
+                  f'trail the 21 EMA. Grey setup = stop wider than 10%.')
 
 
-def chasing(spy_state: dict) -> bool:
-    return phase(spy_state)[0] in CHASE_PHASES
+def chasing(spy_state: dict, ext=None) -> bool:
+    return phase(spy_state, ext)[0] in CHASE_PHASES

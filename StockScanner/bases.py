@@ -591,9 +591,10 @@ def market_label(m: Optional[pd.DataFrame], ft: Optional[dict] = None) -> Option
     if st.startswith('Confirmed') and age is not None and age <= FTD_FRESH:
         i_f = last - age
         fail = max(ft.get('corr_low') or 0.0, (1 - FTD_CORR) * float(h[i_f:].max()))
-        when = 'today' if age == 0 else f'{age} session{"s" if age != 1 else ""} ago'
-        return (f'Follow-through day {when} ({d.index[i_f]:%d %b}{_ftd_rvol(d, i_f)}) · {_ftd_low_status(l, i_f, last)} · '
-                f'{off} · fails below {_px(fail)}')
+        # 13 Nov 2026: date only (the scan can be a session behind the MRS, so "today" / "N sessions ago" misled)
+        rv = _ftd_rvol(d, i_f)
+        return (f'Follow-through day {d.index[i_f]:%d %b}' + (f' ({rv.lstrip(", ")})' if rv else '')
+                + f' · {_ftd_low_status(l, i_f, last)} · {off} · fails below {_px(fail)}')
     corr_txt = f'correction = close below {_px(corr_line)}'
     rg = find_range(h, l, last - RANGE_LAG)
     if rg is not None:

@@ -278,6 +278,16 @@ def check_password() -> bool:
 if not check_password():
     st.stop()
 
+# ── Load health (v6.3.2, 13 Nov 2026): every section that fails to load is listed in one line under the decision
+#    strip, so a missing card is never silent. _health(section, why) is called at the call sites (the loaders are
+#    cached, so their own prints only show on a cache miss).
+_HEALTH = []
+
+
+def _health(section: str, why) -> None:
+    _HEALTH.append((section, str(why)[:180]))
+    print(f'[health] {section}: {why}')
+
 # ── Load data (before sidebar so we can show last date + live defaults) ────────
 HIST_PATH = Path(__file__).parent / 'mrs_history.csv'
 GITHUB_RAW_URL = 'https://raw.githubusercontent.com/fabiolmn17-web/MRS_Dashboard/main/mrs_history.csv'
@@ -296,9 +306,13 @@ def load_data() -> pd.DataFrame:
         return df.sort_values('date').reset_index(drop=True)
     except Exception as e:
         print(f'[load_data] GitHub fetch failed ({e}), falling back to local file')
-        return pipeline.load_history(HIST_PATH)
+        _df = pipeline.load_history(HIST_PATH)
+        _df.attrs['mrs_fallback'] = f'GitHub fetch failed ({str(e)[:80]}); showing the copy bundled with the app'
+        return _df
 
 hist = load_data()
+if hist.attrs.get('mrs_fallback'):
+    _health('MRS history', hist.attrs['mrs_fallback'])
 
 # ── Zero gamma shadow: Gamma Live SPY 40-day flip, sent after each close by the Gamma Live PC ──────────────────
 GAMMA_SHADOW_PATH = Path(__file__).parent / 'gamma_shadow.csv'
@@ -682,6 +696,21 @@ _ind_df, _hold_df = load_industry_data()
 _scan_p = Path(__file__).parent / 'StockScanner' / 'output' / 'scan_results.csv'
 _scan_df, _scan_date = load_scanner_results(
     (_scan_p.stat().st_size, _scan_p.stat().st_mtime) if _scan_p.exists() else None)
+if _sec_closes is None or not len(_sec_closes):
+    _health('Sector table', 'sector ETF prices not available (Yahoo)')
+elif _sec_df is None or not len(_sec_df):
+    _health('Sector table', 'sector table could not be built')
+if _ind_df is None:
+    _health('Industries / leaders', 'industry_rs.csv missing or unreadable (nightly industry job)')
+if _scan_df is None:
+    _health('Scanner', 'scan_results.csv missing, empty or unreadable (nightly scanner job)')
+_scan_part = Path(__file__).parent / 'StockScanner' / 'output' / 'scan_coverage_low.txt'
+if _scan_part.exists():
+    try:
+        _health('Scanner', 'last run had low coverage, the previous full scan is shown: '
+                + _scan_part.read_text(encoding='utf-8').strip()[:140])
+    except Exception:
+        pass
 _bp = _band_profile(hist)
 _mom_light = rs_labels.momentum_light(hist.sort_values('date').set_index('date')['spy'].astype(float), reg)
 _leaders = rs_labels.leaders_shortlist(_ind_df)
@@ -809,6 +838,7 @@ st.markdown(market_state.decision_strip_html(
     show_stats=not st.session_state.get('show_risk_panel', True),
     show_sq=False,
     deep=_deep, deep_cut=(ctx['p10'] if _deep == 'DEEP RISK-OFF' else ctx['p90'])), unsafe_allow_html=True)
+_health_slot = st.empty()          # filled at the end of the run with the load-health line
 
 # ══════════════════════════════════════════════════════════════════════════════
 # WHERE TO LOOK: leaders to buy (industries first), rotation, scanner
@@ -826,28 +856,45 @@ try:
 except Exception as _al_err:
     print(f'[allocation] {_al_err}')
     st.session_state['_alloc_spy_in'] = None
-st.session_state['_ctx'] = (reg, _deep, _al_states.get('SPY'))
-st.session_state['_ctx_chase'] = bool(_al_states.get('SPY')) and context_card.chasing(_al_states.get('SPY'))
+    _health('Allocation card', _al_err)
+if not _al_states and not any(h[0] == 'Allocation card' for h in _HEALTH):
+    _health('Allocation card / SPY phase', 'SPY / QQQ history not available (Yahoo)')
+# Risk today snapshot (pedal), built here so the card and the pedal show the same SPY-vs-50-day number (v6.3.1).
+_rp_snap = None
 try:
-    st.markdown(context_card.card_html(reg, _deep, _al_states.get('SPY')), unsafe_allow_html=True)
+    _rp_etfs = tuple(sorted(_ind_df['ETF'].dropna().unique())) if _ind_df is not None and 'ETF' in _ind_df.columns else tuple()
+    with st.spinner('Loading the risk panel…'):
+        _rp_spy, _rp_v3, _rp_cl = load_risk_inputs(_rp_etfs)
+    if _rp_spy is not None and len(_rp_spy):
+        _rp_snap = risk_panel.build_snapshot(hist, _rp_spy, _rp_v3, _rp_cl, pipeline.regime_label)
+        st.session_state['_spy_ext_atr'] = _rp_snap.get('ext_atr')     # 9 Nov 2026: depth context on Deep dip
+except Exception as _rp_err:
+    print(f'[risk panel] {_rp_err}')
+    _rp_snap = None
+    _health('Risk today panel', _rp_err)
+if _rp_snap is None and not any(h[0] == 'Risk today panel' for h in _HEALTH):
+    _health('Risk today panel', 'SPY / VIX3M history not available (Yahoo)')
+_ctx_ext = _rp_snap.get('ext_atr') if _rp_snap else None
+st.session_state['_ctx'] = (reg, _deep, _al_states.get('SPY'), _ctx_ext)
+st.session_state['_ctx_chase'] = bool(_al_states.get('SPY')) and context_card.chasing(_al_states.get('SPY'), _ctx_ext)
+try:
+    st.markdown(context_card.card_html(reg, _deep, _al_states.get('SPY'), _ctx_ext), unsafe_allow_html=True)
 except Exception as _cx_err:
     print(f'[context card] {_cx_err}')
+    _health('Market context card', _cx_err)
 
 # ── Risk today panel (v5): pedal, today's state, effective bets, insurance cost, vol guide ──────────
+#    v6.3.1 (13 Nov 2026): the snapshot is built above, with the Market context card (one SPY-vs-50-day number).
 if st.session_state.get('show_risk_panel', True):
-    try:
-        _rp_etfs = tuple(sorted(_ind_df['ETF'].dropna().unique())) if _ind_df is not None and 'ETF' in _ind_df.columns else tuple()
-        with st.spinner('Loading the risk panel…'):
-            _rp_spy, _rp_v3, _rp_cl = load_risk_inputs(_rp_etfs)
-        if _rp_spy is not None and len(_rp_spy):
-            _rp_snap = risk_panel.build_snapshot(hist, _rp_spy, _rp_v3, _rp_cl, pipeline.regime_label)
-            st.session_state['_spy_ext_atr'] = _rp_snap.get('ext_atr')     # 9 Nov 2026: depth context on Deep dip
+    if _rp_snap is not None:
+        try:
             st.markdown(risk_panel.panel_html(_rp_snap), unsafe_allow_html=True)
-        else:
-            st.caption('Risk today panel: SPY history not available right now.')
-    except Exception as _rp_err:
-        print(f'[risk panel] {_rp_err}')
-        st.caption('Risk today panel could not be built this time.')
+        except Exception as _rp_err:
+            print(f'[risk panel] {_rp_err}')
+            _health('Risk today panel', _rp_err)
+            st.caption('Risk today panel could not be built this time.')
+    else:
+        st.caption('Risk today panel: SPY history not available right now.')
 
 # ── Allocation rule card (10 Nov 2026): SPY / QQQ rebound + breakout tickets ────────────────────────
 #    The SPY state also feeds the stock-entry guide line on the scanner (computed even when the card is hidden).
@@ -863,11 +910,13 @@ try:
     st.markdown(market_state.leaders_html(_leaders, _mom_light, _hold_df, _ld_asof, _dropped), unsafe_allow_html=True)
 except Exception as _ld_err:
     print(f'[leaders] {_ld_err}')
+    _health('Leaders list', _ld_err)
 
 try:
     st.markdown(market_state.avoid_html(rs_labels.laggards_shortlist(_ind_df), _hold_df), unsafe_allow_html=True)
 except Exception as _av_err:
     print(f'[avoid] {_av_err}')
+    _health('Avoid list', _av_err)
 
 
 # ── Sector rotation at a glance (rotation_view.py) ─────────────────────────────
@@ -890,6 +939,7 @@ try:
                         unsafe_allow_html=True)
 except Exception as _rot_err:
     print(f'[rotation] {_rot_err}')
+    _health('Sector rotation', _rot_err)
 
 st.divider()
 
@@ -1122,6 +1172,7 @@ def _wl_inner():
             _wl_side_panel(pick)
         except Exception as _e:
             print(f'[watchlist panel] {_e}')
+            _health('Watchlist side panel', _e)
 
 
 _wl_section = st.fragment(_wl_section_body) if hasattr(st, 'fragment') else _wl_section_body
@@ -1453,6 +1504,7 @@ try:
     _wl_section()
 except Exception as _wl_e:
     print(f'[watchlist] {_wl_e}')
+    _health('Watchlist', _wl_e)
     st.caption('Watchlist could not be loaded this time.')
 
 st.markdown('<div class="section-header">Momentum &amp; trend scanner</div>', unsafe_allow_html=True)
@@ -1501,6 +1553,7 @@ if _scan_df is not None and len(_scan_df) > 0:
     if not _has_mom:
         st.info('The momentum columns arrive with the next nightly scan. Until then the table shows the Growth candidates.')
     if len(_sd) < 900:          # 3 Nov 2026: the broad US universe is ~1,500+ names; fewer = it fell back
+        _health('Scanner', f'the scan covered only {len(_sd)} stocks (universe download fell back)')
         st.warning(f'The scan covered only {len(_sd)} stocks' + (f' ({_uni_src})' if _uni_src else '') + ': the US '
                    'universe download did not work in the nightly run, so the lists are shorter than usual. Check the '
                    'nightly scanner workflow on GitHub (Actions tab).')
@@ -2565,6 +2618,22 @@ with _t_pc:
         except:
             st.write('PC SMA-10 data not available.')
 
+
+# ── Load health line (v6.3.2): fills the slot under the decision strip ─────────────────────────────────────
+try:
+    if _HEALTH:
+        _hl = ' · '.join(f'<b>{_esc(a)}</b> ({_esc(b)})' for a, b in _HEALTH)
+        _health_slot.markdown(
+            f'<div style="font-size:0.78rem;color:#f3ece2;border:1px solid #f4a062;border-left:4px solid #f4a062;'
+            f'border-radius:4px;background:#2a1c13;padding:5px 10px;margin:-4px 0 10px 0;">'
+            f'<b style="color:#f4a062;">Not loaded this run ({len(_HEALTH)}):</b> {_hl}. '
+            f'<span style="color:#a89f95;">Reload in a few minutes; if it persists, check the GitHub Actions runs.</span>'
+            f'</div>', unsafe_allow_html=True)
+    else:
+        _health_slot.markdown('<div style="font-size:0.70rem;color:#6e675f;margin:-6px 0 8px 0;">'
+                              '✓ All sections loaded this run.</div>', unsafe_allow_html=True)
+except Exception as _hl_err:
+    print(f'[health] {_hl_err}')
 
 # ── Footer ─────────────────────────────────────────────────────────────────────
 last_upd = hist['date'].max()

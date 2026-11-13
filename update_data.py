@@ -10,7 +10,9 @@ import sys
 import datetime
 import numpy as np
 import pandas as pd
-from pandas.tseries.holiday import USFederalHolidayCalendar
+from pandas.tseries.holiday import (AbstractHolidayCalendar, Holiday, GoodFriday, USMartinLutherKingJr,
+                                    USPresidentsDay, USMemorialDay, USLaborDay, USThanksgivingDay,
+                                    nearest_workday, sunday_to_monday)
 from pathlib import Path
 
 import pipeline
@@ -19,25 +21,33 @@ import risk_panel
 
 HIST_PATH = Path(__file__).parent / 'mrs_history.csv'
 
-# ── NYSE holiday calendar (uses pandas built-in — no extra packages needed) ───
-_CAL      = USFederalHolidayCalendar()
-_GF_DATES = {  # Good Friday (NYSE-specific, not a federal holiday)
-    pd.Timestamp('2024-03-29'), pd.Timestamp('2025-04-18'),
-    pd.Timestamp('2026-04-03'), pd.Timestamp('2027-03-26'),
-    pd.Timestamp('2028-04-14'), pd.Timestamp('2029-03-30'),
-    pd.Timestamp('2030-04-19'),
-}
+
+# ── NYSE holiday calendar (pandas built-in rules, no extra packages) ─────────
+# 13 Nov 2026 (audit): the previous check used USFederalHolidayCalendar, which also contains Columbus Day and Veterans
+# Day. NYSE is OPEN on both, so those sessions were skipped by the evening run (e.g. 12 Oct and 11 Nov 2026) and only
+# filled by the next day's run. Good Friday now comes from the Easter rule (the hard-coded list ended in 2030).
+# Not covered: one-off closures (national days of mourning, weather); a run on such a day finds no new bar and appends
+# nothing.
+class NYSECalendar(AbstractHolidayCalendar):
+    rules = [
+        Holiday('New Year', month=1, day=1, observance=sunday_to_monday),   # NYSE does not close the Friday before
+        USMartinLutherKingJr, USPresidentsDay, GoodFriday, USMemorialDay,
+        Holiday('Juneteenth', month=6, day=19, start_date='2022-01-01', observance=nearest_workday),
+        Holiday('Independence Day', month=7, day=4, observance=nearest_workday),
+        USLaborDay, USThanksgivingDay,
+        Holiday('Christmas', month=12, day=25, observance=nearest_workday),
+    ]
+
+
+_CAL = NYSECalendar()
+
 
 def is_trading_day(dt: pd.Timestamp) -> bool:
     """Return True if dt is a NYSE trading session."""
+    dt = pd.Timestamp(dt).normalize()
     if dt.weekday() >= 5:          # Saturday / Sunday
         return False
-    fed_holidays = _CAL.holidays(start=dt, end=dt)
-    if len(fed_holidays) > 0:      # Federal holiday (incl. Juneteenth)
-        return False
-    if dt in _GF_DATES:            # Good Friday
-        return False
-    return True
+    return len(_CAL.holidays(start=dt, end=dt)) == 0
 
 
 def main():

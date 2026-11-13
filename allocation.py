@@ -375,7 +375,8 @@ def card_html(states: dict) -> str:
               f'<div>{_gauge(s, tks)}<details><summary>6-month chart</summary>{_chart(s)}</details></div></div>')
     h += ('<div class="sub" style="border-top:1px solid #24211e;padding-top:4px;">OPEN = in a trade · ARMED = would buy at the level shown '
           '· LOCKED = this sell-off already used its one rebound entry. Act at the close (from about 15:45 ET) or the next open; '
-          'don\'t wait for a pullback. 100% of the allocated capital while a ticket is open; a stop-out costs about 2 ATR(10). '
+          'don\'t wait for a pullback. 100% of the allocated capital while a ticket is open; a stop-out costs about 2 ATR(10) (the tickets use ATR(10), as '
+          'tested; stock setups use ATR(14)). '
           'Hover a ticker for the backtest.</div></div>')
     return h.replace('\n', ' ')
 

@@ -52,6 +52,33 @@ logger = logging.getLogger(__name__)
 
 OUTPUT_DIR  = Path(__file__).parent / 'output'
 RESULTS_CSV = OUTPUT_DIR / 'scan_results.csv'
+# v6.3.2 (13 Nov 2026, audit): a scan that covers far fewer stocks than the previous one (Yahoo throttling, a failed
+# universe download, or no candidate passing the filters) no longer replaces the good file. The previous scan is kept
+# and COVERAGE_FLAG says why; the dashboard shows it in the load-health line. The next run (evening or the 09:30
+# Berlin morning run) publishes normally and removes the flag.
+MIN_COVERAGE  = 0.70
+COVERAGE_FLAG = OUTPUT_DIR / 'scan_coverage_low.txt'
+
+
+def _publish(df: pd.DataFrame, log=print, note: str = '') -> bool:
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    prev_n = 0
+    if RESULTS_CSV.exists():
+        try:
+            with open(RESULTS_CSV, encoding='utf-8') as fh:
+                prev_n = max(sum(1 for _ in fh) - 1, 0)
+        except Exception:
+            prev_n = 0
+    if prev_n > 0 and len(df) < MIN_COVERAGE * prev_n:
+        msg = (f'{pd.Timestamp.utcnow():%Y-%m-%d %H:%M} UTC: {len(df)} stocks against {prev_n} in the previous scan'
+               + (f' ({note})' if note else '') + '; the previous scan was kept')
+        COVERAGE_FLAG.write_text(msg + '\n', encoding='utf-8')
+        log('  COVERAGE LOW: ' + msg)
+        return False
+    df.to_csv(RESULTS_CSV, index=False)
+    if COVERAGE_FLAG.exists():
+        COVERAGE_FLAG.unlink()
+    return True
 
 # Price history period (calendar days) — covers 252+ trading days for 1Y RS
 PRICE_DAYS    = 500   # x1.5 in _batch_download = ~750 calendar days (~2 years): cups up to 65 weeks + their prior uptrend
@@ -105,6 +132,16 @@ def run_scan(
     log('\n[2/5] Downloading price history...')
     all_tickers = tickers + ['SPY', 'QQQ']          # QQQ: market follow-through state only (bases v3, 8 Nov 2026)
     price_data  = _batch_download(all_tickers, PRICE_DAYS, BATCH_SIZE, log)
+    # v6.3.2: second chance for tickers that did not download at all (throttling), before any coverage decision
+    _miss = [t_ for t_ in all_tickers if price_data.get(t_) is None or not len(price_data.get(t_))]
+    if len(_miss) > 0.10 * len(all_tickers):
+        log(f'  {len(_miss)} of {len(all_tickers)} tickers did not download — waiting {RETRY_WAIT_S}s and retrying '
+            f'them once...')
+        time.sleep(RETRY_WAIT_S)
+        _again = _batch_download(_miss, PRICE_DAYS, BATCH_SIZE, log)
+        price_data.update({k_: v_ for k_, v_ in _again.items() if v_ is not None and len(v_)})
+        log(f'  after the retry: {sum(1 for t_ in all_tickers if price_data.get(t_) is not None and len(price_data.get(t_)))}'
+            f' of {len(all_tickers)} downloaded')
 
     # Freshness check (5 Nov 2026): every stock should end on the last completed session
     exp_day = expected_session()
@@ -425,10 +462,11 @@ def run_scan(
             f"52-week high {int(final_df['bo52'].fillna(False).astype(bool).sum())}")
     log(f'  Total scanned: {len(final_df)} | Elapsed: {elapsed:.0f}s')
 
-    # Save
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    final_df.to_csv(RESULTS_CSV, index=False)
-    log(f'\n  Results saved → {RESULTS_CSV}')
+    # Save (v6.3.2: only if the coverage is in line with the previous scan)
+    if _publish(final_df, log, note=f'universe {universe_note}'):
+        log(f'\n  Results saved → {RESULTS_CSV}')
+    else:
+        log('\n  Results NOT published: coverage too low (see above)')
     log('═' * 60)
 
     return final_df
@@ -626,9 +664,9 @@ def _batch_download(
 
 
 def _save_empty(mrs_score, mrs_state) -> pd.DataFrame:
+    # v6.3.2: an empty result never replaces a full scan (the coverage guard keeps the previous file)
     df = pd.DataFrame(columns=['ticker', 'pass_mode', 'mrs_score', 'mrs_state', 'scan_date'])
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    df.to_csv(RESULTS_CSV, index=False)
+    _publish(df, print, note='no candidates after the technical filter')
     return df
 
 
