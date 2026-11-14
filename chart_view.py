@@ -10,6 +10,9 @@ Shows the last ~12 months of daily candles with:
   Volume pane   (4 Nov 2026) daily volume bars (teal up / orange down day) and the 50-day average, under the price
   Base overlay  (3 Nov 2026) the current base from StockScanner/bases.py on this chart's own (unadjusted) prices:
                 shaded base, the cup's left lip / low / right lip, the handle, and the pivot line
+v6.5 (14 Nov 2026): drawn like the TradingView "Ext·RS" indicator v7.5 (see figure()): candles in the SPY phase colour,
+  SMA 50 / 200 / 250, SMA 50 +/- 2..5 ATR lines, Deep dip / chase / R1 markers. The EMA 10 and the 52W / 21D high lines
+  above are replaced (EMA 21 and the highs are in the legend).
 Descriptive chart only: same data the scanner uses, no signals.
 """
 import numpy as np
@@ -149,45 +152,204 @@ def _add_pivots(fig, h, v):
             continue
         fig.add_trace(go.Scatter(x=[xs[i - off] for i in idx], y=[arr[i] for i in idx], mode='text',
                                  text=[f'{arr[i]:,.2f}' for i in idx], textposition=f'{pos} center',
-                                 textfont=dict(size=9, color='#9b958f'), hoverinfo='skip', showlegend=False))
+                                 textfont=dict(size=9, color='#c9c1b7'), hoverinfo='skip', showlegend=False))
 
 
-def figure(h: pd.DataFrame, ticker: str, height: int = 520, base: dict = None) -> go.Figure:
-    """base: bases.detect(h) output to draw (computed here when None; pass {} to draw none)."""
+# ── v6.5 (14 Nov 2026): the chart drawn like the TradingView "Ext·RS" indicator v7.5 (Fabio's settings) ──────────────
+PH_COL = {0: '#85cac5', 1: '#649995', 2: '#e8dccb', 3: '#8a847c'}       # Dip zone / Recovery / Trend / Out
+PH_NAME = {0: 'Dip zone', 1: 'Recovery', 2: 'Trend', 3: 'Out'}
+S50_COL, S200_COL, E21_COL = 'rgba(201,193,183,0.65)', '#b9805a', '#9b958f'
+ATR_UP_COL, ATR_DN_COL = '#b9805a', '#649995'
+ATR_UP, ATR_DN, ATR_N = (2, 3, 4, 5), (2, 3, 4, 5), 20  # SMA 50 + / - k ATR(14), drawn over the last 20 sessions
+MK_COL = dict(dd='#76ff03', dw='#9e9e9e', ch='#ff5252', os='#ffeb3b')
+FUTURE = 9                                              # empty sessions at the right edge, for the ATR labels
+
+
+def _etfs() -> set:
+    out = {'SPY', 'QQQ', 'IWM', 'DIA', 'RSP', 'MDY', 'GLD', 'SLV', 'TLT', 'IEF', 'HYG', 'XBI', 'XOP', 'GDX', 'GDXJ', 'SMH',
+           'IGV', 'KRE', 'KBE', 'ITB', 'XHB', 'XRT', 'XME', 'IYT', 'JETS', 'ARKK', 'VXX', 'UVXY', 'USO', 'UNG', 'FXI', 'EEM',
+           'EFA', 'EWZ', 'EWJ'}
+    try:
+        from StockScanner import industry as _ind
+        out |= set(_ind.SECTOR_ETF.values())
+        out |= {t for lst in _ind.INDUSTRY_MAP.values() for t, _ in lst}
+    except Exception:
+        pass
+    return out
+
+
+def spy_phase(spy):
+    """Per-session SPY phase from the allocation replay (allocation.py, the same rules as the Today card and the
+    TradingView indicator): 0 = DIP ZONE (close at least 1 ATR(14) below the 50-day), 1 = RECOVERY (rebound ticket open),
+    2 = TREND (21-day breakout ticket open), 3 = OUT (no ticket). pd.Series by date, or None without data."""
+    if spy is None or len(spy) < 60:
+        return None
+    try:
+        import allocation as _al
+        d = _al.indicators(spy)
+        n = len(d)
+        tA = _al.replay(d, _al.rebound_entries(d), d['sma50'].values)
+        tB = _al.replay(d, _al.breakout_entries(d), d['ema21'].values)
+
+        def _open(trades):                 # open from the entry close up to the session before the exit
+            m = np.zeros(n, bool)
+            for t in trades:
+                m[t['i']:(t['j'] if t['j'] is not None else n)] = True
+            return m
+        a, b = _open(tA), _open(tB)
+        E = d['E'].values
+        ph = np.where(~np.isfinite(E), 3, np.where(E <= -1, 0, np.where(a, 1, np.where(b, 2, 3))))
+        return pd.Series(ph, index=pd.to_datetime(d.index).normalize())
+    except Exception:
+        return None
+
+
+def _ma_trig(c, lo, sma, n_above: int = 20, max_below: int = 5):
+    """The Deep dip rule on one moving average, per session (scanner and Pine f_ddtrig): the 20 closes before all above
+    it, then an undercut (low below, close back above) or a reclaim (1-5 closes below, then a close back above)."""
+    n = len(c)
+    x = c - sma
+    pos = np.where(np.isfinite(x), x > 0, False)
+    out = np.zeros(n, bool)
+    for i in range(n_above + max_below + 2, n):
+        if not pos[i]:
+            continue
+        if pos[i - 1]:
+            out[i] = bool(lo[i] < sma[i] and pos[i - n_above:i].all())
+        else:
+            k = 0
+            while k <= max_below and np.isfinite(x[i - 1 - k]) and x[i - 1 - k] <= 0:
+                k += 1
+            out[i] = bool(1 <= k <= max_below and pos[i - k - n_above:i - k].all())
+    return out
+
+
+def _rsi(c: pd.Series, n: int = 14) -> pd.Series:
+    dl = c.diff()
+    up = dl.clip(lower=0).ewm(alpha=1 / n, adjust=False).mean()
+    dn = (-dl.clip(upper=0)).ewm(alpha=1 / n, adjust=False).mean()
+    return 100 - 100 / (1 + up / dn.replace(0, np.nan))
+
+
+def figure(h: pd.DataFrame, ticker: str, height: int = 520, base: dict = None, spy: pd.DataFrame = None) -> go.Figure:
+    """Daily chart drawn like the TradingView Ext·RS indicator (v7.5, Fabio's settings, 14 Nov 2026):
+      candles in the SPY phase colour (Dip zone / Recovery / Trend / Out), hollow on up days, filled on down days;
+      SMA 50 / 200 / 250 (250 dashed); EMA 21, 52W high and 21D high in the legend (click to show);
+      dotted SMA 50 +2..+5 and -2..-5 ATR(14) lines over the last 20 sessions, labelled at the right edge;
+      markers: Deep dip trigger (grey when the 2 ATR stop is wider than 10%), breakout while SPY is in DIP ZONE /
+      RECOVERY (stocks only), 50-day reclaim after RSI(14) < 35 (R1);
+      10/10 swing price labels; the base overlay (MRS only) and the volume pane as before.
+    spy: SPY daily OHLC for the phase (None = all candles in the Out colour). base: bases.detect(h) output to draw
+    (computed here when None; pass {} to draw none)."""
+    h = h.copy()
     c = h['Close']
-    e10 = c.ewm(span=10, adjust=False).mean()
-    e21 = c.ewm(span=21, adjust=False).mean()
+    s50 = c.rolling(50).mean()
     s200 = c.rolling(200).mean()
     s250 = c.rolling(250).mean()
+    e21 = c.ewm(span=21, adjust=False).mean()
+    pc = c.shift()
+    tr = pd.concat([h['High'] - h['Low'], (h['High'] - pc).abs(), (h['Low'] - pc).abs()], axis=1).max(axis=1)
+    a14 = tr.ewm(alpha=1 / 14, adjust=False).mean()
     v = h.iloc[-BARS:]
-    x = v.index.strftime('%Y-%m-%d')          # category axis: no gaps on weekends and holidays
+    off = len(h) - len(v)
+    x = list(v.index.strftime('%Y-%m-%d'))          # category axis: no gaps on weekends and holidays
+    xf = [' ' * (i + 1) for i in range(FUTURE)]       # empty sessions at the right edge
     lv = levels(h)
     fig = go.Figure()
-    fig.add_trace(go.Candlestick(
-        x=x, open=v['Open'], high=v['High'], low=v['Low'], close=v['Close'], name=ticker,
-        increasing=dict(line=dict(color=UP, width=1), fillcolor=UP),
-        decreasing=dict(line=dict(color=DOWN, width=1), fillcolor=DOWN),
-        showlegend=False))
-    fig.add_trace(go.Scatter(x=x, y=e10.iloc[-BARS:], name='EMA 10', mode='lines',
-                             line=dict(color='#b9b2a9', width=0.7), hoverinfo='skip'))
-    fig.add_trace(go.Scatter(x=x, y=e21.iloc[-BARS:], name='EMA 21', mode='lines',
-                             line=dict(color=SMA50_COL, width=1.3), hoverinfo='skip'))
+
+    # candles in the SPY phase colour
+    ph_all = spy_phase(spy)
+    if ph_all is not None:
+        ph = ph_all.reindex(v.index).fillna(3).astype(int).to_numpy()
+    else:
+        ph = np.full(len(v), 3)
+    for p in (0, 1, 2, 3):
+        m = ph == p
+        if not m.any():
+            continue
+        col = PH_COL[p]
+        w = lambda s_: s_.where(m)
+        fig.add_trace(go.Candlestick(
+            x=x, open=w(v['Open']), high=w(v['High']), low=w(v['Low']), close=w(v['Close']),
+            name=f'SPY {PH_NAME[p].lower()}', showlegend=False,
+            increasing=dict(line=dict(color=col, width=1), fillcolor='rgba(0,0,0,0)'),
+            decreasing=dict(line=dict(color=col, width=1), fillcolor=col)))
+    fig.add_trace(go.Scatter(x=xf, y=[float(c.iloc[-1])] * FUTURE, mode='markers', marker=dict(opacity=0),
+                             hoverinfo='skip', showlegend=False))
+
+    # moving averages (EMA 21 and the highs: click in the legend)
+    fig.add_trace(go.Scatter(x=x, y=s50.iloc[-BARS:], name='SMA 50', mode='lines',
+                             line=dict(color=S50_COL, width=1), hoverinfo='skip'))
     fig.add_trace(go.Scatter(x=x, y=s200.iloc[-BARS:], name='SMA 200', mode='lines',
-                             line=dict(color=SMA200_COL, width=1.5), hoverinfo='skip'))
+                             line=dict(color=S200_COL, width=1), hoverinfo='skip'))
     fig.add_trace(go.Scatter(x=x, y=s250.iloc[-BARS:], name='SMA 250', mode='lines',
-                             line=dict(color=SMA200_COL, width=1.1, dash='dash'), hoverinfo='skip'))
-    hi52, hi20 = lv['hi52'], lv['hi20']
-    same = (not np.isnan(hi52)) and (not np.isnan(hi20)) and abs(hi52 / hi20 - 1) < 0.003
-    lines = [(hi52, HI52_COL, 'dash', '52W & 21D high' if same else '52W high', 'top left')]
-    if not same:
-        lines.append((hi20, HI20_COL, 'dot', '21D high', 'bottom left'))
-    for y, col, dash, lbl, pos in lines:
-        if not np.isnan(y):
-            fig.add_hline(y=y, line=dict(color=col, width=1, dash=dash),
-                          annotation=dict(text=f'{lbl} {y:,.2f}', font=dict(size=10, color=col), bgcolor='rgba(18,18,18,0.75)'),
-                          annotation_position=pos)
+                             line=dict(color=S200_COL, width=1, dash='dash'), hoverinfo='skip'))
+    fig.add_trace(go.Scatter(x=x, y=e21.iloc[-BARS:], name='EMA 21 (exit trail)', mode='lines', visible='legendonly',
+                             line=dict(color=E21_COL, width=1), hoverinfo='skip'))
+    for y, col, dash, lbl in ((lv['hi52'], HI52_COL, 'dash', '52W high'), (lv['hi21'], HI20_COL, 'dot', '21D high')):
+        if np.isfinite(y):
+            fig.add_trace(go.Scatter(x=[x[0], x[-1]], y=[y, y], name=f'{lbl} {y:,.2f}', mode='lines',
+                                     visible='legendonly', line=dict(color=col, width=1, dash=dash), hoverinfo='skip'))
+
+    # ATR(14) lines from the SMA 50, last ATR_N sessions, labels at the right edge (one legend entry toggles all)
+    xa = x[-ATR_N:]
+    first_atr = True
+    lab_x, lab_y, lab_t, lab_c = [], [], [], []
+    for k in [-q for q in ATR_DN][::-1] + list(ATR_UP):
+        yk = (s50 + k * a14).iloc[-ATR_N:]
+        if not np.isfinite(yk.iloc[-1]):
+            continue
+        col = ATR_UP_COL if k > 0 else ATR_DN_COL
+        fig.add_trace(go.Scatter(x=xa, y=yk, mode='lines', name='SMA 50 ± ATR lines', legendgroup='atr',
+                                 showlegend=first_atr, line=dict(color=col, width=1, dash='dot'), hoverinfo='skip'))
+        first_atr = False
+        lab_x.append(xf[1]); lab_y.append(float(yk.iloc[-1]))
+        lab_t.append(f'{"+" if k > 0 else "−"}{abs(k)} ATR'); lab_c.append(col)
+    if lab_x:
+        fig.add_trace(go.Scatter(x=lab_x, y=lab_y, mode='text', text=lab_t, textposition='middle right',
+                                 textfont=dict(size=9, color=lab_c), legendgroup='atr', showlegend=False,
+                                 hoverinfo='skip', cliponaxis=False))
+
+    # markers (same rules as the scanner and the TradingView indicator)
+    cc, ll, hh = c.to_numpy(float), h['Low'].to_numpy(float), h['High'].to_numpy(float)
+    dd = _ma_trig(cc, ll, s200.to_numpy(float)) | _ma_trig(cc, ll, s250.to_numpy(float))
+    wide = (2 * a14 / c).to_numpy(float) > 0.10
+    os50 = _ma_trig(cc, ll, s50.to_numpy(float)) & (_rsi(c).rolling(10).min().shift(1) < 35).to_numpy()
+    bo = (c > h['High'].rolling(21).max().shift(1)).to_numpy()
+    bo_new = bo & ~np.r_[False, bo[:-1]]
+    ph_full = np.r_[np.full(off, 3), ph]
+    chase = bo_new & np.isin(ph_full, (0, 1)) & (str(ticker).upper() not in _etfs())
+    av = a14.to_numpy(float)
+    vis = np.arange(len(h)) >= off
+    for key, mask, sym, ypos, name, tip in (
+            ('dd', dd & ~wide & vis, 'triangle-up', ll - 0.6 * av, 'Deep dip trigger',
+             'Deep dip trigger (undercut / reclaim of the 200 / 250 SMA after 20 closes above)'),
+            ('dw', dd & wide & vis, 'triangle-up', ll - 0.6 * av, 'Deep dip, stop wider than 10%',
+             'Deep dip, but the 2 ATR(14) stop is more than 10% away: about 0R in S1'),
+            ('ch', chase & vis, 'circle', hh + 0.6 * av, 'Breakout in dip zone / recovery',
+             'First close above the 21-day high while SPY is in DIP ZONE / RECOVERY: lagged a random entry (S2)'),
+            ('os', os50 & vis, 'x', ll - 1.3 * av, '50-day reclaim after RSI < 35',
+             '50-day reclaim after RSI(14) < 35 in the 10 sessions before: −0.26R (R1, Provisional avoid)')):
+        idx = np.flatnonzero(mask)
+        if not len(idx):
+            continue
+        fig.add_trace(go.Scatter(x=[x[i - off] for i in idx], y=ypos[idx], mode='markers', name=name,
+                                 marker=dict(symbol=sym, size=8 if sym != 'circle' else 6, color=MK_COL[key],
+                                             line=dict(width=0)),
+                                 hovertemplate=tip + '<extra></extra>'))
     _add_base(fig, v, base_info(h) if base is None else base)
     _add_pivots(fig, h, v)
+
+    # SPY phase key (top left)
+    if ph_all is not None:
+        today = PH_NAME[int(ph[-1])]
+        key = ' '.join(f'<span style="color:{PH_COL[p]}">■ {PH_NAME[p]}</span>' for p in (0, 1, 2, 3))
+        ktxt = f'SPY phase today: <b style="color:{PH_COL[int(ph[-1])]}">{today.upper()}</b>   {key}'
+    else:
+        ktxt = '<span style="color:#9b958f">SPY phase not available right now (candles in the Out colour)</span>'
+    fig.add_annotation(xref='paper', yref='paper', x=0.0, y=1.0, xanchor='left', yanchor='top', showarrow=False,
+                       text=ktxt, font=dict(size=10, color='#c9c1b7'), bgcolor='rgba(18,18,18,0.75)')
+
     # volume pane (4 Nov 2026): bars coloured by the candle, 50-day average line; its own axis under the price
     has_vol = 'Volume' in v.columns and pd.to_numeric(v['Volume'], errors='coerce').fillna(0).gt(0).any()
     if has_vol:
@@ -195,14 +357,15 @@ def figure(h: pd.DataFrame, ticker: str, height: int = 520, base: dict = None) -
         va50 = pd.to_numeric(h['Volume'], errors='coerce').rolling(50).mean().iloc[-BARS:]
         up = (v['Close'] >= v['Open']).to_numpy()
         fig.add_trace(go.Bar(x=x, y=vol, yaxis='y2', name='Volume', showlegend=False,
-                             marker=dict(color=np.where(up, 'rgba(133,202,197,0.55)', 'rgba(244,160,98,0.55)'), line_width=0),
+                             marker=dict(color=np.where(up, 'rgba(133,202,197,0.45)', 'rgba(244,160,98,0.45)'), line_width=0),
                              hovertemplate='Volume %{y:,.0f}<extra></extra>'))
         fig.add_trace(go.Scatter(x=x, y=va50, yaxis='y2', name='Vol 50d avg', mode='lines', showlegend=False,
                                  line=dict(color='#e8dccb', width=1, dash='dot'),
                                  hovertemplate='50-day avg %{y:,.0f}<extra></extra>'))
     # month ticks on the category axis: first session of each month
     first = ~v.index.to_period('M').duplicated()
-    tv = list(x[first])[1:]
+    xs = pd.Index(x)
+    tv = list(xs[first])[1:]
     tt = [d.strftime('%b %Y') if d.month == 1 else d.strftime('%b') for d in v.index[first]][1:]
     fig.update_layout(
         template='plotly_dark+atn', height=height, margin=dict(l=8, r=56, t=8, b=8),
@@ -305,8 +468,14 @@ def show(st, components, fig, key: str, config: dict):
     first = st.session_state.setdefault('_mrs_first_fig', {})
     if k not in first:
         first[k] = fig
-    c = fig.data[0]
-    hi = [float(v) for v in c.high]
-    lo = [float(v) for v in c.low]
+    hi_a = lo_a = None
+    for tr_ in fig.data:                       # v6.5: one candle trace per SPY phase; combine them bar by bar
+        if tr_.type == 'candlestick':
+            a_ = np.array(tr_.high, dtype=float)
+            b_ = np.array(tr_.low, dtype=float)
+            hi_a = a_ if hi_a is None else np.fmax(hi_a, a_)
+            lo_a = b_ if lo_a is None else np.fmin(lo_a, b_)
+    hi = [float(v) for v in pd.Series(hi_a).ffill().bfill()]
+    lo = [float(v) for v in pd.Series(lo_a).ffill().bfill()]
     st.plotly_chart(first[k], use_container_width=True, key=k, config=config, theme=None)
     components.html(CHART_JS % (json.dumps(k), json.dumps(ver), fig.to_json(), json.dumps(hi), json.dumps(lo)), height=0)

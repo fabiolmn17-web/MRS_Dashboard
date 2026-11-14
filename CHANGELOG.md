@@ -7,6 +7,17 @@ Versions follow `docs/PROCESS.md`:
 
 The current version is in `VERSION` and in the page footer. Entries before 6.3.1 were reconstructed from the commit history and the project notes on 13 Nov 2026.
 
+## 6.5.0 · 2026-11-14
+
+The daily chart (scanner, watchlist and ticker lookup) is drawn like the TradingView "Ext·RS" indicator v7.5 with Fabio's settings (`chart_view.py`).
+
+- Candles in the SPY phase colour, from the same allocation replay as the Today card: Dip zone, Recovery, Trend, Out. Hollow on up days, filled on down days.
+- SMA 50, SMA 200 and SMA 250 (dashed). The EMA 10 is removed; the EMA 21, the 52-week high and the 21-day high are in the legend (click to show).
+- Dotted SMA 50 ± 2 to 5 ATR(14) lines over the last 20 sessions, labelled at the right edge (one legend entry toggles them).
+- Markers: Deep dip trigger (grey when the 2 ATR stop is wider than 10%), breakout while SPY is in Dip zone / Recovery (stocks only), 50-day reclaim after RSI(14) < 35 (R1).
+- Unchanged: 10/10 swing price labels, the base overlay, the volume pane, the zoom that carries over between tickers.
+- Checked on the EODHD panel (PBR, NVDA, XLE): renders; Yahoo is blocked on the device, so not run inside the app here.
+
 ## 6.4.0 · 2026-11-14
 
 Roadmap steps 1–3 (Claude Doc "MRS roadmap: from the Nov 2026 tests to the dashboard") and the page inventory (Step 0). The page now answers three questions in order: what can be done today, where to look, how to exit.

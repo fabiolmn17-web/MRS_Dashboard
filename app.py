@@ -1171,7 +1171,7 @@ def _wl_inner():
     if h is None or len(h) < 30:
         st.info(f'No price history for {pick}.')
         return
-    fig = chart_view.figure(h, pick, height=640)       # 4 Nov 2026: as tall as the side panel next to it
+    fig = chart_view.figure(h, pick, height=640, spy=_chart_history('SPY'))       # 4 Nov 2026: as tall as the side panel next to it
     r = d[d['ticker'] == pick].iloc[0]
     for val, col, lbl in ((r['trigger'], '#85cac5', 'trigger'), (r['stop'], '#f4a062', 'stop')):
         if pd.notna(val):
@@ -1221,13 +1221,18 @@ def _scan_chart_panel(tickers):
         f' · vs 52W high <b style="color:#e3b48e;">{_d(lv["hi52"])}</b> · vs 21D high <b style="color:#9b958f;">{_d(lv["hi21"])}</b></div>',
         unsafe_allow_html=True)
     _wl_star(t, 'wl_star_scan')
-    chart_view.show(st, components, chart_view.figure(h, t, height=520), 'scan_chart', _CHART_CFG)
-    st.markdown('<div style="font-size:0.66rem;color:#9b958f;">Daily, last 12 months. SMA 50 / 200; 52W high = highest '
-                'high of the last 252 sessions; 21D high = highest high of the 21 sessions before today. Base (if any): '
-                'shaded box, cup line and handle, dashed pivot line (found on these unadjusted prices; the table\'s '
-                'pivot comes from the scan\'s dividend-adjusted prices and can differ by the dividends since). Click a row '
-                'in the table (or use the ↑ / ↓ keys) to switch; drag a box or use the mouse wheel to zoom, double-click '
-                'for the full 12 months. The zoom is kept when you switch tickers.</div>', unsafe_allow_html=True)
+    chart_view.show(st, components, chart_view.figure(h, t, height=520, spy=_chart_history('SPY')), 'scan_chart', _CHART_CFG)
+    st.markdown('<div style="font-size:0.66rem;color:#9b958f;">Daily, last 12 months, drawn like the TradingView '
+                'Ext·RS indicator. Candles in the SPY phase colour (same replay as the Today card): Dip zone, Recovery, '
+                'Trend, Out; hollow = up day, filled = down day. SMA 50, 200, 250 (dashed); dotted lines = SMA 50 ± 2 to 5 '
+                'ATR(14) over the last 20 sessions. ▲ Deep dip trigger (grey: the 2 ATR stop is wider than 10%), '
+                '● breakout while SPY is in Dip zone / Recovery (stocks; lagged a random entry), ✕ 50-day reclaim after '
+                'RSI &lt; 35 (R1, avoid). Prices = confirmed 10/10 swing highs and lows. Click the legend for the EMA 21, '
+                'the 52W high and the 21D high. Base (if any): shaded box, cup line and handle, dashed pivot line (found '
+                'on these unadjusted prices; the table\'s pivot comes from the scan\'s dividend-adjusted prices and can '
+                'differ by the dividends since). Click a row in the table (or use the ↑ / ↓ keys) to switch; drag a box '
+                'or use the mouse wheel to zoom, double-click for the full 12 months. The zoom is kept when you switch '
+                'tickers.</div>', unsafe_allow_html=True)
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -1509,7 +1514,7 @@ def _scan_lookup(sd, sec_label, sec_score, leader_hold):
     if h is not None and len(h) >= 30:
         with c_ch:
             _wl_star(t, 'wl_star_lookup')
-            chart_view.show(st, components, chart_view.figure(h, t, height=360), 'lookup_chart', _CHART_CFG)
+            chart_view.show(st, components, chart_view.figure(h, t, height=360, spy=_chart_history('SPY')), 'lookup_chart', _CHART_CFG)
     st.markdown('<div style="height:6px;"></div>', unsafe_allow_html=True)
 
 
