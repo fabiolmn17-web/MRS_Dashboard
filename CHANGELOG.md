@@ -7,6 +7,29 @@ Versions follow `docs/PROCESS.md`:
 
 The current version is in `VERSION` and in the page footer. Entries before 6.3.1 were reconstructed from the commit history and the project notes on 13 Nov 2026.
 
+## 6.4.0 · 2026-11-14
+
+Roadmap steps 1–3 (Claude Doc "MRS roadmap: from the Nov 2026 tests to the dashboard") and the page inventory (Step 0). The page now answers three questions in order: what can be done today, where to look, how to exit.
+
+- **Today card** (new, `today_card.py`) replaces the decision strip, the Market context card, the pedal tile and the allocation card on the main path:
+  - MRS score, band, DEEP badge, percentile, side;
+  - SPY phase track (DIP ZONE → RECOVERY → TREND → OUT) and the levels that change it;
+  - **This state:** EDGE / NO EDGE with the survivorship-free cell numbers (S3 panel B; about 0.05R lower than before);
+  - **Risk per trade:** 1% on the risk-off side with SPY in DIP ZONE / RECOVERY / TREND, 0.7% risk-on with SPY in TREND, 0.5% elsewhere; open risk ≤ 3.5% of NLV counted to the current stops; ≤ 10 positions (P2, Provisional);
+  - **Hard stop:** −15% from the account peak (Fabio's rule; P2 addendum on what it does and does not do);
+  - **Where to look** (side-dependent: weaker names did better on the risk-off side) and **Exit** (2 ATR(14) ≤ 10%; hold the stop until +2R, then trail the 21 EMA);
+  - alert lines only when active: EASE OFF, correlation stress, DEEP RISK-OFF, no shorts on laggards in RISK-OFF.
+- **Folds:** Market detail (levels and changes, risk panel, SPY / QQQ tickets, leaders, avoid, rotation), Sectors and industries, Why the model says this. Sidebar: one "Show everything" switch replaces the Risk panel and Allocation toggles.
+- **Context card:** cell numbers survivorship-free; "choose the name by leadership" replaced (it contradicted S3).
+- **Scanner:**
+  - long scans in order of the evidence: Deep dip, Pullbacks, Bases, Breakouts, Momentum list (All + Hot 50 merged, sorted by RS rating);
+  - short scans folded into one group;
+  - 12 default columns (Ticker, Setup, Base / pivot, Breakout, RS rtg, Ext, RVOL, Earnings, % 52W Hi, Squeeze, Industry, Heat); "More columns" shows all 21;
+  - "More filters" fold (squeeze, base faults, correction, depth);
+  - new chips: **✕ oversold** on a 50-day reclaim after RSI(14) < 35 in the 10 sessions before (R1, Provisional avoid); **breakout stop under the 5-day low** (S2, Tested);
+  - context line: "Setups mark where the trade is wrong, not an edge".
+- **Nightly scanner** (`StockScanner/momentum.py`): new fields `p50_os`, `p50_rsi10`, `low_5d`. The chips appear after the next scan.
+
 ## 6.3.2 · 2026-11-13
 
 - **Load-health line** under the decision strip: "Data issues this run (n): section (reason)", or "✓ All sections loaded and current". It also flags a scan or industry file behind the MRS.

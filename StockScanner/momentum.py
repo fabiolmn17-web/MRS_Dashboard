@@ -63,6 +63,49 @@ FIELDS += DD_FIELDS
 # 9 Nov 2026: RVOL (Epistruct RVOL at Time, Pine v1.3): rvol_d = anchor 1D on daily bars (today's volume / the
 # average of the last 20 sessions); rvol_w = anchor 1W, Cumulative (week-to-date vs the same weekday, 20 weeks)
 FIELDS += ['rvol_d', 'rvol_w', 'rvol_w_n']
+# 14 Nov 2026 (MRS v6.4): R1 warning (50-day reclaim after an oversold dip) and the breakout stop under the 5-day low (S2)
+FIELDS += ['p50_os', 'p50_rsi10', 'low_5d']
+
+
+def _rsi_wilder(c: pd.Series, n: int = 14) -> pd.Series:
+    """RSI(14), Wilder smoothing (RMA of gains / losses), as ta.rsi."""
+    d = c.diff()
+    up = d.clip(lower=0).ewm(alpha=1 / n, adjust=False).mean()
+    dn = (-d.clip(upper=0)).ewm(alpha=1 / n, adjust=False).mean()
+    return 100 - 100 / (1 + up / dn.replace(0, np.nan))
+
+
+def p50_oversold(df: pd.DataFrame, n_above: int = 20, max_below: int = 5, max_days: int = 1) -> tuple:
+    """R1 (13 Nov 2026): the Deep dip rule on the 50-day SMA (20 closes above, then an undercut, or a reclaim after 1-5
+    closes below), triggered today or yesterday, with the lowest RSI(14) of the 10 sessions before the trigger.
+    Returns (oversold: bool, lowest RSI). oversold = lowest RSI < 35 (R1: -0.26R vs other 50-day reclaims, Provisional)."""
+    try:
+        d = df[['Low', 'Close']].dropna()
+        if len(d) < 50 + n_above + max_below + 12:
+            return False, np.nan
+        c, l = d['Close'].values, d['Low'].values
+        sma = d['Close'].rolling(50).mean().values
+        rsi = _rsi_wilder(d['Close']).values
+        x = c - sma
+        n = len(c)
+        for dago in range(0, max_days + 1):
+            i = n - 1 - dago
+            if not np.isfinite(sma[i]) or x[i] <= 0:
+                continue
+            hit = False
+            if x[i-1] > 0:
+                hit = l[i] < sma[i] and (x[i-n_above:i] > 0).all()
+            else:
+                k = 0
+                while k <= max_below and x[i-1-k] <= 0:
+                    k += 1
+                hit = 1 <= k <= max_below and (x[i-k-n_above:i-k] > 0).all()
+            if hit:
+                m = float(np.nanmin(rsi[i-10:i]))
+                return bool(m < 35), m
+    except Exception as e:  # never break the scan on one ticker
+        logger.warning(f'p50 oversold error: {e}')
+    return False, np.nan
 
 
 def rvol_at_time(df, length=20, min_n=5, mode='Cumulative', anchor='W'):
@@ -236,7 +279,7 @@ def momentum_fields(df: Optional[pd.DataFrame], spy_df: Optional[pd.DataFrame]) 
     out = {k: np.nan for k in FIELDS}
     out.update({'held_label': '', 'held_trend': '', 'pending_label': '', 'tag_1m': '', 'ext_zone': '',
                 'mom_zone': '', 'pullback': '', 'mom_list': False, 'above_sma200': False, 'sma50_above_sma200': False,
-                'short_list': False, 'pb_setup': '', 'rally_setup': ''})
+                'short_list': False, 'pb_setup': '', 'rally_setup': '', 'p50_os': False})
     if df is None or spy_df is None or df.empty or 'Close' not in df.columns:
         return out
     d = df[['High', 'Low', 'Close']].dropna()
@@ -288,6 +331,8 @@ def momentum_fields(df: Optional[pd.DataFrame], spy_df: Optional[pd.DataFrame]) 
         out['ema21_above'] = bool(p > float(e21.iloc[-1]))
         out['ema10_above21'] = bool(float(e10.iloc[-1]) > float(e21.iloc[-1]))
         out.update(deep_dip_fields(df, 'long')); out.update(deep_dip_fields(df, 'short'))
+        out['p50_os'], out['p50_rsi10'] = p50_oversold(df)
+        out['low_5d'] = float(d['Low'].iloc[-5:].min()) if len(d) >= 5 else np.nan
         hl = (d['High'] / d['Low']).iloc[-20:]
         out['adr_pct'] = float((hl.mean() - 1) * 100) if len(hl) == 20 else np.nan
         if 'Volume' in df.columns:

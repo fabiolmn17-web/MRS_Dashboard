@@ -345,11 +345,29 @@ def _grey(html, w):
             f'<span class="sub" style="color:{DIM};">stop {w:.0f}%</span>')
 
 
+def _p50_os_chip(r) -> str:
+    """v6.4 (14 Nov 2026): a reclaim / undercut of the 50-day (the Deep dip rule on the 50-day SMA, today or yesterday)
+    after RSI(14) fell below 35 in the 10 sessions before. R1 (survivorship-free, 2009-26): -0.02R vs +0.19R for the other
+    50-day reclaims, difference -0.26R (95% range -0.47 to -0.04), same sign in both eras and with survivors only.
+    Provisional: avoid."""
+    if str(r.get('p50_os')).lower() != 'true':
+        return ''
+    rv = r.get('p50_rsi10')
+    tip = ('50-day reclaim after an oversold dip' + ('' if _nan(rv) else f' (lowest RSI(14) of the 10 sessions before: '
+           f'{float(rv):.0f})') + '. In R1 these lost: -0.02R vs +0.19R for other 50-day reclaims (-0.26R, range -0.47 '
+           'to -0.04; both eras). A pullback that turned into an oversold sell-off is no longer a pullback. Provisional: avoid.')
+    return (f' <span title="{_e(tip)}" style="font-size:0.62rem;font-weight:700;color:#0a0a0a;background:{ORANGE};'
+            f'padding:0 4px;border-radius:3px;">✕ oversold</span>')
+
+
 def setup_cell(r):
     html, rank = _setup_cell_raw(r)
+    os_ = _p50_os_chip(r)
     w = stop_width(r)
     if rank and not _nan(w) and w > MAX_STOP:
-        return _grey(html, w), rank - 0.5
+        return _grey(html, w) + os_, rank - 0.5
+    if os_:
+        return (html if rank else '') + os_, rank - 0.25 if rank else -1
     return html, rank
 
 
@@ -357,6 +375,11 @@ def breakout_cell(r):
     html, rank = _breakout_cell_raw(r)
     if not rank:
         return html, rank
+    l5, cl = r.get('low_5d'), r.get('close')
+    if not _nan(l5) and not _nan(cl) and float(cl) > 0 and r.get('_side') != 'short':
+        p5 = (float(cl) - float(l5)) / float(cl) * 100
+        html += (f' <span class="sub" title="Breakout stop under the 5-day low: +0.06R per trade vs a 2 ATR stop in S2 '
+                 f'(both eras). Tested.">stop {float(l5):,.2f} ({p5:.1f}%)</span>')
     w = stop_width(r)
     if str(r.get('_chase')).lower() == 'true' and r.get('_side') != 'short':
         html += (' <span title="SPY is in the dip zone or the recovery phase: 21-day breakouts did worse than a random '
@@ -494,17 +517,31 @@ def _row(r, today, sec_label, sec_score, leader_hold, yf_to_sector, clickable=Fa
     return h
 
 
+# v6.4 (14 Nov 2026): 12 default columns in this order (page inventory, Fabio's choice): Ticker, Setup, Base / pivot,
+# Breakout, RS rtg, Ext vs SMA50, RVOL, Earnings, % 52W Hi, then Squeeze, Industry, Heat. "More columns" shows all 21.
+DEFAULT_COLS = [0, 15, 17, 18, 8, 9, 12, 19, 4, 16, 20, 1]
+
+
 def build_html(df: pd.DataFrame, sec_label: dict, sec_score: dict, leader_hold: dict, yf_to_sector: dict,
-               clickable: bool = False) -> str:
+               clickable: bool = False, cols: list = None) -> str:
     """df: filtered scan rows. sec_label/sec_score: display sector -> held label / score.
-    leader_hold: ticker -> industry ETF on the buy-leaders list whose top 10 holds it."""
+    leader_hold: ticker -> industry ETF on the buy-leaders list whose top 10 holds it.
+    cols: indices into HEAD to show, in this order (None = all 21)."""
     today = pd.Timestamp.today().normalize()
-    h = CSS + '<div class="wrap"><table id="mt"><thead><tr>'
-    for i, (lbl, cls) in enumerate(HEAD):
+    idx = list(range(len(HEAD))) if cols is None else list(cols)
+    css = CSS if cols is None else CSS.replace('min-width:1410px', 'min-width:%dpx' % max(700, 70 * len(idx)))
+    h = css + '<div class="wrap"><table id="mt"><thead><tr>'
+    for i, k in enumerate(idx):
+        lbl, cls = HEAD[k]
         h += f'<th class="{cls}" data-col="{i}" onclick="srt(this)">{lbl}<span class="sarr" id="sa{i}"></span></th>'
     h += '</tr></thead><tbody>'
     for _, r in df.iterrows():
-        h += _row(r, today, sec_label, sec_score, leader_hold, yf_to_sector, clickable)
+        row = _row(r, today, sec_label, sec_score, leader_hold, yf_to_sector, clickable)
+        if cols is not None:
+            tr = re.match(r'<tr[^>]*>', row).group(0)
+            tds = re.findall(r'<td\b.*?</td>', row, flags=re.S)
+            row = tr + ''.join(tds[k] for k in idx) + '</tr>'
+        h += row
     h += '</tbody></table></div>' + ('' if clickable else JS)
     return h
 

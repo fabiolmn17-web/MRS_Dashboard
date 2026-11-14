@@ -23,15 +23,17 @@ CHASE_PHASES = ('DIP ZONE', 'RECOVERY')          # breakouts lag in these phases
 
 # S2 cross-tab (exploratory): mean R per trade, stop 2 ATR(14), 2R then trail the 21 EMA.
 # dd = Deep dip, p50 = 50-day pullback, bo = 21-day breakout, rnd = random uptrend entry; n_dd = Deep dip trades.
+# v6.4 (14 Nov 2026): survivorship-free numbers (S3 rerun, panel B: point-in-time universe with delisted names,
+# stocks 2009-26, trail exit), about 0.05R below the 13 Nov values on the risk-off side.
 CELL = {
-    ('OFF', 'DIP ZONE'): dict(dd=0.38, p50=0.42, bo=0.25, rnd=0.41, n_dd=10091),
-    ('ON', 'DIP ZONE'): dict(dd=0.02, p50=-0.01, bo=0.27, rnd=0.27, n_dd=476),
-    ('OFF', 'RECOVERY'): dict(dd=0.37, p50=0.38, bo=0.30, rnd=0.39, n_dd=4037),
-    ('ON', 'RECOVERY'): dict(dd=0.15, p50=0.09, bo=0.08, rnd=0.12, n_dd=5803),
-    ('OFF', 'TREND'): dict(dd=0.44, p50=0.32, bo=0.26, rnd=0.19, n_dd=1370),
-    ('ON', 'TREND'): dict(dd=0.26, p50=0.19, bo=0.17, rnd=0.21, n_dd=3319),
-    ('OFF', 'OUT'): dict(dd=0.13, p50=0.17, bo=0.10, rnd=0.17, n_dd=2803),
-    ('ON', 'OUT'): dict(dd=0.15, p50=0.11, bo=0.18, rnd=0.18, n_dd=1526),
+    ('OFF', 'DIP ZONE'): dict(dd=0.33, p50=0.40, bo=0.22, rnd=0.37, n_dd=12294),
+    ('ON', 'DIP ZONE'): dict(dd=0.00, p50=-0.10, bo=0.38, rnd=0.15, n_dd=629),
+    ('OFF', 'RECOVERY'): dict(dd=0.30, p50=0.29, bo=0.31, rnd=0.35, n_dd=5423),
+    ('ON', 'RECOVERY'): dict(dd=0.10, p50=0.07, bo=0.06, rnd=0.09, n_dd=7574),
+    ('OFF', 'TREND'): dict(dd=0.37, p50=0.24, bo=0.19, rnd=0.16, n_dd=1748),
+    ('ON', 'TREND'): dict(dd=0.13, p50=0.15, bo=0.09, rnd=0.14, n_dd=4449),
+    ('OFF', 'OUT'): dict(dd=0.09, p50=0.17, bo=0.09, rnd=0.14, n_dd=3662),
+    ('ON', 'OUT'): dict(dd=0.08, p50=0.06, bo=0.16, rnd=0.14, n_dd=2058),
 }
 BEST = ('OFF', 'DIP ZONE')
 SMALL_N = 1000
@@ -106,14 +108,14 @@ def cell_line(band: str, deep: str, ph: str):
 FOCUS = {
     'DIP ZONE': 'Deep dips and reclaims of the 50-day. Skip breakouts: they lagged in this phase.',
     'RECOVERY': 'Deep dips and pullbacks first; breakouts lag.',
-    'TREND': 'Deep dips did best; pullbacks and breakouts about random.',
+    'TREND': 'Deep dips did best on the risk-off side; pullbacks and breakouts close to random.',
     'OUT': 'No setup beat a random entry here: only the strongest names.',
 }
 RISK = ('Stop 2 ATR(14), at most 10% below the entry (breakouts: under the 5-day low). Take 2R, then trail the '
         '21 EMA (first close below it). How much risk: see the pedal below.')
-PICK = 'Choose the name by leadership (sector, industry, RS); the setup only sets the entry and the stop.'
-EVIDENCE = ('S2, 12 Nov 2026: 210K stock trades 2009-26 (today\'s list: survivorship-biased, which flatters buying in '
-            'sell-offs most), stop 2 ATR(14), 2R then trail the 21 EMA, mean R per trade. Cells = MRS side (risk-off: '
+PICK = ('Name choice adds little (best fifth about +0.08R): on the risk-off side weaker names did better, on the risk-on '
+        'side stronger ones (S3, survivorship-free). The setup sets the entry and the stop.')
+EVIDENCE = ('S2 / S3, survivorship-free rerun 13 Nov 2026: stock trades 2009-26 with delisted names (panel B), stop 2 ATR(14), 2R then trail the 21 EMA, mean R per trade. Cells = MRS side (risk-off: '
             'score < -0.5) x SPY phase; phases and cells drawn after S2: exploratory. Tested in S2: no setup beat a random '
             'uptrend entry in the same SPY allocation state; breakouts were below random while the rebound ticket was '
             'open (-0.06R). Stops / exits: 1.5 ATR cost about 0.05R; 2R then trail beat a plain 2R by +0.03 to +0.08R.')

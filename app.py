@@ -33,6 +33,7 @@ import market_state
 import risk_panel
 import allocation
 import context_card
+import today_card
 import scan_view
 import heat_score
 import chart_view
@@ -467,10 +468,9 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
     st.sidebar.caption('Clears cache and reloads CSV from disk.')
-    show_risk_panel = st.sidebar.toggle('Risk today panel', value=True, key='show_risk_panel',
-                                        help='Pedal, today\'s state, effective bets, insurance cost, book volatility guide (v5).')
-    show_alloc = st.sidebar.toggle('Allocation rule card', value=True, key='show_alloc',
-                                   help='SPY / QQQ rebound + breakout tickets (in-sample rule; forward tracking from 10 Nov 2026).')
+    # v6.4 (14 Nov 2026): one switch opens every fold (Market detail, More filters, More columns, Sectors, Why)
+    st.sidebar.toggle('Show everything', value=False, key='show_all',
+                      help='Opens every folded section and shows all scanner columns, as before v6.4.')
 
     # ── Zero gamma: InsiderFinance (scored) vs Gamma Live 40d (shadow) ────────────────────────────────────────
     _gst = gamma_shadow_table(hist, gshadow)
@@ -832,15 +832,10 @@ def _gl_header() -> dict:
         pass
     return {}
 
-st.markdown(market_state.decision_strip_html(
-    mrs, reg, rcol, dur, f"{_ordinal(int(round(ctx['percentile'])))} percentile since {ctx['start'].year}",
-    sq_lbl, sq_col, sq_desc, _mom_light, _bp, _leaders,
-    {'VIX': _f('vix', '{:.2f}'), 'SPX': _f('spx', '{:,.0f}'), 'Zero γ': _f('zero_gamma', '{:,.0f}'),
-     **_gl_header()},
-    _changes, _deep_line, 'Data as of: ' + ' · '.join(_fresh),
-    show_stats=not st.session_state.get('show_risk_panel', True),
-    show_sq=False,
-    deep=_deep, deep_cut=(ctx['p10'] if _deep == 'DEEP RISK-OFF' else ctx['p90'])), unsafe_allow_html=True)
+# v6.4 (14 Nov 2026): the Today card replaces the decision strip; it is filled below, once the SPY phase
+# and the pedal snapshot are known. The decision strip code (market_state.decision_strip_html) is kept.
+_show_all = bool(st.session_state.get('show_all', False))
+_today_slot = st.empty()
 _health_slot = st.empty()          # filled at the end of the run with the load-health line
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -881,68 +876,84 @@ _ctx_ext = _rp_snap.get('ext_atr') if _rp_snap else None
 st.session_state['_ctx'] = (reg, _deep, _al_states.get('SPY'), _ctx_ext)
 st.session_state['_ctx_chase'] = bool(_al_states.get('SPY')) and context_card.chasing(_al_states.get('SPY'), _ctx_ext)
 try:
-    st.markdown(context_card.card_html(reg, _deep, _al_states.get('SPY'), _ctx_ext), unsafe_allow_html=True)
+    _since = ' · '.join(x for x in [(_changes[0] if _changes and str(_changes[0]).startswith('MRS') else ''),
+                                    (_bhl if '_bhl' in globals() and _bhl else '')] if x)
+    _today_slot.markdown(today_card.card_html(
+        mrs, reg, rcol, f"{_ordinal(int(round(ctx['percentile'])))} percentile since {ctx['start'].year}", _deep,
+        (ctx['p10'] if _deep == 'DEEP RISK-OFF' else ctx['p90']), _al_states.get('SPY'), _ctx_ext, _rp_snap,
+        since=_since, levels={'VIX': _f('vix', '{:.2f}'), 'SPX': _f('spx', '{:,.0f}')},
+        fresh='Data as of: ' + ' · '.join(_fresh), date_txt=f'{last_dt:%a %d %b %Y}'), unsafe_allow_html=True)
 except Exception as _cx_err:
-    print(f'[context card] {_cx_err}')
-    _health('Market context card', _cx_err)
+    print(f'[today card] {_cx_err}')
+    _health('Today card', _cx_err)
 
-# ── Risk today panel (v5): pedal, today's state, effective bets, insurance cost, vol guide ──────────
-#    v6.3.1 (13 Nov 2026): the snapshot is built above, with the Market context card (one SPY-vs-50-day number).
-if st.session_state.get('show_risk_panel', True):
-    if _rp_snap is not None:
-        try:
-            st.markdown(risk_panel.panel_html(_rp_snap), unsafe_allow_html=True)
-        except Exception as _rp_err:
-            print(f'[risk panel] {_rp_err}')
-            _health('Risk today panel', _rp_err)
-            st.caption('Risk today panel could not be built this time.')
-    else:
-        st.caption('Risk today panel: SPY history not available right now.')
+# ── v6.4 (14 Nov 2026): Market detail fold (inventory: fold) ───────────────────────────────────────────
+with st.expander('Market detail: levels and changes, risk panel, SPY / QQQ tickets, leaders, avoid, rotation',
+                 expanded=_show_all):
+    try:
+        st.markdown(today_card.detail_html(
+            [f'VIX {_f("vix", "{:.2f}")} · SPX {_f("spx", "{:,.0f}")} · Zero γ {_f("zero_gamma", "{:,.0f}")}'
+             + ''.join(f' · {k} {v}' for k, v in _gl_header().items())] + _changes,
+            market_state.rotation_line(reg), _deep_line), unsafe_allow_html=True)
+    except Exception as _dt_err:
+        print(f'[market detail] {_dt_err}')
+    # ── Risk today panel (v5): pedal, today's state, effective bets, insurance cost, vol guide ──────────
+    #    v6.3.1 (13 Nov 2026): the snapshot is built above, with the Market context card (one SPY-vs-50-day number).
+    if True:   # v6.4: inside the Market detail fold
+        if _rp_snap is not None:
+            try:
+                st.markdown(risk_panel.panel_html(_rp_snap), unsafe_allow_html=True)
+            except Exception as _rp_err:
+                print(f'[risk panel] {_rp_err}')
+                _health('Risk today panel', _rp_err)
+                st.caption('Risk today panel could not be built this time.')
+        else:
+            st.caption('Risk today panel: SPY history not available right now.')
 
-# ── Allocation rule card (10 Nov 2026): SPY / QQQ rebound + breakout tickets ────────────────────────
-#    The SPY state also feeds the stock-entry guide line on the scanner (computed even when the card is hidden).
-#    (v6.3, 13 Nov 2026: the SPY state is now computed above, with the Market context card.)
-if st.session_state.get('show_alloc', True):
-    if _al_states:
-        st.markdown(allocation.card_html(_al_states), unsafe_allow_html=True)
-    else:
-        st.caption('Allocation rule card: SPY / QQQ history not available right now.')
+    # ── Allocation rule card (10 Nov 2026): SPY / QQQ rebound + breakout tickets ────────────────────────
+    #    The SPY state also feeds the stock-entry guide line on the scanner (computed even when the card is hidden).
+    #    (v6.3, 13 Nov 2026: the SPY state is now computed above, with the Market context card.)
+    if True:   # v6.4: inside the Market detail fold
+        if _al_states:
+            st.markdown(allocation.card_html(_al_states), unsafe_allow_html=True)
+        else:
+            st.caption('Allocation rule card: SPY / QQQ history not available right now.')
 
-try:
-    _ld_asof = str(_ind_df['as_of'].iloc[0]) if _ind_df is not None and 'as_of' in _ind_df.columns else None
-    st.markdown(market_state.leaders_html(_leaders, _mom_light, _hold_df, _ld_asof, _dropped), unsafe_allow_html=True)
-except Exception as _ld_err:
-    print(f'[leaders] {_ld_err}')
-    _health('Leaders list', _ld_err)
+    try:
+        _ld_asof = str(_ind_df['as_of'].iloc[0]) if _ind_df is not None and 'as_of' in _ind_df.columns else None
+        st.markdown(market_state.leaders_html(_leaders, _mom_light, _hold_df, _ld_asof, _dropped), unsafe_allow_html=True)
+    except Exception as _ld_err:
+        print(f'[leaders] {_ld_err}')
+        _health('Leaders list', _ld_err)
 
-try:
-    st.markdown(market_state.avoid_html(rs_labels.laggards_shortlist(_ind_df), _hold_df), unsafe_allow_html=True)
-except Exception as _av_err:
-    print(f'[avoid] {_av_err}')
-    _health('Avoid list', _av_err)
+    try:
+        st.markdown(market_state.avoid_html(rs_labels.laggards_shortlist(_ind_df), _hold_df), unsafe_allow_html=True)
+    except Exception as _av_err:
+        print(f'[avoid] {_av_err}')
+        _health('Avoid list', _av_err)
 
 
-# ── Sector rotation at a glance (rotation_view.py) ─────────────────────────────
-try:
-    _rot_pts = rotation_view.rotation_points(load_sector_data(), SECTOR_MAP)
-    if len(_rot_pts):
-        _rot_ind, _ = load_industry_data()
-        _rot_asof = str(_rot_ind['as_of'].iloc[0]) if _rot_ind is not None and 'as_of' in _rot_ind.columns else None
-        st.markdown('<div class="section-header" style="margin-top:6px;">Sector rotation — relative strength vs SPY</div>',
-                    unsafe_allow_html=True)
-        _rot_h_lbl = st.radio('Map horizon', ['6M vs 3M (standard)', '3M vs 1M (short-term)'], index=0,
-                              horizontal=True, key='rot_horizon', label_visibility='collapsed')
-        _rot_h = 'short' if _rot_h_lbl.startswith('3M') else 'standard'
-        _rot_l, _rot_r = st.columns([1.35, 1], gap='large')
-        with _rot_l:
-            st.plotly_chart(rotation_view.rotation_figure(_rot_pts, horizon=_rot_h), use_container_width=True,
-                            config={'displayModeBar': False})
-        with _rot_r:
-            st.markdown(rotation_view.rotation_summary_html(_rot_pts, _rot_ind, _rot_asof, horizon=_rot_h),
+    # ── Sector rotation at a glance (rotation_view.py) ─────────────────────────────
+    try:
+        _rot_pts = rotation_view.rotation_points(load_sector_data(), SECTOR_MAP)
+        if len(_rot_pts):
+            _rot_ind, _ = load_industry_data()
+            _rot_asof = str(_rot_ind['as_of'].iloc[0]) if _rot_ind is not None and 'as_of' in _rot_ind.columns else None
+            st.markdown('<div class="section-header" style="margin-top:6px;">Sector rotation — relative strength vs SPY</div>',
                         unsafe_allow_html=True)
-except Exception as _rot_err:
-    print(f'[rotation] {_rot_err}')
-    _health('Sector rotation', _rot_err)
+            _rot_h_lbl = st.radio('Map horizon', ['6M vs 3M (standard)', '3M vs 1M (short-term)'], index=0,
+                                  horizontal=True, key='rot_horizon', label_visibility='collapsed')
+            _rot_h = 'short' if _rot_h_lbl.startswith('3M') else 'standard'
+            _rot_l, _rot_r = st.columns([1.35, 1], gap='large')
+            with _rot_l:
+                st.plotly_chart(rotation_view.rotation_figure(_rot_pts, horizon=_rot_h), use_container_width=True,
+                                config={'displayModeBar': False})
+            with _rot_r:
+                st.markdown(rotation_view.rotation_summary_html(_rot_pts, _rot_ind, _rot_asof, horizon=_rot_h),
+                            unsafe_allow_html=True)
+    except Exception as _rot_err:
+        print(f'[rotation] {_rot_err}')
+        _health('Sector rotation', _rot_err)
 
 st.divider()
 
@@ -1680,8 +1691,9 @@ if _scan_df is not None and len(_scan_df) > 0:
     _cold_idx = _heat.where(_fs).dropna().sort_values(ascending=True).index[:50]
 
     _SCANS = {
-        'L_all': ('All', int(_m_long.sum()), 'long',
-                  'Every stock on the momentum list (held RS +1 or higher, above the 200-day, 50 > 200). Hottest first.'),
+        'L_all': ('Momentum list', int(_m_long.sum()), 'long',
+                  'Every stock on the momentum list (held RS +1 or higher, above the 200-day, 50 > 200). Highest RS rating '
+                  'first (v6.4: replaces All and Hot 50; the heat score had no return edge).'),
         'S_all': ('All', int(_m_short.sum()), 'short',
                   'Every stock on the short list (held RS −1 or lower, below the 200-day, 50 < 200). Coldest first.'),
         'L_bases': ('Bases', int(_q_lb.sum()), 'long',
@@ -1738,11 +1750,12 @@ if _scan_df is not None and len(_scan_df) > 0:
                    'heat alone is not a short signal: the coldest names did not lag the universe. Descriptive.'),
     }
     # 8 Nov 2026: Deep rip (short mirror lost money, Tested) and Cold 50 (coldest names did not lag) removed
-    _LONG_K, _SHORT_K = ['L_all', 'L_bases', 'L_bo', 'L_pb', 'L_dip', 'L_hot'], ['S_all', 'S_bases', 'S_bd', 'S_rally']
-    for _k_rm in ('S_dip', 'S_cold'):
+    # v6.4 (14 Nov 2026): long scans in order of the evidence; Hot 50 merged into the momentum list; shorts folded
+    _LONG_K, _SHORT_K = ['L_dip', 'L_pb', 'L_bases', 'L_bo', 'L_all'], ['S_all', 'S_bases', 'S_bd', 'S_rally']
+    for _k_rm in ('S_dip', 'S_cold', 'L_hot'):
         _SCANS.pop(_k_rm, None)
     if st.session_state.get('ms_scan') not in _SCANS:
-        st.session_state['ms_scan'] = 'L_all'
+        st.session_state['ms_scan'] = 'L_dip'
     _fmt_scan = lambda k: _SCANS[k][0] if k in ('L_hot', 'S_cold') else f'{_SCANS[k][0]}  {_SCANS[k][1]}'
 
     def _pick(side):
@@ -1757,14 +1770,16 @@ if _scan_df is not None and len(_scan_df) > 0:
     _cur = st.session_state['ms_scan']
     st.session_state['ms_pick_long'] = _cur if _cur in _LONG_K else None
     st.session_state['ms_pick_short'] = _cur if _cur in _SHORT_K else None
-    _c1, _c2, _c3, _c5 = st.columns([1.8, 1.8, 1.0, 0.8])
+    _c1, _c2, _c5 = st.columns([2.4, 1.4, 0.9])
+    _c3 = st.expander('More filters: squeeze, base faults, correction, depth', expanded=_show_all)   # v6.4
     if hasattr(st, 'pills'):
         with _c1:
             st.pills('Long  ·  momentum list', _LONG_K, format_func=_fmt_scan, selection_mode='single',
                      key='ms_pick_long', on_change=_pick, args=('long',))
         with _c2:
-            st.pills('Short  ·  short list', _SHORT_K, format_func=_fmt_scan, selection_mode='single',
-                     key='ms_pick_short', on_change=_pick, args=('short',))
+            with st.expander('Short scans (untested)', expanded=(_cur in _SHORT_K) or _show_all):   # v6.4: folded
+                st.pills('Short  ·  short list', _SHORT_K, format_func=_fmt_scan, selection_mode='single',
+                         key='ms_pick_short', on_change=_pick, args=('short',))
     else:                                               # older Streamlit
         with _c1:
             st.session_state['ms_scan'] = st.radio('Scan', _LONG_K + _SHORT_K, format_func=lambda k: (
@@ -1780,6 +1795,8 @@ if _scan_df is not None and len(_scan_df) > 0:
     with _c5:
         st.markdown('<div style="height:1.75rem;"></div>', unsafe_allow_html=True)
         _no_earn = st.checkbox('Hide earnings ≤ 7 days', value=False, key='ms_earn')
+        st.toggle('More columns', value=False, key='ms_morecols',
+                  help='Default: 12 columns. On: all 21 (sector, close, RS label, RS 3M / 1M, momentum, 5-day, Growth, EPS).')
     if _scan in ('L_bases', 'S_bases', 'L_bo', 'S_bd'):   # bases v3 (8 Nov 2026): base quality filters
         _b0, _b1, _b2, _b3 = st.columns([1.2, 1.0, 1.3, 1.5])
         with _b0:
@@ -1789,21 +1806,20 @@ if _scan_df is not None and len(_scan_df) > 0:
                               'ascending base, flat base / tight area (base-on-base when it sits on the prior base, cup '
                               'with handle when it is the handle of an earlier cup), cup still forming (no handle yet), IPO base.')
         if _scan in ('L_bases', 'L_bo'):
-            with _b1:
+            with _c3:
                 st.markdown('<div style="height:1.75rem;"></div>', unsafe_allow_html=True)
                 st.checkbox('Hide faulty bases', value=False, key='ms_bnofault',
                             help='Faults: wedging handle, V / straight up from the low, wide and loose, left side > 13 '
                                  'weeks, 3rd+ stage, light-volume breakout, distribution, deeper than 2.5× the market. '
                                  'Descriptive, untested.')
-            with _b2:
-                st.markdown('<div style="height:1.75rem;"></div>', unsafe_allow_html=True)
+            with _c3:
                 st.checkbox('Base formed in a market correction', value=False, key='ms_bcorr',
                             help='SPY fell 8% or more (from its high inside the window) while the base formed. Most sound '
                                  'bases in the model book formed during market corrections.')
     if _scan in ('L_dip', 'S_dip'):                   # 7 Nov 2026 (c): settings of the Deep dip / rip scans
         _d0, _d1, _d3 = st.columns([1.2, 1.0, 2.2])
         if _scan == 'L_dip':
-            with _d1:
+            with _c3:
                 st.selectbox('Depth of the sell-off', _DIP_DEPTH, index=0, key='ms_dipdepth',
                              help='How far the close is below its own 50-day SMA, in ATR(14) (the downside of the '
                                   'extension). In the 13 Deep dip ETFs (2005-26), below −3 ATR the next 20 sessions '
@@ -1840,7 +1856,8 @@ if _scan_df is not None and len(_scan_df) > 0:
         if _cxh:
             st.markdown(f'<div style="font-size:0.76rem;color:#f3ece2;border-left:3px solid {_cxh[0]};padding:2px 8px;'
                         f'margin:-2px 0 8px 0;background:#0d0d0d;">{_html_mod.escape(_cxh[1])} '
-                        f'<span style="color:#6e675f;">Provisional (studies S1 / S2, in-sample); see the Market context card.'
+                        f'Setups mark where the trade is wrong, not an edge: the state decides the outcome. '
+                        f'<span style="color:#6e675f;">Survivorship-free S1 / S2 / S3; see the Today card.'
                         f'</span></div>', unsafe_allow_html=True)
 
     _mask = {'L_all': _m_long, 'S_all': _m_short, 'L_bases': _q_lb, 'L_pb': _q_lp, 'S_bases': _q_sb, 'S_rally': _q_sr,
@@ -1880,6 +1897,9 @@ if _scan_df is not None and len(_scan_df) > 0:
         _rk = pd.to_numeric(_v['sb_state'].map({'Near breakdown': 2, 'In base': 1}), errors='coerce').fillna(0)
         _v = _v.assign(_k=_rk * 1000 - pd.to_numeric(_v['sb_dist_pct'], errors='coerce').fillna(9) * 100) \
                .sort_values('_k', ascending=False)
+    elif _scan == 'L_all':                              # v6.4: highest RS rating first
+        _v = _v.assign(_k=pd.to_numeric(_v['rs_rating'], errors='coerce') if 'rs_rating' in _v.columns else _hv) \
+               .sort_values('_k', ascending=False, na_position='last')
     elif _scan in ('S_rally', 'S_cold', 'S_all'):
         _v = _v.assign(_k=_hv).sort_values('_k', ascending=True, na_position='last')
     else:
@@ -1889,33 +1909,35 @@ if _scan_df is not None and len(_scan_df) > 0:
         st.info('No stocks match the selected filters.')
     else:
         _shown = _v.head(600).assign(_chase=st.session_state.get('_ctx_chase', False))   # v6.3: breakout 'chasing' tag
+        _cols = None if (st.session_state.get('ms_morecols') or _show_all) else scan_view.DEFAULT_COLS
         _scan_table_and_chart(scan_view.build_html(_shown, _sec_label, _sec_score, _leader_hold, YF_TO_SECTOR,
-                                                   clickable=True),
+                                                   clickable=True, cols=_cols),
                               list(_shown['ticker'].astype(str)), min(760, 64 + 32 * len(_shown)))
-        st.markdown(
-            '<div style="font-size:0.70rem;color:#9b958f;line-height:1.55;">'
-            f'{len(_v)} stocks{" (first 600 shown)" if len(_v) > 600 else ""}. Click a header to sort. '
-            'Momentum list = held RS score +1 or higher (beats SPY on 1Y / 6M / 3M, label held 3 sessions) AND close above the '
-            '200-day SMA AND 50-day above 200-day. Growth = STRICT ≥ 25% EPS and revenue growth, RELAXED ≥ 20% / 15% '
-            '(fundamentals are fetched only for stocks above their 50-day SMA, within 20% of the 52-week high). '
-            'Ext vs SMA50 = (close − SMA50) / ATR(14): Deep below ≤ −3, Below ≤ −1, Just below ≤ 0, Near ≤ +0.5, '
-            'Above ≤ +5, Far above beyond (Above is a trend state, not a reversal warning: the next month\'s left tail was '
-            'no larger than near the SMA in stocks and ETFs; what changes is the upside, narrower by about 4–5 pp, and the '
-            'stop under the SMA50, which is far away: size down; audit v2, 8 Nov 2026). '
-            'Momentum = 50-day SMA slope over 5 sessions: Weak ≤ −0.5%, Falling ≤ 0, '
-            'Building ≤ +0.5 (Fading if it came down from above +0.5 in the last 11 sessions), Persistent above. '
-            '5-day: dip ≤ −2%, pullback ≤ −3%, sharp ≤ −4%. Setup: PB 20d / 50d = pullback to a rising SMA (long), '
-            'Rally 20d / 50d = rally to a falling SMA (short). Base / pivot: pattern, weeks, distance to the pivot in '
-            'ATR(14) (near = within 1.5 ATR), pivot, quality Q and faults; on Breakouts: days since, breakout volume, '
-            'close location of the breakout day, ATR above the pivot (orange beyond 1.5 = extended) and the next '
-            'overhead pivot high. On the short scans = bear base (↓) and the breakdown level. Earnings in orange = within 7 days. '
-            'Squeeze = Bollinger inside Keltner on daily bars: Bollinger (20, 2.0) inside Keltner (SMA 20 ± k × average true range 20), '
-            'High k = 1.0, Mid 1.5, Low 2.0; days = consecutive sessions in a squeeze; Fired ↑/↓ = out of the squeeze today, '
-            'by momentum sign; the square is the momentum colour (aqua &gt; 0 rising, blue &gt; 0 falling, red &lt; 0 falling, yellow &lt; 0 rising). '
-            + market_state.ev('Descriptive') + ' The momentum rules come from the industry study and the literature; the '
-            'Ext·Mom table under the chart shows the selected stock\'s own history (up to 10 years) and a pooled stock panel, '
-            'like the TradingView indicator. Where to start the chart work, not a buy signal.'
-            '</div>', unsafe_allow_html=True)
+        with st.expander('How to read the columns'):   # v6.4: folded
+            st.markdown(
+                '<div style="font-size:0.70rem;color:#9b958f;line-height:1.55;">'
+                f'{len(_v)} stocks{" (first 600 shown)" if len(_v) > 600 else ""}. Click a header to sort. '
+                'Momentum list = held RS score +1 or higher (beats SPY on 1Y / 6M / 3M, label held 3 sessions) AND close above the '
+                '200-day SMA AND 50-day above 200-day. Growth = STRICT ≥ 25% EPS and revenue growth, RELAXED ≥ 20% / 15% '
+                '(fundamentals are fetched only for stocks above their 50-day SMA, within 20% of the 52-week high). '
+                'Ext vs SMA50 = (close − SMA50) / ATR(14): Deep below ≤ −3, Below ≤ −1, Just below ≤ 0, Near ≤ +0.5, '
+                'Above ≤ +5, Far above beyond (Above is a trend state, not a reversal warning: the next month\'s left tail was '
+                'no larger than near the SMA in stocks and ETFs; what changes is the upside, narrower by about 4–5 pp, and the '
+                'stop under the SMA50, which is far away: size down; audit v2, 8 Nov 2026). '
+                'Momentum = 50-day SMA slope over 5 sessions: Weak ≤ −0.5%, Falling ≤ 0, '
+                'Building ≤ +0.5 (Fading if it came down from above +0.5 in the last 11 sessions), Persistent above. '
+                '5-day: dip ≤ −2%, pullback ≤ −3%, sharp ≤ −4%. Setup: PB 20d / 50d = pullback to a rising SMA (long), '
+                'Rally 20d / 50d = rally to a falling SMA (short). Base / pivot: pattern, weeks, distance to the pivot in '
+                'ATR(14) (near = within 1.5 ATR), pivot, quality Q and faults; on Breakouts: days since, breakout volume, '
+                'close location of the breakout day, ATR above the pivot (orange beyond 1.5 = extended) and the next '
+                'overhead pivot high. On the short scans = bear base (↓) and the breakdown level. Earnings in orange = within 7 days. '
+                'Squeeze = Bollinger inside Keltner on daily bars: Bollinger (20, 2.0) inside Keltner (SMA 20 ± k × average true range 20), '
+                'High k = 1.0, Mid 1.5, Low 2.0; days = consecutive sessions in a squeeze; Fired ↑/↓ = out of the squeeze today, '
+                'by momentum sign; the square is the momentum colour (aqua &gt; 0 rising, blue &gt; 0 falling, red &lt; 0 falling, yellow &lt; 0 rising). '
+                + market_state.ev('Descriptive') + ' The momentum rules come from the industry study and the literature; the '
+                'Ext·Mom table under the chart shows the selected stock\'s own history (up to 10 years) and a pooled stock panel, '
+                'like the TradingView indicator. Where to start the chart work, not a buy signal.'
+                '</div>', unsafe_allow_html=True)
     pass   # 8 Nov 2026: industry-groups expander removed (duplicate of the sector/industry table); _industry_groups_panel kept
 else:
     st.info('No scanner results yet. The scanner runs nightly at 10 PM UTC (Mon–Fri) via GitHub Actions.')
@@ -1927,82 +1949,83 @@ st.divider()
 # SECTOR PERFORMANCE & RELATIVE STRENGTH
 # ══════════════════════════════════════════════════════════════════════════════
 st.divider()
-st.markdown('<div class="section-header">Sectors and industries — relative strength vs SPY</div>',
-            unsafe_allow_html=True)
+with st.expander('Sectors and industries: relative strength vs SPY', expanded=_show_all):   # v6.4: folded
+    st.markdown('<div class="section-header">Sectors and industries — relative strength vs SPY</div>',
+                unsafe_allow_html=True)
 
 
-# Debug: show the actual as-of date of the fetched data, and flag any ticker
-# whose last date lags behind the most recent one (partial-fetch staleness).
-if _sec_closes is not None and len(_sec_closes) > 0:
-    _last_dates = {c: _sec_closes[c].dropna().index.max() for c in _sec_closes.columns}
-    _max_date   = max(_last_dates.values())
-    _stale      = {c: d for c, d in _last_dates.items() if d < _max_date}
-    _staleness_msg = f'Sector data as of **{_max_date.strftime("%b %d, %Y")}**'
-    if _stale:
-        _lag_list = ', '.join(f'{c} ({d.strftime("%b %d")})' for c, d in _stale.items())
-        _staleness_msg += f'  \n:warning: Lagging tickers: {_lag_list}'
-    st.caption(_staleness_msg)
-else:
-    st.caption(':warning: Sector data fetch returned nothing.')
+    # Debug: show the actual as-of date of the fetched data, and flag any ticker
+    # whose last date lags behind the most recent one (partial-fetch staleness).
+    if _sec_closes is not None and len(_sec_closes) > 0:
+        _last_dates = {c: _sec_closes[c].dropna().index.max() for c in _sec_closes.columns}
+        _max_date   = max(_last_dates.values())
+        _stale      = {c: d for c, d in _last_dates.items() if d < _max_date}
+        _staleness_msg = f'Sector data as of **{_max_date.strftime("%b %d, %Y")}**'
+        if _stale:
+            _lag_list = ', '.join(f'{c} ({d.strftime("%b %d")})' for c, d in _stale.items())
+            _staleness_msg += f'  \n:warning: Lagging tickers: {_lag_list}'
+        st.caption(_staleness_msg)
+    else:
+        st.caption(':warning: Sector data fetch returned nothing.')
 
-if _sec_df is not None and len(_sec_df) > 0:
-    def _pct(v, decimals=1):
-        if v is None or (isinstance(v, float) and np.isnan(v)): return '—'
-        sign = '+' if v > 0 else ''
-        return f'{sign}{v * 100:.{decimals}f}%'
+    if _sec_df is not None and len(_sec_df) > 0:
+        def _pct(v, decimals=1):
+            if v is None or (isinstance(v, float) and np.isnan(v)): return '—'
+            sign = '+' if v > 0 else ''
+            return f'{sign}{v * 100:.{decimals}f}%'
 
-    def _cell_color(v):
-        if v is None or (isinstance(v, float) and np.isnan(v)): return '#9b958f'
-        return '#85cac5' if v > 0 else '#f4a062' if v < 0 else '#9b958f'
+        def _cell_color(v):
+            if v is None or (isinstance(v, float) and np.isnan(v)): return '#9b958f'
+            return '#85cac5' if v > 0 else '#f4a062' if v < 0 else '#9b958f'
 
-    def _score_color(v):
-        if v >= 1.0:  return '#85cac5'
-        if v >= 0.5:  return '#649995'
-        if v <= -1.0: return '#f4a062'
-        if v <= -0.5: return '#b9805a'
-        return '#9b958f'
+        def _score_color(v):
+            if v >= 1.0:  return '#85cac5'
+            if v >= 0.5:  return '#649995'
+            if v <= -1.0: return '#f4a062'
+            if v <= -0.5: return '#b9805a'
+            return '#9b958f'
 
-    TREND_CFG = {
-        'IMPROVING': ('↑ IMPROVING',  '#85cac5', 'rgba(133,202,197,0.18)'),
-        'FADING':    ('↓ FADING',     '#f4a062', 'rgba(244,160,98,0.18)'),
-        'STABLE+':  ('→ STABLE',      '#649995', 'rgba(0,0,0,0)'),
-        'STABLE-':  ('→ STABLE',      '#b9805a', 'rgba(0,0,0,0)'),
-        'NEUTRAL':  ('— NEUTRAL',     '#9b958f', 'rgba(0,0,0,0)'),
-    }
+        TREND_CFG = {
+            'IMPROVING': ('↑ IMPROVING',  '#85cac5', 'rgba(133,202,197,0.18)'),
+            'FADING':    ('↓ FADING',     '#f4a062', 'rgba(244,160,98,0.18)'),
+            'STABLE+':  ('→ STABLE',      '#649995', 'rgba(0,0,0,0)'),
+            'STABLE-':  ('→ STABLE',      '#b9805a', 'rgba(0,0,0,0)'),
+            'NEUTRAL':  ('— NEUTRAL',     '#9b958f', 'rgba(0,0,0,0)'),
+        }
 
-    # ── Sort controls ──────────────────────────────────────────────────────────
-    SORT_OPTIONS = {
-        'Composite Score': 'Score',
-        'Days in label': 'DaysInLabel',
-        'RS 1M':  'RS 1M',
-        'RS 3M':  'RS 3M',
-        'RS 6M':  'RS 6M',
-        'RS 1Y':  'RS 1Y',
-        '1M Return': '1M',
-        '3M Return': '3M',
-        '6M Return': '6M',
-        '1Y Return': '1Y',
-        'YTD Return': 'YTD',
-    }
-    sc1, sc2 = st.columns([2, 1])
-    with sc1:
-        sort_label = st.selectbox('Sort by', list(SORT_OPTIONS.keys()), index=0, key='sector_sort', label_visibility='collapsed')
-    with sc2:
-        sort_asc = st.checkbox('Ascending', value=False, key='sector_asc')
-    sort_col = SORT_OPTIONS[sort_label]
-    _sec_df  = _sec_df.sort_values(sort_col, ascending=sort_asc).reset_index(drop=True)
+        # ── Sort controls ──────────────────────────────────────────────────────────
+        SORT_OPTIONS = {
+            'Composite Score': 'Score',
+            'Days in label': 'DaysInLabel',
+            'RS 1M':  'RS 1M',
+            'RS 3M':  'RS 3M',
+            'RS 6M':  'RS 6M',
+            'RS 1Y':  'RS 1Y',
+            '1M Return': '1M',
+            '3M Return': '3M',
+            '6M Return': '6M',
+            '1Y Return': '1Y',
+            'YTD Return': 'YTD',
+        }
+        sc1, sc2 = st.columns([2, 1])
+        with sc1:
+            sort_label = st.selectbox('Sort by', list(SORT_OPTIONS.keys()), index=0, key='sector_sort', label_visibility='collapsed')
+        with sc2:
+            sort_asc = st.checkbox('Ascending', value=False, key='sector_asc')
+        sort_col = SORT_OPTIONS[sort_label]
+        _sec_df  = _sec_df.sort_values(sort_col, ascending=sort_asc).reset_index(drop=True)
 
-    # ── Sector -> industry -> top-10-holdings drill-down (sector_view.py) ──────
-    _ind_df, _hold_df = load_industry_data()
-    _ind_as_of = None
-    if _ind_df is not None and 'as_of' in _ind_df.columns and len(_ind_df):
-        _ind_as_of = str(_ind_df['as_of'].iloc[0])
-    _drill_html = sector_view.build_drilldown_html(
-        _sec_df, _ind_df, _hold_df, sort_col, sort_asc, ind_as_of=_ind_as_of)
-    # Native <details> rows rendered in the page itself (no iframe, so no height limit).
-    st.markdown(_drill_html, unsafe_allow_html=True)
-else:
-    st.info('Sector data temporarily unavailable.')
+        # ── Sector -> industry -> top-10-holdings drill-down (sector_view.py) ──────
+        _ind_df, _hold_df = load_industry_data()
+        _ind_as_of = None
+        if _ind_df is not None and 'as_of' in _ind_df.columns and len(_ind_df):
+            _ind_as_of = str(_ind_df['as_of'].iloc[0])
+        _drill_html = sector_view.build_drilldown_html(
+            _sec_df, _ind_df, _hold_df, sort_col, sort_asc, ind_as_of=_ind_as_of)
+        # Native <details> rows rendered in the page itself (no iframe, so no height limit).
+        st.markdown(_drill_html, unsafe_allow_html=True)
+    else:
+        st.info('Sector data temporarily unavailable.')
 
 
 # Risk dial expander removed 8 Nov 2026: it repeated the band odds of the decision strip and the Risk today panel.
@@ -2010,616 +2033,617 @@ else:
 # ══════════════════════════════════════════════════════════════════════════════
 # WHY THE MODEL SAYS THIS (diagnostics, in tabs)
 # ══════════════════════════════════════════════════════════════════════════════
-st.markdown('<div class="section-header" style="margin-top:10px;">Why the model says this</div>', unsafe_allow_html=True)
-_t_comp, _t_hist, _t_ch, _t_pc = st.tabs(['Score components & states', 'MRS, SPX and VIX history', 'Component history', 'Put/call context'])
-with _t_comp:
-    # ══════════════════════════════════════════════════════════════════════════════
-    # TWO-COLUMN LAYOUT
-    # ══════════════════════════════════════════════════════════════════════════════
-    left, right = st.columns([1.4, 1], gap='large')
+if st.toggle('Why the model says this: score components, history, put/call', value=_show_all):   # v6.4: folded
+    st.markdown('<div class="section-header" style="margin-top:10px;">Why the model says this</div>', unsafe_allow_html=True)
+    _t_comp, _t_hist, _t_ch, _t_pc = st.tabs(['Score components & states', 'MRS, SPX and VIX history', 'Component history', 'Put/call context'])
+    with _t_comp:
+        # ══════════════════════════════════════════════════════════════════════════════
+        # TWO-COLUMN LAYOUT
+        # ══════════════════════════════════════════════════════════════════════════════
+        left, right = st.columns([1.4, 1], gap='large')
 
-    with left:
-        if _preview_active:
-            st.markdown(
-                '<div style="background:rgba(161,98,7,0.15);border:1px solid #e3b48e;border-radius:6px;'
-                'padding:7px 12px;margin-bottom:8px;font-size:0.78rem;color:#e3b48e;">'
-                '📥 Showing today\'s submitted inputs — CSV update pending (~90 sec, then Refresh Data)'
-                '</div>',
-                unsafe_allow_html=True
-            )
-        st.markdown('<div class="section-header">Component Breakdown</div>', unsafe_allow_html=True)
-        COMP_DEF = [
-            ('VIX',        'vix_phi',  'vix_score',  'vix_state',   'vix',        'vix'),
-            ('Extension',  'ext_phi',  'ext_score',  'ext_state',   'ext_raw',    'ext'),
-            ('Momentum',   'mom_phi',  'mom_score',  'mom_state',   'mom_raw',    'mom'),
-            ('ADL Trend',  'adl_phi',  'adl_score',  'adl_state',   'adl_level',  'adl'),
-            ('B20%',       'b20_phi',  'b20_score',  'b20_state',   'b20_pct',    'b20'),
-            ('PC Ratio',   None,       'pc_score',   'pc_state',    'pc_sma10',   'pc'),
-            ('SKEW',       'skew_phi', 'skew_score', 'skew_state',  'skew',       'skew'),
-            ('Zero Gamma', None,       'gamma_score','gamma_state', 'zero_gamma', 'gamma'),
-            ('Volume',     None,       'vol_score',  'vol_state',   'volume',     'vol'),
-        ]
+        with left:
+            if _preview_active:
+                st.markdown(
+                    '<div style="background:rgba(161,98,7,0.15);border:1px solid #e3b48e;border-radius:6px;'
+                    'padding:7px 12px;margin-bottom:8px;font-size:0.78rem;color:#e3b48e;">'
+                    '📥 Showing today\'s submitted inputs — CSV update pending (~90 sec, then Refresh Data)'
+                    '</div>',
+                    unsafe_allow_html=True
+                )
+            st.markdown('<div class="section-header">Component Breakdown</div>', unsafe_allow_html=True)
+            COMP_DEF = [
+                ('VIX',        'vix_phi',  'vix_score',  'vix_state',   'vix',        'vix'),
+                ('Extension',  'ext_phi',  'ext_score',  'ext_state',   'ext_raw',    'ext'),
+                ('Momentum',   'mom_phi',  'mom_score',  'mom_state',   'mom_raw',    'mom'),
+                ('ADL Trend',  'adl_phi',  'adl_score',  'adl_state',   'adl_level',  'adl'),
+                ('B20%',       'b20_phi',  'b20_score',  'b20_state',   'b20_pct',    'b20'),
+                ('PC Ratio',   None,       'pc_score',   'pc_state',    'pc_sma10',   'pc'),
+                ('SKEW',       'skew_phi', 'skew_score', 'skew_state',  'skew',       'skew'),
+                ('Zero Gamma', None,       'gamma_score','gamma_state', 'zero_gamma', 'gamma'),
+                ('Volume',     None,       'vol_score',  'vol_state',   'volume',     'vol'),
+            ]
 
-        # Compute volume vs 20d average for display
-        vol_vs_20d = '—'
-        if 'volume' in hist.columns:
-            vol_series = hist['volume'].astype(float)
-            vol_20d_avg = vol_series.rolling(20, min_periods=1).mean()
-            if len(vol_series) > 0 and len(vol_20d_avg) > 0:
-                last_vol = vol_series.iloc[-1]
-                last_avg = vol_20d_avg.iloc[-1]
-                if not np.isnan(last_vol) and not np.isnan(last_avg) and last_avg > 0:
-                    pct_diff = (last_vol / last_avg - 1) * 100
-                    vol_vs_20d = f'vs 20d: {pct_diff:+.0f}%'
+            # Compute volume vs 20d average for display
+            vol_vs_20d = '—'
+            if 'volume' in hist.columns:
+                vol_series = hist['volume'].astype(float)
+                vol_20d_avg = vol_series.rolling(20, min_periods=1).mean()
+                if len(vol_series) > 0 and len(vol_20d_avg) > 0:
+                    last_vol = vol_series.iloc[-1]
+                    last_avg = vol_20d_avg.iloc[-1]
+                    if not np.isnan(last_vol) and not np.isnan(last_avg) and last_avg > 0:
+                        pct_diff = (last_vol / last_avg - 1) * 100
+                        vol_vs_20d = f'vs 20d: {pct_diff:+.0f}%'
 
-        rows = []
-        _contrib_total = 0.0
-        for name, phi_key, sc_key, st_key, raw_key, w_key in COMP_DEF:
-            phi_v = last.get(phi_key, np.nan) if phi_key else np.nan
-            sc_v  = last.get(sc_key, np.nan)
-            st_v  = last.get(st_key, '—') or '—'
-            raw_v = last.get(raw_key, np.nan)
-            try: phi_f = f'{float(phi_v):.3f}' if not np.isnan(float(phi_v)) else '—'
-            except: phi_f = '—'
-            _w = pipeline.COMPONENT_WEIGHTS[w_key]
-            try:
-                sc_float = float(sc_v)
-                sc_f = f'{sc_float:+.2f}' if not np.isnan(sc_float) else '—'
-                ct_f = f'{sc_float * _w:+.2f}' if not np.isnan(sc_float) else '—'
-                if not np.isnan(sc_float):
-                    _contrib_total += sc_float * _w
-            except:
-                sc_f = '—'
-                ct_f = '—'
-            try:
-                raw_float = float(raw_v)
-                if np.isnan(raw_float):
-                    raw_f = '—'
-                elif name == 'Volume':
-                    raw_f = f'{raw_float/1e6:.1f}M'  # Format volume in millions
-                elif name in ('Extension', 'Momentum'):
-                    raw_f = f'{raw_float*100:+.2f}%'  # % above SMA50 / 5-day % change of SMA50
-                else:
-                    raw_f = f'{raw_float:,.2f}'
-            except:
-                raw_f = '—'
-            # Fix state display for NaN
-            if st_v == 'nan' or (isinstance(st_v, float) and np.isnan(st_v)):
-                st_v = '—'
-            # Special handling for Volume state - show vs 20d avg
-            if name == 'Volume':
-                st_v = f'{st_v} · {vol_vs_20d} · info only'
-            rows.append({'Component': name, 'Raw Value': raw_f,
-                         'Phi': phi_f, 'State': str(st_v), 'Score': sc_f,
-                         'Weight': f'×{_w:.2f}', 'Contribution': ct_f})
-        rows.append({'Component': 'MRS composite', 'Raw Value': '', 'Phi': '', 'State': reg,
-                     'Score': '', 'Weight': '', 'Contribution': f'{_contrib_total:+.2f}'})
-        df_comp = pd.DataFrame(rows)
-        def color_score(val):
-            try:
-                v = float(val)
-                if v > 0: return 'color: #85cac5; font-weight: 700'
-                if v < 0: return 'color: #f4a062; font-weight: 700'
-                return 'color: #9b958f'
-            except:
-                return ''
-        styled = df_comp.style.map(color_score, subset=['Score', 'Contribution'])
-        st.dataframe(styled, use_container_width=True, hide_index=True)
-        st.markdown("""
-        <div style="font-size:0.72rem;color:#9b958f;margin-top:4px;">
-        Phi = percentile rank over rolling 756-session window (3 years).
-        Score = component state score (positive = calmer, negative = wider swings) ·
-        Weight = MRS v4.0 weight: VIX is the anchor (scored continuously from its Phi and
-        carrying the scale offset), Extension / Momentum / PC / SKEW / Breadth are an equal-weighted
-        context block, ADL and B20 share the Breadth weight, Volume is information only ·
-        Contribution = Score × Weight; contributions sum to the MRS composite (v8 study).
-        </div>
-        """, unsafe_allow_html=True)
-
-    with right:
-        st.markdown('<div class="section-header">VIX Lifecycle State</div>', unsafe_allow_html=True)
-        vix_phi   = last.get('vix_phi', np.nan)
-        trig_days = float(last.get('trigger_days', 0) or 0)
-        try: vix_phi_f = float(vix_phi)
-        except: vix_phi_f = np.nan
-
-        if not np.isnan(vix_phi_f) and vix_phi_f < 0.30:
-            vix_row_cls = 'safe-row'
-            vix_txt = (f'<span style="color:#85cac5">●</span> LOW VIX — VIX Phi = {vix_phi_f:.3f}. Calmest swings historically: large-move '
-                       f'rate about half the all-sessions rate (0.49x at 10 sessions, 2008–2026). '
-                       f'Calm bases can break — watch the context components.')
-        elif not np.isnan(vix_phi_f) and vix_phi_f > 0.70:
-            vix_row_cls = 'hazard-row'
-            vix_txt = (f'<span style="color:#f4a062">●</span> HIGH VIX — VIX Phi = {vix_phi_f:.3f}. Widest two-sided swings: large-move '
-                       f'rate 1.3–2x the all-sessions rate (High / Stress, 2008–2026). Both tails are wide.')
-        elif not np.isnan(vix_phi_f):
-            vix_row_cls = 'neutral-row'
-            vix_txt = f'<span style="color:#e3b48e">●</span> MID RANGE — VIX Phi = {vix_phi_f:.3f}. Swings near to slightly below average.'
-        else:
-            vix_row_cls = 'neutral-row'
-            vix_txt = '<span style="color:#a89f95">●</span> VIX Phi: no data'
-
-        st.markdown(f'<div class="{vix_row_cls}">{vix_txt}</div>', unsafe_allow_html=True)
-
-        if trig_days > 0:
-            days_left = int(7 - trig_days)
-            st.markdown(f'<div class="neutral-row"><span style="color:#a89f95">●</span> Compression exit — day {int(trig_days)} of 7 '
-                        f'({days_left}d left). Reference only: the earlier suppression effect did not '
-                        f'replicate in the v8 re-test (0.86x large-move rate, not significant).</div>',
-                        unsafe_allow_html=True)
-
-        st.markdown('<div class="section-header" style="margin-top:16px;">Zero Gamma Position</div>',
-                    unsafe_allow_html=True)
-        try:
-            spx_v = float(last.get('spx', np.nan))
-            zg_v  = float(last.get('zero_gamma', np.nan))
-            if not np.isnan(spx_v) and not np.isnan(zg_v) and zg_v > 0:
-                dist_pct = (spx_v - zg_v) / spx_v * 100
-                if dist_pct > 0.25:
-                    gcls = 'safe-row'
-                    gtxt = f'<span style="color:#85cac5">●</span> SPX {spx_v:,.0f} is {dist_pct:.1f}% ABOVE zero-gamma ({zg_v:,.0f}). Dealers long gamma — dampening environment.'
-                elif dist_pct > -0.25:
-                    gcls = 'neutral-row'
-                    gtxt = f'<span style="color:#e3b48e">●</span> SPX {spx_v:,.0f} is NEAR zero-gamma ({zg_v:,.0f}, {dist_pct:+.1f}%). Transition zone — regime could flip.'
-                else:
-                    gcls = 'hazard-row'
-                    gtxt = f'<span style="color:#f4a062">●</span> SPX {spx_v:,.0f} is {abs(dist_pct):.1f}% BELOW zero-gamma ({zg_v:,.0f}). Dealers short gamma — amplifying moves.'
-                st.markdown(f'<div class="{gcls}">{gtxt}</div>', unsafe_allow_html=True)
-            else:
-                zg_only = float(last.get('zero_gamma', np.nan))
-                if not np.isnan(zg_only) and zg_only > 0:
-                    st.markdown(f'<div class="neutral-row"><span style="color:#a89f95">●</span> Zero Gamma level: <b>{zg_only:,.0f}</b> — SPX close pending</div>', unsafe_allow_html=True)
-                else:
-                    st.markdown('<div class="neutral-row"><span style="color:#a89f95">●</span> Zero Gamma: no data today</div>', unsafe_allow_html=True)
-        except:
-            try:
-                zg_only = float(last.get('zero_gamma', np.nan))
-                if not np.isnan(zg_only) and zg_only > 0:
-                    st.markdown(f'<div class="neutral-row"><span style="color:#a89f95">●</span> Zero Gamma level: <b>{zg_only:,.0f}</b> — SPX close pending</div>', unsafe_allow_html=True)
-                else:
-                    st.markdown('<div class="neutral-row"><span style="color:#a89f95">●</span> Zero Gamma: no data today</div>', unsafe_allow_html=True)
-            except:
-                st.markdown('<div class="neutral-row"><span style="color:#a89f95">●</span> Zero Gamma: no data today</div>', unsafe_allow_html=True)
-
-        # ── Signal quality (8 Nov 2026: moved here from the decision strip; Recovery Signal removed, untested and
-        #    overlapping REBOUND WINDOW in the Risk today panel. See studies/_framework/MRS_Evidence_Audit_v2.md) ──
-        st.markdown('<div class="section-header" style="margin-top:16px;">Signal quality (breadth confirmation)</div>',
-                    unsafe_allow_html=True)
-        st.markdown(f'<div class="neutral-row"><span style="font-weight:700;color:{sq_col};">● {sq_lbl}</span><br>'
-                    f'<span style="font-size:0.82rem;color:#a89f95;">{_html_mod.escape(str(sq_desc))}</span><br>'
-                    '<span style="font-size:0.72rem;color:#6e675f;">Not tested: whether breadth confirmation changes the '
-                    'band\'s forward odds is an open study. Context only.</span></div>', unsafe_allow_html=True)
-
-with _t_hist:
-    # ══════════════════════════════════════════════════════════════════════════════
-    # CHARTS
-    # ══════════════════════════════════════════════════════════════════════════════
-    hist90  = hist.dropna(subset=['mrs_score']).tail(90).copy()
-    hist90['date'] = pd.to_datetime(hist90['date'])
-    x_min   = hist.tail(90)['date'].min()
-    x_max   = hist.tail(90)['date'].max()
-    x_range = [x_min, x_max]
-
-    VLINE_STYLE = dict(line_dash='dot', line_color='rgba(227,180,142,0.6)', line_width=1.5)
-    LAYOUT_BASE = dict(
-        template='plotly_dark+atn',
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        showlegend=False,
-        xaxis=dict(showgrid=False, tickformat='%b %d', tickfont_size=11, range=x_range),
-    )
-
-    # ── 1. 90-Day MRS History ─────────────────────────────────────────────────────
-    st.markdown('<div class="section-header">90-Day MRS History</div>', unsafe_allow_html=True)
-
-    fig = go.Figure()
-    band_defs = [
-        (1.5,  5.0,  'rgba(26,127,55,0.12)',  'RISK-ON'),
-        (0.5,  1.5,  'rgba(87,166,107,0.10)', 'MILD RISK-ON'),
-        (-0.5, 0.5,  'rgba(155,149,143,0.08)','NEUTRAL'),
-        (-1.5, -0.5, 'rgba(217,119,6,0.10)',  'MILD RISK-OFF'),
-        (-5.0, -1.5, 'rgba(185,28,28,0.12)',  'RISK-OFF'),
-    ]
-    _ylo = min(-4.5, float(hist90['mrs_score'].min()) - 0.5) if len(hist90) else -4.5
-    _yhi = max(4.5, float(hist90['mrs_score'].max()) + 0.5) if len(hist90) else 4.5
-    band_defs[0] = (1.5, 12.0, band_defs[0][2], band_defs[0][3])
-    band_defs[-1] = (-12.0, -1.5, band_defs[-1][2], band_defs[-1][3])
-    for y0, y1, fill, label in band_defs:
-        fig.add_hrect(y0=y0, y1=y1, fillcolor=fill, line_width=0)
-        fig.add_annotation(
-            x=1.01, xref='paper',
-            y=(max(y0, _ylo) + min(y1, _yhi)) / 2, yref='y',
-            text=label, showarrow=False,
-            font=dict(size=9, color='#9b958f'),
-            xanchor='left',
-        )
-
-    fig.add_trace(go.Scatter(
-        x=hist90['date'], y=hist90['mrs_score'],
-        mode='lines+markers', name='MRS',
-        line=dict(color='#e8dccb', width=2.5),
-        marker=dict(size=4, color='#e8dccb'),
-        hovertemplate='<b>%{x|%b %d}</b><br>MRS: %{y:+.2f}<extra></extra>',
-    ))
-    fig.add_hline(y=0, line_dash='dash', line_color='rgba(255,255,255,0.25)', line_width=1)
-    fig.add_shape(type='line', x0=last_dt_str, x1=last_dt_str, y0=_ylo, y1=_yhi,
-                  line=dict(dash='dot', color='rgba(227,180,142,0.6)', width=1.5))
-    fig.add_annotation(x=last_dt_str, y=_yhi - 0.3, text='Today', showarrow=False,
-                       font=dict(size=10, color='#e3b48e'), xanchor='left')
-    fig.update_layout(**LAYOUT_BASE,
-        margin=dict(l=10, r=130, t=10, b=30), height=300,
-        yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.06)',
-                   tickformat='+.1f', range=[_ylo, _yhi], tickfont_size=11),
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-    # ── 2. SPX Close + Zero Gamma line ────────────────────────────────────────────
-    st.markdown('<div class="section-header" style="margin-top:0; margin-bottom:4px;">SPX Close</div>',
-                unsafe_allow_html=True)
-
-    hist90_spx       = hist.tail(90).copy()
-    hist90_spx_valid = hist90_spx.dropna(subset=['spx'])
-
-    if len(hist90_spx_valid) > 0:
-        spx_min = hist90_spx_valid['spx'].min()
-        spx_max = hist90_spx_valid['spx'].max()
-        spx_pad = (spx_max - spx_min) * 0.10
-        zg_val = np.nan
-        try:
-            zg_val = float(last.get('zero_gamma', np.nan))
-        except:
-            pass
-        if not np.isnan(zg_val):
-            spx_min = min(spx_min, zg_val)
-            spx_max = max(spx_max, zg_val)
-
-        fig_spx = go.Figure()
-        fig_spx.add_trace(go.Scatter(
-            x=hist90_spx['date'],
-            y=hist90_spx['spx'],
-            mode='lines', name='SPX',
-            line=dict(color='#9b958f', width=2),
-            hovertemplate='<b>%{x|%b %d}</b><br>SPX: %{y:,.0f}<extra></extra>',
-        ))
-        if not np.isnan(zg_val):
-            fig_spx.add_hline(
-                y=zg_val,
-                line_dash='dash',
-                line_color='rgba(227,180,142,0.55)',
-                line_width=1.2,
-                annotation_text=f'Zero γ {zg_val:,.0f}',
-                annotation_position='right',
-                annotation_font_color='#e3b48e',
-                annotation_font_size=10,
-            )
-        fig_spx.add_shape(type='line', x0=last_dt_str, x1=last_dt_str, y0=0, y1=1, yref='paper',
-                      line=dict(dash='dot', color='rgba(227,180,142,0.6)', width=1.5))
-        fig_spx.update_layout(**LAYOUT_BASE,
-            margin=dict(l=10, r=130, t=4, b=30), height=180,
-            yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.06)',
-                       tickformat=',.0f', tickfont_size=11,
-                       range=[spx_min - spx_pad, spx_max + spx_pad]),
-        )
-        st.plotly_chart(fig_spx, use_container_width=True)
-
-    # ── 3. VIX State panel ────────────────────────────────────────────────────────
-    st.markdown('<div class="section-header" style="margin-top:0; margin-bottom:4px;">VIX State</div>',
-                unsafe_allow_html=True)
-
-    hist90_vix       = hist.tail(90).copy()
-    hist90_vix_valid = hist90_vix.dropna(subset=['vix'])
-
-    if len(hist90_vix_valid) > 0:
-        vix_min = hist90_vix_valid['vix'].min()
-        vix_max = hist90_vix_valid['vix'].max()
-        vix_pad = (vix_max - vix_min) * 0.12
-
-        fig_vix = go.Figure()
-        if 'vix_phi' in hist90_vix_valid.columns:
-            def _vix_state(phi):
+            rows = []
+            _contrib_total = 0.0
+            for name, phi_key, sc_key, st_key, raw_key, w_key in COMP_DEF:
+                phi_v = last.get(phi_key, np.nan) if phi_key else np.nan
+                sc_v  = last.get(sc_key, np.nan)
+                st_v  = last.get(st_key, '—') or '—'
+                raw_v = last.get(raw_key, np.nan)
+                try: phi_f = f'{float(phi_v):.3f}' if not np.isnan(float(phi_v)) else '—'
+                except: phi_f = '—'
+                _w = pipeline.COMPONENT_WEIGHTS[w_key]
                 try:
-                    p = float(phi)
-                    if p < 0.30: return 'compression'
-                    if p > 0.70: return 'spike'
-                    return 'mid'
+                    sc_float = float(sc_v)
+                    sc_f = f'{sc_float:+.2f}' if not np.isnan(sc_float) else '—'
+                    ct_f = f'{sc_float * _w:+.2f}' if not np.isnan(sc_float) else '—'
+                    if not np.isnan(sc_float):
+                        _contrib_total += sc_float * _w
                 except:
-                    return 'mid'
-            hist90_vix_valid = hist90_vix_valid.copy()
-            hist90_vix_valid['vstate'] = hist90_vix_valid['vix_phi'].apply(_vix_state)
-            STATE_COLORS = {
-                'compression': 'rgba(244,160,98,0.18)',
-                'spike':       'rgba(227,180,142,0.14)',
-                'mid':         'rgba(133,202,197,0.07)',
-            }
-            for state, grp in groupby(hist90_vix_valid.itertuples(index=False), key=lambda r: r.vstate):
-                rows = list(grp)
-                d0 = pd.Timestamp(rows[0].date)
-                d1 = pd.Timestamp(rows[-1].date)
-                fig_vix.add_vrect(x0=d0, x1=d1, fillcolor=STATE_COLORS[state], line_width=0)
-
-        fig_vix.add_trace(go.Scatter(
-            x=hist90_vix['date'],
-            y=hist90_vix['vix'],
-            mode='lines', name='VIX',
-            line=dict(color='#9b958f', width=2),
-            hovertemplate='<b>%{x|%b %d}</b><br>VIX: %{y:.2f}<extra></extra>',
-        ))
-        fig_vix.add_hline(y=20, line_dash='dot',
-                          line_color='rgba(255,255,255,0.20)', line_width=1,
-                          annotation_text='20', annotation_position='right',
-                          annotation_font_color='#9b958f', annotation_font_size=10)
-        fig_vix.add_shape(type='line', x0=last_dt_str, x1=last_dt_str, y0=0, y1=1, yref='paper',
-                      line=dict(dash='dot', color='rgba(227,180,142,0.6)', width=1.5))
-        fig_vix.update_layout(**LAYOUT_BASE,
-            margin=dict(l=10, r=130, t=4, b=30), height=160,
-            yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.06)',
-                       tickformat='.0f', tickfont_size=11,
-                       range=[max(0, vix_min - vix_pad), vix_max + vix_pad]),
-        )
-        st.plotly_chart(fig_vix, use_container_width=True)
-
-with _t_ch:
-    # ══════════════════════════════════════════════════════════════════════════════
-    # COMPONENT HISTORY CHARTS
-    # ══════════════════════════════════════════════════════════════════════════════
-    st.markdown('<div class="section-header">Component History</div>', unsafe_allow_html=True)
-
-    _PHI_CFG = [
-        # (label, phi_col, line_color)
-        ('VIX',       'vix_phi',  '#e8dccb'),
-        ('Extension', 'ext_phi',  '#b9805a'),
-        ('Momentum',  'mom_phi',  '#649995'),
-        ('ADL',       'adl_phi',  '#9b958f'),
-        ('B20%',      'b20_phi',  '#e3b48e'),
-        ('SKEW',      'skew_phi', '#e8dccb'),
-    ]
-
-    # Prepare data — rows with at least one valid phi
-    _hist_phi = hist90.copy()
-    _phi_cols = [c for _, c, _ in _PHI_CFG if c in _hist_phi.columns]
-    _hist_phi = _hist_phi[(_hist_phi[_phi_cols].fillna(0) != 0).any(axis=1)].copy()
-    _hist_phi['date'] = pd.to_datetime(_hist_phi['date'])
-
-    # Normalize SPX to [0, 1] for underlay overlay
-    _spy_norm = None
-    if 'spx' in _hist_phi.columns:
-        _spy_raw = _hist_phi['spx'].astype(float)
-        _spy_min, _spy_max = _spy_raw.min(), _spy_raw.max()
-        if _spy_max > _spy_min:
-            _spy_norm = (_spy_raw - _spy_min) / (_spy_max - _spy_min)
-
-    # ── Chart A: Small multiples (2 × 3 grid) ────────────────────────────────────
-    _fig_sm = make_subplots(
-        rows=2, cols=3,
-        subplot_titles=[lbl for lbl, _, _ in _PHI_CFG],
-        shared_xaxes=True,
-        shared_yaxes=True,
-        vertical_spacing=0.14,
-        horizontal_spacing=0.04,
-    )
-
-    _DANGER_FILL  = 'rgba(244,160,98,0.18)'
-    _POSITIVE_FILL = 'rgba(133,202,197,0.18)'
-    _DANGER_LINE   = 'rgba(244,160,98,0.45)'
-    _POSITIVE_LINE = 'rgba(133,202,197,0.45)'
-
-    for _i, (label, col, color) in enumerate(_PHI_CFG):
-        _r, _c = _i // 3 + 1, _i % 3 + 1
-        if col not in _hist_phi.columns:
-            continue
-
-        _y = _hist_phi[col].replace(0, np.nan)
-        _x = _hist_phi['date']
-
-        # SPX underlay (normalized to [0,1])
-        if _spy_norm is not None:
-            _fig_sm.add_trace(go.Scatter(
-                x=_x, y=_spy_norm.values,
-                mode='lines',
-                line=dict(color='rgba(255,255,255,0.18)', width=1.2),
-                showlegend=False,
-                hoverinfo='skip',
-            ), row=_r, col=_c)
-
-        # Threshold bands — red = zone of wider swings, green = zone of calmer swings.
-        # For VIX a HIGH Phi is the wide-swing zone, so its bands are flipped.
-        _hi_wide = (label == 'VIX')
-        _lo_fill, _hi_fill = ((_POSITIVE_FILL, _DANGER_FILL) if _hi_wide else (_DANGER_FILL, _POSITIVE_FILL))
-        _lo_line, _hi_line = ((_POSITIVE_LINE, _DANGER_LINE) if _hi_wide else (_DANGER_LINE, _POSITIVE_LINE))
-        _fig_sm.add_hrect(y0=0, y1=0.30, fillcolor=_lo_fill,
-                          line_width=0, row=_r, col=_c)
-        _fig_sm.add_hrect(y0=0.70, y1=1.0, fillcolor=_hi_fill,
-                          line_width=0, row=_r, col=_c)
-        _fig_sm.add_hline(y=0.30, line_dash='dot', line_color=_lo_line,
-                          line_width=1, row=_r, col=_c)
-        _fig_sm.add_hline(y=0.70, line_dash='dot', line_color=_hi_line,
-                          line_width=1, row=_r, col=_c)
-
-        # Phi line
-        _fig_sm.add_trace(go.Scatter(
-            x=_x, y=_y,
-            mode='lines',
-            line=dict(color=color, width=1.8),
-            showlegend=False,
-            hovertemplate=f'<b>{label}</b> %{{x|%b %d}}: Φ=%{{y:.3f}}<extra></extra>',
-        ), row=_r, col=_c)
-
-        # Current value dot (last non-NaN point)
-        _valid_mask = _y.notna()
-        if _valid_mask.any():
-            _last_idx  = _valid_mask[_valid_mask].index[-1]
-            _last_phi  = float(_y.loc[_last_idx])
-            _last_date = _x.loc[_last_idx]
-            _lo_c, _hi_c = (('#85cac5', '#f4a062') if _hi_wide else ('#f4a062', '#85cac5'))
-            _dot_color = (_lo_c if _last_phi < 0.30
-                          else _hi_c if _last_phi > 0.70
-                          else color)
-            _fig_sm.add_trace(go.Scatter(
-                x=[_last_date], y=[_last_phi],
-                mode='markers',
-                marker=dict(color=_dot_color, size=7, line=dict(color='white', width=1)),
-                showlegend=False, hoverinfo='skip',
-            ), row=_r, col=_c)
-
-    _fig_sm.update_layout(
-        template='plotly_dark+atn',
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        height=360,
-        showlegend=False,
-        margin=dict(l=0, r=0, t=36, b=0),
-    )
-    # Style all axes uniformly
-    _fig_sm.update_yaxes(range=[0, 1], tickformat='.1f', tickfont_size=10, showgrid=False)
-    _fig_sm.update_xaxes(tickformat='%b %d', tickfont_size=10, showgrid=False)
-    # Style subplot titles
-    for ann in _fig_sm.layout.annotations:
-        ann.update(font=dict(size=11, color='#a89f95'))
-
-    st.plotly_chart(_fig_sm, use_container_width=True)
-
-    # ── Chart B: State heatmap ────────────────────────────────────────────────────
-    st.markdown(
-        '<p style="color:#9b958f;font-size:0.72rem;margin:2px 0 6px 0;">'
-        'State heatmap (v4.0 scores) — red: component pushing toward wider swings · grey: normal state · '
-        'green: pushing toward calmer swings. B20% and ADL score a high reading the same as a normal one (v4.0 re-test), '
-        'so their rows are only ever red or grey.</p>',
-        unsafe_allow_html=True,
-    )
-
-    # Build z matrix: rows=components, cols=dates
-    _hm_labels = [lbl for lbl, _, _ in _PHI_CFG]
-    _hm_dates  = _hist_phi['date'].tolist()
-    _hm_z      = []
-    _hm_text   = []
-
-    _HM_SCORE = {'VIX': ('vix_score', None), 'Extension': ('ext_score', 'ext'), 'Momentum': ('mom_score', 'mom'),
-                 'ADL': ('adl_score', 'adl'), 'B20%': ('b20_score', 'b20'), 'SKEW': ('skew_score', 'skew')}
-    for label, col, _ in _PHI_CFG:
-        _row_z    = []
-        _row_text = []
-        _sc_col, _nk = _HM_SCORE[label]
-        _phis = (_hist_phi[col].replace(0, np.nan) if col in _hist_phi.columns
-                 else pd.Series([np.nan] * len(_hist_phi), index=_hist_phi.index))
-        _scs = (_hist_phi[_sc_col] if _sc_col in _hist_phi.columns
-                else pd.Series([np.nan] * len(_hist_phi), index=_hist_phi.index))
-        for phi_val, sc_val in zip(_phis, _scs):
-            if pd.isna(phi_val) or pd.isna(sc_val):
-                _row_z.append(np.nan)
-                _row_text.append('—')
-                continue
-            # VIX is continuous: use its state bands (Low calm, Mid normal, High/Stress wide)
-            if _nk is None:
-                _d = 1.0 if phi_val < 0.30 else (-1.0 if phi_val >= 0.60 else 0.0)
-            else:
-                _d = float(sc_val) - pipeline.NEUTRAL_SCORE[_nk]
-            _tol = 1e-9
-            if _d < -_tol:
-                _row_z.append(0.15); _st = 'toward wider swings'
-            elif _d > _tol:
-                _row_z.append(0.85); _st = 'toward calmer swings'
-            else:
-                _row_z.append(0.5); _st = 'normal'
-            _row_text.append(f'Φ={phi_val:.3f}, score {float(sc_val):+.2f} ({_st})')
-        _hm_z.append(_row_z)
-        _hm_text.append(_row_text)
-
-    # Custom colorscale: red → dark grey (neutral) → green, with sharp breaks at thresholds
-    _hm_colorscale = [
-        [0.00, '#74492e'],
-        [0.20, '#f4a062'],
-        [0.29, '#b9805a'],
-        [0.30, '#1a1918'],   # sharp neutral start
-        [0.70, '#1a1918'],   # sharp neutral end
-        [0.71, '#649995'],
-        [0.90, '#85cac5'],
-        [1.00, '#3d5d5a'],
-    ]
-
-    _fig_hm = go.Figure(go.Heatmap(
-        z=_hm_z,
-        x=_hm_dates,
-        y=_hm_labels,
-        text=_hm_text,
-        hovertemplate='<b>%{y}</b> %{x|%b %d}: %{text}<extra></extra>',
-        colorscale=_hm_colorscale,
-        zmin=0, zmax=1,
-        showscale=False,
-        xgap=1, ygap=2,
-    ))
-
-    _fig_hm.update_layout(
-        template='plotly_dark+atn',
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        height=180,
-        margin=dict(l=0, r=0, t=4, b=0),
-        xaxis=dict(tickformat='%b %d', tickfont_size=10, showgrid=False),
-        yaxis=dict(tickfont_size=11, showgrid=False, autorange='reversed'),
-    )
-    st.plotly_chart(_fig_hm, use_container_width=True)
-
-with _t_pc:
-    # ══════════════════════════════════════════════════════════════════════════════
-    # PC RATIO CONTEXT (collapsible)
-    # ══════════════════════════════════════════════════════════════════════════════
-    _pc_stale = risk_dial.pc_stale_sessions(hist)
-    if _pc_stale >= 3:
-        st.markdown(
-            f'<div class="neutral-row"><span style="color:#e3b48e">●</span> PC ratio has carried the same value ({float(last.get("pc_ratio", np.nan)):.3f}) '
-            f'for {_pc_stale} sessions. Check the input — enter the USI:PC close in the sidebar. '
-            'Stale PC values caused most of the Apr–Sep 2026 drift (Report v7.0 §2.4).</div>',
-            unsafe_allow_html=True)
-
-    with st.expander('PC Ratio — Five-Zone Context (v4.0 scores)', expanded=_pc_stale >= 3):
-        pc_sma10 = last.get('pc_sma10', np.nan)
-        pc_daily = last.get('pc_ratio', np.nan)
-        try:
-            pc10 = float(pc_sma10)
-            if pc10 < 0.686:
-                zone, note = 'Extreme LOW', ('Complacency zone. Swings a little narrower than average '
-                                             '(large-move rate 0.84x / 0.74x at 10 / 21 sessions). Score +0.25.')
-                zcol = '#85cac5'
-            elif pc10 < 0.732:
-                zone, note = 'Moderate LOW', 'Slightly narrower swings than average (0.77x / 0.88x). Score +0.25.'
-                zcol = '#649995'
-            elif pc10 < 0.944:
-                zone, note = 'Mid', 'Normal zone, slightly narrower swings than average (0.88x / 0.86x). Score +0.25.'
-                zcol = '#9b958f'
-            elif pc10 < 1.003:
-                zone, note = 'Moderate HIGH', ('Fear building: wider swings (1.42x / 1.49x). Score −0.25.')
-                zcol = '#e3b48e'
-            else:
-                zone, note = 'Extreme HIGH', ('Heavy put buying: the widest swings of any zone in BOTH directions '
-                                              '(1.79x at 10 and 21 sessions). Its strong upside tail is part of that wide '
-                                              'distribution, not a calm signal. Score −0.5 (was +1.0 in v3.0).')
-                zcol = '#f4a062'
-            col1, col2, col3 = st.columns(3)
-            col1.metric('PC SMA-10', f'{pc10:.3f}')
-            col2.metric('Daily PC', f'{float(pc_daily):.3f}' if not np.isnan(float(pc_daily)) else '—')
-            col3.metric('Zone', zone)
-            st.markdown(f"""
-            <div style="background:#121212;border:1px solid #2a2724;border-radius:6px;
-                        padding:10px 16px;font-size:0.86rem;margin-top:8px;">
-            <b style="color:{zcol};">{zone}</b><br>{note}
+                    sc_f = '—'
+                    ct_f = '—'
+                try:
+                    raw_float = float(raw_v)
+                    if np.isnan(raw_float):
+                        raw_f = '—'
+                    elif name == 'Volume':
+                        raw_f = f'{raw_float/1e6:.1f}M'  # Format volume in millions
+                    elif name in ('Extension', 'Momentum'):
+                        raw_f = f'{raw_float*100:+.2f}%'  # % above SMA50 / 5-day % change of SMA50
+                    else:
+                        raw_f = f'{raw_float:,.2f}'
+                except:
+                    raw_f = '—'
+                # Fix state display for NaN
+                if st_v == 'nan' or (isinstance(st_v, float) and np.isnan(st_v)):
+                    st_v = '—'
+                # Special handling for Volume state - show vs 20d avg
+                if name == 'Volume':
+                    st_v = f'{st_v} · {vol_vs_20d} · info only'
+                rows.append({'Component': name, 'Raw Value': raw_f,
+                             'Phi': phi_f, 'State': str(st_v), 'Score': sc_f,
+                             'Weight': f'×{_w:.2f}', 'Contribution': ct_f})
+            rows.append({'Component': 'MRS composite', 'Raw Value': '', 'Phi': '', 'State': reg,
+                         'Score': '', 'Weight': '', 'Contribution': f'{_contrib_total:+.2f}'})
+            df_comp = pd.DataFrame(rows)
+            def color_score(val):
+                try:
+                    v = float(val)
+                    if v > 0: return 'color: #85cac5; font-weight: 700'
+                    if v < 0: return 'color: #f4a062; font-weight: 700'
+                    return 'color: #9b958f'
+                except:
+                    return ''
+            styled = df_comp.style.map(color_score, subset=['Score', 'Contribution'])
+            st.dataframe(styled, use_container_width=True, hide_index=True)
+            st.markdown("""
+            <div style="font-size:0.72rem;color:#9b958f;margin-top:4px;">
+            Phi = percentile rank over rolling 756-session window (3 years).
+            Score = component state score (positive = calmer, negative = wider swings) ·
+            Weight = MRS v4.0 weight: VIX is the anchor (scored continuously from its Phi and
+            carrying the scale offset), Extension / Momentum / PC / SKEW / Breadth are an equal-weighted
+            context block, ADL and B20 share the Breadth weight, Volume is information only ·
+            Contribution = Score × Weight; contributions sum to the MRS composite (v8 study).
             </div>
             """, unsafe_allow_html=True)
-            st.markdown("""
-            | Zone | SMA-10 | v4.0 score | Large-move rate 10D | 21D | v3.0 score |
-            |------|--------|-----------|---------|---------|------|
-            | Extreme LOW | < 0.686 | **+0.25** | 0.84x | 0.74x | +1.0 |
-            | Moderate LOW | 0.686–0.732 | **+0.25** | 0.77x | 0.88x | +0.5 |
-            | Mid | 0.732–0.944 | +0.25 | 0.88x | 0.86x | 0.0 |
-            | Moderate HIGH | 0.944–1.003 | **−0.25** | 1.42x | 1.49x | −1.0 |
-            | Extreme HIGH | ≥ 1.003 | **−0.5** | 1.79x | 1.79x | +1.0 |
 
-            Large-move rate = share of sessions followed by a move of ±3% (10D) or ±5% (21D) in either
-            direction, relative to all sessions, 2008–2026 (v8 study). Scores are for the dashboard's
-            dispersion job: positive = calmer, negative = wider swings. Cutoffs sit at the ~10th / 18th /
-            80th / 90th percentile of the 10-day average.
-            """)
-        except:
-            st.write('PC SMA-10 data not available.')
+        with right:
+            st.markdown('<div class="section-header">VIX Lifecycle State</div>', unsafe_allow_html=True)
+            vix_phi   = last.get('vix_phi', np.nan)
+            trig_days = float(last.get('trigger_days', 0) or 0)
+            try: vix_phi_f = float(vix_phi)
+            except: vix_phi_f = np.nan
+
+            if not np.isnan(vix_phi_f) and vix_phi_f < 0.30:
+                vix_row_cls = 'safe-row'
+                vix_txt = (f'<span style="color:#85cac5">●</span> LOW VIX — VIX Phi = {vix_phi_f:.3f}. Calmest swings historically: large-move '
+                           f'rate about half the all-sessions rate (0.49x at 10 sessions, 2008–2026). '
+                           f'Calm bases can break — watch the context components.')
+            elif not np.isnan(vix_phi_f) and vix_phi_f > 0.70:
+                vix_row_cls = 'hazard-row'
+                vix_txt = (f'<span style="color:#f4a062">●</span> HIGH VIX — VIX Phi = {vix_phi_f:.3f}. Widest two-sided swings: large-move '
+                           f'rate 1.3–2x the all-sessions rate (High / Stress, 2008–2026). Both tails are wide.')
+            elif not np.isnan(vix_phi_f):
+                vix_row_cls = 'neutral-row'
+                vix_txt = f'<span style="color:#e3b48e">●</span> MID RANGE — VIX Phi = {vix_phi_f:.3f}. Swings near to slightly below average.'
+            else:
+                vix_row_cls = 'neutral-row'
+                vix_txt = '<span style="color:#a89f95">●</span> VIX Phi: no data'
+
+            st.markdown(f'<div class="{vix_row_cls}">{vix_txt}</div>', unsafe_allow_html=True)
+
+            if trig_days > 0:
+                days_left = int(7 - trig_days)
+                st.markdown(f'<div class="neutral-row"><span style="color:#a89f95">●</span> Compression exit — day {int(trig_days)} of 7 '
+                            f'({days_left}d left). Reference only: the earlier suppression effect did not '
+                            f'replicate in the v8 re-test (0.86x large-move rate, not significant).</div>',
+                            unsafe_allow_html=True)
+
+            st.markdown('<div class="section-header" style="margin-top:16px;">Zero Gamma Position</div>',
+                        unsafe_allow_html=True)
+            try:
+                spx_v = float(last.get('spx', np.nan))
+                zg_v  = float(last.get('zero_gamma', np.nan))
+                if not np.isnan(spx_v) and not np.isnan(zg_v) and zg_v > 0:
+                    dist_pct = (spx_v - zg_v) / spx_v * 100
+                    if dist_pct > 0.25:
+                        gcls = 'safe-row'
+                        gtxt = f'<span style="color:#85cac5">●</span> SPX {spx_v:,.0f} is {dist_pct:.1f}% ABOVE zero-gamma ({zg_v:,.0f}). Dealers long gamma — dampening environment.'
+                    elif dist_pct > -0.25:
+                        gcls = 'neutral-row'
+                        gtxt = f'<span style="color:#e3b48e">●</span> SPX {spx_v:,.0f} is NEAR zero-gamma ({zg_v:,.0f}, {dist_pct:+.1f}%). Transition zone — regime could flip.'
+                    else:
+                        gcls = 'hazard-row'
+                        gtxt = f'<span style="color:#f4a062">●</span> SPX {spx_v:,.0f} is {abs(dist_pct):.1f}% BELOW zero-gamma ({zg_v:,.0f}). Dealers short gamma — amplifying moves.'
+                    st.markdown(f'<div class="{gcls}">{gtxt}</div>', unsafe_allow_html=True)
+                else:
+                    zg_only = float(last.get('zero_gamma', np.nan))
+                    if not np.isnan(zg_only) and zg_only > 0:
+                        st.markdown(f'<div class="neutral-row"><span style="color:#a89f95">●</span> Zero Gamma level: <b>{zg_only:,.0f}</b> — SPX close pending</div>', unsafe_allow_html=True)
+                    else:
+                        st.markdown('<div class="neutral-row"><span style="color:#a89f95">●</span> Zero Gamma: no data today</div>', unsafe_allow_html=True)
+            except:
+                try:
+                    zg_only = float(last.get('zero_gamma', np.nan))
+                    if not np.isnan(zg_only) and zg_only > 0:
+                        st.markdown(f'<div class="neutral-row"><span style="color:#a89f95">●</span> Zero Gamma level: <b>{zg_only:,.0f}</b> — SPX close pending</div>', unsafe_allow_html=True)
+                    else:
+                        st.markdown('<div class="neutral-row"><span style="color:#a89f95">●</span> Zero Gamma: no data today</div>', unsafe_allow_html=True)
+                except:
+                    st.markdown('<div class="neutral-row"><span style="color:#a89f95">●</span> Zero Gamma: no data today</div>', unsafe_allow_html=True)
+
+            # ── Signal quality (8 Nov 2026: moved here from the decision strip; Recovery Signal removed, untested and
+            #    overlapping REBOUND WINDOW in the Risk today panel. See studies/_framework/MRS_Evidence_Audit_v2.md) ──
+            st.markdown('<div class="section-header" style="margin-top:16px;">Signal quality (breadth confirmation)</div>',
+                        unsafe_allow_html=True)
+            st.markdown(f'<div class="neutral-row"><span style="font-weight:700;color:{sq_col};">● {sq_lbl}</span><br>'
+                        f'<span style="font-size:0.82rem;color:#a89f95;">{_html_mod.escape(str(sq_desc))}</span><br>'
+                        '<span style="font-size:0.72rem;color:#6e675f;">Not tested: whether breadth confirmation changes the '
+                        'band\'s forward odds is an open study. Context only.</span></div>', unsafe_allow_html=True)
+
+    with _t_hist:
+        # ══════════════════════════════════════════════════════════════════════════════
+        # CHARTS
+        # ══════════════════════════════════════════════════════════════════════════════
+        hist90  = hist.dropna(subset=['mrs_score']).tail(90).copy()
+        hist90['date'] = pd.to_datetime(hist90['date'])
+        x_min   = hist.tail(90)['date'].min()
+        x_max   = hist.tail(90)['date'].max()
+        x_range = [x_min, x_max]
+
+        VLINE_STYLE = dict(line_dash='dot', line_color='rgba(227,180,142,0.6)', line_width=1.5)
+        LAYOUT_BASE = dict(
+            template='plotly_dark+atn',
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            showlegend=False,
+            xaxis=dict(showgrid=False, tickformat='%b %d', tickfont_size=11, range=x_range),
+        )
+
+        # ── 1. 90-Day MRS History ─────────────────────────────────────────────────────
+        st.markdown('<div class="section-header">90-Day MRS History</div>', unsafe_allow_html=True)
+
+        fig = go.Figure()
+        band_defs = [
+            (1.5,  5.0,  'rgba(26,127,55,0.12)',  'RISK-ON'),
+            (0.5,  1.5,  'rgba(87,166,107,0.10)', 'MILD RISK-ON'),
+            (-0.5, 0.5,  'rgba(155,149,143,0.08)','NEUTRAL'),
+            (-1.5, -0.5, 'rgba(217,119,6,0.10)',  'MILD RISK-OFF'),
+            (-5.0, -1.5, 'rgba(185,28,28,0.12)',  'RISK-OFF'),
+        ]
+        _ylo = min(-4.5, float(hist90['mrs_score'].min()) - 0.5) if len(hist90) else -4.5
+        _yhi = max(4.5, float(hist90['mrs_score'].max()) + 0.5) if len(hist90) else 4.5
+        band_defs[0] = (1.5, 12.0, band_defs[0][2], band_defs[0][3])
+        band_defs[-1] = (-12.0, -1.5, band_defs[-1][2], band_defs[-1][3])
+        for y0, y1, fill, label in band_defs:
+            fig.add_hrect(y0=y0, y1=y1, fillcolor=fill, line_width=0)
+            fig.add_annotation(
+                x=1.01, xref='paper',
+                y=(max(y0, _ylo) + min(y1, _yhi)) / 2, yref='y',
+                text=label, showarrow=False,
+                font=dict(size=9, color='#9b958f'),
+                xanchor='left',
+            )
+
+        fig.add_trace(go.Scatter(
+            x=hist90['date'], y=hist90['mrs_score'],
+            mode='lines+markers', name='MRS',
+            line=dict(color='#e8dccb', width=2.5),
+            marker=dict(size=4, color='#e8dccb'),
+            hovertemplate='<b>%{x|%b %d}</b><br>MRS: %{y:+.2f}<extra></extra>',
+        ))
+        fig.add_hline(y=0, line_dash='dash', line_color='rgba(255,255,255,0.25)', line_width=1)
+        fig.add_shape(type='line', x0=last_dt_str, x1=last_dt_str, y0=_ylo, y1=_yhi,
+                      line=dict(dash='dot', color='rgba(227,180,142,0.6)', width=1.5))
+        fig.add_annotation(x=last_dt_str, y=_yhi - 0.3, text='Today', showarrow=False,
+                           font=dict(size=10, color='#e3b48e'), xanchor='left')
+        fig.update_layout(**LAYOUT_BASE,
+            margin=dict(l=10, r=130, t=10, b=30), height=300,
+            yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.06)',
+                       tickformat='+.1f', range=[_ylo, _yhi], tickfont_size=11),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        # ── 2. SPX Close + Zero Gamma line ────────────────────────────────────────────
+        st.markdown('<div class="section-header" style="margin-top:0; margin-bottom:4px;">SPX Close</div>',
+                    unsafe_allow_html=True)
+
+        hist90_spx       = hist.tail(90).copy()
+        hist90_spx_valid = hist90_spx.dropna(subset=['spx'])
+
+        if len(hist90_spx_valid) > 0:
+            spx_min = hist90_spx_valid['spx'].min()
+            spx_max = hist90_spx_valid['spx'].max()
+            spx_pad = (spx_max - spx_min) * 0.10
+            zg_val = np.nan
+            try:
+                zg_val = float(last.get('zero_gamma', np.nan))
+            except:
+                pass
+            if not np.isnan(zg_val):
+                spx_min = min(spx_min, zg_val)
+                spx_max = max(spx_max, zg_val)
+
+            fig_spx = go.Figure()
+            fig_spx.add_trace(go.Scatter(
+                x=hist90_spx['date'],
+                y=hist90_spx['spx'],
+                mode='lines', name='SPX',
+                line=dict(color='#9b958f', width=2),
+                hovertemplate='<b>%{x|%b %d}</b><br>SPX: %{y:,.0f}<extra></extra>',
+            ))
+            if not np.isnan(zg_val):
+                fig_spx.add_hline(
+                    y=zg_val,
+                    line_dash='dash',
+                    line_color='rgba(227,180,142,0.55)',
+                    line_width=1.2,
+                    annotation_text=f'Zero γ {zg_val:,.0f}',
+                    annotation_position='right',
+                    annotation_font_color='#e3b48e',
+                    annotation_font_size=10,
+                )
+            fig_spx.add_shape(type='line', x0=last_dt_str, x1=last_dt_str, y0=0, y1=1, yref='paper',
+                          line=dict(dash='dot', color='rgba(227,180,142,0.6)', width=1.5))
+            fig_spx.update_layout(**LAYOUT_BASE,
+                margin=dict(l=10, r=130, t=4, b=30), height=180,
+                yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.06)',
+                           tickformat=',.0f', tickfont_size=11,
+                           range=[spx_min - spx_pad, spx_max + spx_pad]),
+            )
+            st.plotly_chart(fig_spx, use_container_width=True)
+
+        # ── 3. VIX State panel ────────────────────────────────────────────────────────
+        st.markdown('<div class="section-header" style="margin-top:0; margin-bottom:4px;">VIX State</div>',
+                    unsafe_allow_html=True)
+
+        hist90_vix       = hist.tail(90).copy()
+        hist90_vix_valid = hist90_vix.dropna(subset=['vix'])
+
+        if len(hist90_vix_valid) > 0:
+            vix_min = hist90_vix_valid['vix'].min()
+            vix_max = hist90_vix_valid['vix'].max()
+            vix_pad = (vix_max - vix_min) * 0.12
+
+            fig_vix = go.Figure()
+            if 'vix_phi' in hist90_vix_valid.columns:
+                def _vix_state(phi):
+                    try:
+                        p = float(phi)
+                        if p < 0.30: return 'compression'
+                        if p > 0.70: return 'spike'
+                        return 'mid'
+                    except:
+                        return 'mid'
+                hist90_vix_valid = hist90_vix_valid.copy()
+                hist90_vix_valid['vstate'] = hist90_vix_valid['vix_phi'].apply(_vix_state)
+                STATE_COLORS = {
+                    'compression': 'rgba(244,160,98,0.18)',
+                    'spike':       'rgba(227,180,142,0.14)',
+                    'mid':         'rgba(133,202,197,0.07)',
+                }
+                for state, grp in groupby(hist90_vix_valid.itertuples(index=False), key=lambda r: r.vstate):
+                    rows = list(grp)
+                    d0 = pd.Timestamp(rows[0].date)
+                    d1 = pd.Timestamp(rows[-1].date)
+                    fig_vix.add_vrect(x0=d0, x1=d1, fillcolor=STATE_COLORS[state], line_width=0)
+
+            fig_vix.add_trace(go.Scatter(
+                x=hist90_vix['date'],
+                y=hist90_vix['vix'],
+                mode='lines', name='VIX',
+                line=dict(color='#9b958f', width=2),
+                hovertemplate='<b>%{x|%b %d}</b><br>VIX: %{y:.2f}<extra></extra>',
+            ))
+            fig_vix.add_hline(y=20, line_dash='dot',
+                              line_color='rgba(255,255,255,0.20)', line_width=1,
+                              annotation_text='20', annotation_position='right',
+                              annotation_font_color='#9b958f', annotation_font_size=10)
+            fig_vix.add_shape(type='line', x0=last_dt_str, x1=last_dt_str, y0=0, y1=1, yref='paper',
+                          line=dict(dash='dot', color='rgba(227,180,142,0.6)', width=1.5))
+            fig_vix.update_layout(**LAYOUT_BASE,
+                margin=dict(l=10, r=130, t=4, b=30), height=160,
+                yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.06)',
+                           tickformat='.0f', tickfont_size=11,
+                           range=[max(0, vix_min - vix_pad), vix_max + vix_pad]),
+            )
+            st.plotly_chart(fig_vix, use_container_width=True)
+
+    with _t_ch:
+        # ══════════════════════════════════════════════════════════════════════════════
+        # COMPONENT HISTORY CHARTS
+        # ══════════════════════════════════════════════════════════════════════════════
+        st.markdown('<div class="section-header">Component History</div>', unsafe_allow_html=True)
+
+        _PHI_CFG = [
+            # (label, phi_col, line_color)
+            ('VIX',       'vix_phi',  '#e8dccb'),
+            ('Extension', 'ext_phi',  '#b9805a'),
+            ('Momentum',  'mom_phi',  '#649995'),
+            ('ADL',       'adl_phi',  '#9b958f'),
+            ('B20%',      'b20_phi',  '#e3b48e'),
+            ('SKEW',      'skew_phi', '#e8dccb'),
+        ]
+
+        # Prepare data — rows with at least one valid phi
+        _hist_phi = hist90.copy()
+        _phi_cols = [c for _, c, _ in _PHI_CFG if c in _hist_phi.columns]
+        _hist_phi = _hist_phi[(_hist_phi[_phi_cols].fillna(0) != 0).any(axis=1)].copy()
+        _hist_phi['date'] = pd.to_datetime(_hist_phi['date'])
+
+        # Normalize SPX to [0, 1] for underlay overlay
+        _spy_norm = None
+        if 'spx' in _hist_phi.columns:
+            _spy_raw = _hist_phi['spx'].astype(float)
+            _spy_min, _spy_max = _spy_raw.min(), _spy_raw.max()
+            if _spy_max > _spy_min:
+                _spy_norm = (_spy_raw - _spy_min) / (_spy_max - _spy_min)
+
+        # ── Chart A: Small multiples (2 × 3 grid) ────────────────────────────────────
+        _fig_sm = make_subplots(
+            rows=2, cols=3,
+            subplot_titles=[lbl for lbl, _, _ in _PHI_CFG],
+            shared_xaxes=True,
+            shared_yaxes=True,
+            vertical_spacing=0.14,
+            horizontal_spacing=0.04,
+        )
+
+        _DANGER_FILL  = 'rgba(244,160,98,0.18)'
+        _POSITIVE_FILL = 'rgba(133,202,197,0.18)'
+        _DANGER_LINE   = 'rgba(244,160,98,0.45)'
+        _POSITIVE_LINE = 'rgba(133,202,197,0.45)'
+
+        for _i, (label, col, color) in enumerate(_PHI_CFG):
+            _r, _c = _i // 3 + 1, _i % 3 + 1
+            if col not in _hist_phi.columns:
+                continue
+
+            _y = _hist_phi[col].replace(0, np.nan)
+            _x = _hist_phi['date']
+
+            # SPX underlay (normalized to [0,1])
+            if _spy_norm is not None:
+                _fig_sm.add_trace(go.Scatter(
+                    x=_x, y=_spy_norm.values,
+                    mode='lines',
+                    line=dict(color='rgba(255,255,255,0.18)', width=1.2),
+                    showlegend=False,
+                    hoverinfo='skip',
+                ), row=_r, col=_c)
+
+            # Threshold bands — red = zone of wider swings, green = zone of calmer swings.
+            # For VIX a HIGH Phi is the wide-swing zone, so its bands are flipped.
+            _hi_wide = (label == 'VIX')
+            _lo_fill, _hi_fill = ((_POSITIVE_FILL, _DANGER_FILL) if _hi_wide else (_DANGER_FILL, _POSITIVE_FILL))
+            _lo_line, _hi_line = ((_POSITIVE_LINE, _DANGER_LINE) if _hi_wide else (_DANGER_LINE, _POSITIVE_LINE))
+            _fig_sm.add_hrect(y0=0, y1=0.30, fillcolor=_lo_fill,
+                              line_width=0, row=_r, col=_c)
+            _fig_sm.add_hrect(y0=0.70, y1=1.0, fillcolor=_hi_fill,
+                              line_width=0, row=_r, col=_c)
+            _fig_sm.add_hline(y=0.30, line_dash='dot', line_color=_lo_line,
+                              line_width=1, row=_r, col=_c)
+            _fig_sm.add_hline(y=0.70, line_dash='dot', line_color=_hi_line,
+                              line_width=1, row=_r, col=_c)
+
+            # Phi line
+            _fig_sm.add_trace(go.Scatter(
+                x=_x, y=_y,
+                mode='lines',
+                line=dict(color=color, width=1.8),
+                showlegend=False,
+                hovertemplate=f'<b>{label}</b> %{{x|%b %d}}: Φ=%{{y:.3f}}<extra></extra>',
+            ), row=_r, col=_c)
+
+            # Current value dot (last non-NaN point)
+            _valid_mask = _y.notna()
+            if _valid_mask.any():
+                _last_idx  = _valid_mask[_valid_mask].index[-1]
+                _last_phi  = float(_y.loc[_last_idx])
+                _last_date = _x.loc[_last_idx]
+                _lo_c, _hi_c = (('#85cac5', '#f4a062') if _hi_wide else ('#f4a062', '#85cac5'))
+                _dot_color = (_lo_c if _last_phi < 0.30
+                              else _hi_c if _last_phi > 0.70
+                              else color)
+                _fig_sm.add_trace(go.Scatter(
+                    x=[_last_date], y=[_last_phi],
+                    mode='markers',
+                    marker=dict(color=_dot_color, size=7, line=dict(color='white', width=1)),
+                    showlegend=False, hoverinfo='skip',
+                ), row=_r, col=_c)
+
+        _fig_sm.update_layout(
+            template='plotly_dark+atn',
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            height=360,
+            showlegend=False,
+            margin=dict(l=0, r=0, t=36, b=0),
+        )
+        # Style all axes uniformly
+        _fig_sm.update_yaxes(range=[0, 1], tickformat='.1f', tickfont_size=10, showgrid=False)
+        _fig_sm.update_xaxes(tickformat='%b %d', tickfont_size=10, showgrid=False)
+        # Style subplot titles
+        for ann in _fig_sm.layout.annotations:
+            ann.update(font=dict(size=11, color='#a89f95'))
+
+        st.plotly_chart(_fig_sm, use_container_width=True)
+
+        # ── Chart B: State heatmap ────────────────────────────────────────────────────
+        st.markdown(
+            '<p style="color:#9b958f;font-size:0.72rem;margin:2px 0 6px 0;">'
+            'State heatmap (v4.0 scores) — red: component pushing toward wider swings · grey: normal state · '
+            'green: pushing toward calmer swings. B20% and ADL score a high reading the same as a normal one (v4.0 re-test), '
+            'so their rows are only ever red or grey.</p>',
+            unsafe_allow_html=True,
+        )
+
+        # Build z matrix: rows=components, cols=dates
+        _hm_labels = [lbl for lbl, _, _ in _PHI_CFG]
+        _hm_dates  = _hist_phi['date'].tolist()
+        _hm_z      = []
+        _hm_text   = []
+
+        _HM_SCORE = {'VIX': ('vix_score', None), 'Extension': ('ext_score', 'ext'), 'Momentum': ('mom_score', 'mom'),
+                     'ADL': ('adl_score', 'adl'), 'B20%': ('b20_score', 'b20'), 'SKEW': ('skew_score', 'skew')}
+        for label, col, _ in _PHI_CFG:
+            _row_z    = []
+            _row_text = []
+            _sc_col, _nk = _HM_SCORE[label]
+            _phis = (_hist_phi[col].replace(0, np.nan) if col in _hist_phi.columns
+                     else pd.Series([np.nan] * len(_hist_phi), index=_hist_phi.index))
+            _scs = (_hist_phi[_sc_col] if _sc_col in _hist_phi.columns
+                    else pd.Series([np.nan] * len(_hist_phi), index=_hist_phi.index))
+            for phi_val, sc_val in zip(_phis, _scs):
+                if pd.isna(phi_val) or pd.isna(sc_val):
+                    _row_z.append(np.nan)
+                    _row_text.append('—')
+                    continue
+                # VIX is continuous: use its state bands (Low calm, Mid normal, High/Stress wide)
+                if _nk is None:
+                    _d = 1.0 if phi_val < 0.30 else (-1.0 if phi_val >= 0.60 else 0.0)
+                else:
+                    _d = float(sc_val) - pipeline.NEUTRAL_SCORE[_nk]
+                _tol = 1e-9
+                if _d < -_tol:
+                    _row_z.append(0.15); _st = 'toward wider swings'
+                elif _d > _tol:
+                    _row_z.append(0.85); _st = 'toward calmer swings'
+                else:
+                    _row_z.append(0.5); _st = 'normal'
+                _row_text.append(f'Φ={phi_val:.3f}, score {float(sc_val):+.2f} ({_st})')
+            _hm_z.append(_row_z)
+            _hm_text.append(_row_text)
+
+        # Custom colorscale: red → dark grey (neutral) → green, with sharp breaks at thresholds
+        _hm_colorscale = [
+            [0.00, '#74492e'],
+            [0.20, '#f4a062'],
+            [0.29, '#b9805a'],
+            [0.30, '#1a1918'],   # sharp neutral start
+            [0.70, '#1a1918'],   # sharp neutral end
+            [0.71, '#649995'],
+            [0.90, '#85cac5'],
+            [1.00, '#3d5d5a'],
+        ]
+
+        _fig_hm = go.Figure(go.Heatmap(
+            z=_hm_z,
+            x=_hm_dates,
+            y=_hm_labels,
+            text=_hm_text,
+            hovertemplate='<b>%{y}</b> %{x|%b %d}: %{text}<extra></extra>',
+            colorscale=_hm_colorscale,
+            zmin=0, zmax=1,
+            showscale=False,
+            xgap=1, ygap=2,
+        ))
+
+        _fig_hm.update_layout(
+            template='plotly_dark+atn',
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            height=180,
+            margin=dict(l=0, r=0, t=4, b=0),
+            xaxis=dict(tickformat='%b %d', tickfont_size=10, showgrid=False),
+            yaxis=dict(tickfont_size=11, showgrid=False, autorange='reversed'),
+        )
+        st.plotly_chart(_fig_hm, use_container_width=True)
+
+    with _t_pc:
+        # ══════════════════════════════════════════════════════════════════════════════
+        # PC RATIO CONTEXT (collapsible)
+        # ══════════════════════════════════════════════════════════════════════════════
+        _pc_stale = risk_dial.pc_stale_sessions(hist)
+        if _pc_stale >= 3:
+            st.markdown(
+                f'<div class="neutral-row"><span style="color:#e3b48e">●</span> PC ratio has carried the same value ({float(last.get("pc_ratio", np.nan)):.3f}) '
+                f'for {_pc_stale} sessions. Check the input — enter the USI:PC close in the sidebar. '
+                'Stale PC values caused most of the Apr–Sep 2026 drift (Report v7.0 §2.4).</div>',
+                unsafe_allow_html=True)
+
+        with st.expander('PC Ratio — Five-Zone Context (v4.0 scores)', expanded=_pc_stale >= 3):
+            pc_sma10 = last.get('pc_sma10', np.nan)
+            pc_daily = last.get('pc_ratio', np.nan)
+            try:
+                pc10 = float(pc_sma10)
+                if pc10 < 0.686:
+                    zone, note = 'Extreme LOW', ('Complacency zone. Swings a little narrower than average '
+                                                 '(large-move rate 0.84x / 0.74x at 10 / 21 sessions). Score +0.25.')
+                    zcol = '#85cac5'
+                elif pc10 < 0.732:
+                    zone, note = 'Moderate LOW', 'Slightly narrower swings than average (0.77x / 0.88x). Score +0.25.'
+                    zcol = '#649995'
+                elif pc10 < 0.944:
+                    zone, note = 'Mid', 'Normal zone, slightly narrower swings than average (0.88x / 0.86x). Score +0.25.'
+                    zcol = '#9b958f'
+                elif pc10 < 1.003:
+                    zone, note = 'Moderate HIGH', ('Fear building: wider swings (1.42x / 1.49x). Score −0.25.')
+                    zcol = '#e3b48e'
+                else:
+                    zone, note = 'Extreme HIGH', ('Heavy put buying: the widest swings of any zone in BOTH directions '
+                                                  '(1.79x at 10 and 21 sessions). Its strong upside tail is part of that wide '
+                                                  'distribution, not a calm signal. Score −0.5 (was +1.0 in v3.0).')
+                    zcol = '#f4a062'
+                col1, col2, col3 = st.columns(3)
+                col1.metric('PC SMA-10', f'{pc10:.3f}')
+                col2.metric('Daily PC', f'{float(pc_daily):.3f}' if not np.isnan(float(pc_daily)) else '—')
+                col3.metric('Zone', zone)
+                st.markdown(f"""
+                <div style="background:#121212;border:1px solid #2a2724;border-radius:6px;
+                            padding:10px 16px;font-size:0.86rem;margin-top:8px;">
+                <b style="color:{zcol};">{zone}</b><br>{note}
+                </div>
+                """, unsafe_allow_html=True)
+                st.markdown("""
+                | Zone | SMA-10 | v4.0 score | Large-move rate 10D | 21D | v3.0 score |
+                |------|--------|-----------|---------|---------|------|
+                | Extreme LOW | < 0.686 | **+0.25** | 0.84x | 0.74x | +1.0 |
+                | Moderate LOW | 0.686–0.732 | **+0.25** | 0.77x | 0.88x | +0.5 |
+                | Mid | 0.732–0.944 | +0.25 | 0.88x | 0.86x | 0.0 |
+                | Moderate HIGH | 0.944–1.003 | **−0.25** | 1.42x | 1.49x | −1.0 |
+                | Extreme HIGH | ≥ 1.003 | **−0.5** | 1.79x | 1.79x | +1.0 |
+
+                Large-move rate = share of sessions followed by a move of ±3% (10D) or ±5% (21D) in either
+                direction, relative to all sessions, 2008–2026 (v8 study). Scores are for the dashboard's
+                dispersion job: positive = calmer, negative = wider swings. Cutoffs sit at the ~10th / 18th /
+                80th / 90th percentile of the 10-day average.
+                """)
+            except:
+                st.write('PC SMA-10 data not available.')
 
 
 # ── Load health line (v6.3.2): fills the slot under the decision strip ─────────────────────────────────────
