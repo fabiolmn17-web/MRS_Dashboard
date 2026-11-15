@@ -7,6 +7,51 @@ Versions follow `docs/PROCESS.md`:
 
 The current version is in `VERSION` and in the page footer. Entries before 6.3.1 were reconstructed from the commit history and the project notes on 13 Nov 2026.
 
+## 8.1.0 · 2026-11-15
+
+The scanner and the leader and laggard lists now read the v8 market state (new `state_view.py`): colour and chips, nothing hidden or locked.
+
+- **Scan strip** above the long scans: one chip per scan showing how it did in today's SPY state (▲ works here · ● no edge · ▼ lagged a random entry). Hover shows the evidence (S2 survivorship-free, RS1). Examples:
+  - with ticket A open, breakouts ▼ and deep dips and pullbacks ▲;
+  - with no ticket, bases and breakouts ▼;
+  - in the dip window, momentum ▼.
+- **RS colours by state** (RS label and RS rating, scanner and watchlist panel):
+  - flipped in the dip window, when SPY is in the DIP ZONE or ≤ 20 sessions after it (teal = laggard, copper = leader). RS1: leaders did worst there;
+  - grey in a calm trend (RS1-a: no difference);
+  - as before otherwise.
+- **Momentum light** (leaders list): it now uses the v8 dip window instead of the retired MRS RISK-OFF band.
+- **Laggards list:** in the dip window it is shown dimmed under "rebound window, not an avoid list today"; otherwise it is "Avoid … outside the dip window".
+- **Heat score:** muted chip, and the lookup chips are labelled "describes, no edge" (top-quartile heat earned the same as the universe).
+- **FTD chip and lookup chip:** grey, labelled commentary (C2).
+- **Short scans fold:** relabelled "tested (SB1): avoid in the dip window". It is not locked.
+- Already in place and unchanged: the breakout 5-day-low stop (+0.06R, tested); deep dips with a stop wider than 10% greyed (S1); the "chasing" tag.
+- New `test_state_view.py`: 5 checks.
+
+## 8.0.0 · 2026-11-15
+
+**MAJOR: the exposure driver changes.** The new **MRS v8 card** (`exposure_guide.py`) sits on top of the page. It replaces the composite MRS score as the guide for exposure. The card is visual; the words are in a fold under it, "What each part of the card means", closed by default. The v6 score card (Today card) moves into a fold, "retiring", for comparison until mid-December. Version 7.0.0 was built locally but never shipped; it is folded into this release. Evidence: `Studies/Index_Edge_Program_2026-11/MRS_v7/` (C1, SB1, C2, L3 chain check, v8 sizing) and `Studies/00_GOAL_anchor.md`.
+
+- **Stance badge** (PRESS / NORMAL / EASE), set by the SPY phase:
+  - PRESS: ticket A or B open, 0.75% a trade, swing open risk ≤ 4%;
+  - NORMAL: DIP ZONE, 0.75% a trade, ≤ 3%;
+  - EASE: no ticket, 0.375% a trade, ≤ 1.5%, swing gross ≤ 60%.
+  - v8 sizing run, 500 paths: this beat a flat 3% cap (CAGR 9.1% vs 7.5%, max drawdown −25.9% vs −28.8%) and every clock-based budget.
+- **Clock tile:** sessions since SPY's last DIP ZONE day (DIP / 1–20 / 21–60 / 60+). It is per-trade context (C1, in sample), not size.
+- **SPY phase pills** and a **VIX width gauge** against the median since 1990 (17.56).
+- **SPY tickets:** 1.5% risk each (Fabio, 15 Nov 2026), with unit size and stop or the buy level.
+- **Exit ladder:** stop → +2R break-even → trail the 21 EMA → no cap.
+- **Where to look:** laggards and dips in the dip and the early window; "no leader edge" later.
+- **Hedge tile:**
+  - a window shows only in the 5 sessions after a trend start or a trend end (the 60-session ~5% OTM put);
+  - "never roll puts";
+  - the real put price comes from the new daily put log.
+- **Footer:** sessions since the dip; last follow-through day (commentary only).
+- **New `put_log.py`:** the daily workflow logs SPY put quotes into `mrs_history.csv` (`pl_*` columns): 20 and 60 sessions, ATM / 5% / 10% OTM, mid, implied vol, model price. It needs no workflow change. Until the first logged session, the card shows the 13 Nov IBKR quote as a seed.
+- **`risk_panel.py`:** the modelled "Insurance cost" tile is retired. It priced the hedge about 25% too cheap and advised rolling. `put3m_cost` is still logged.
+- **Chart (`chart_view.py`):** back to Fabio's original lines: EMA 21 light teal, SMA 50 bright grey, SMA 200 orange, SMA 250 dashed orange. Candles are teal up / orange down; the SPY phase colours and the phase key are removed. The ATR lines and markers stay.
+- **Not on the card by decision:** the composite score, the short book, the follow-through day as a rule, RS tilt, margin.
+- `test_exposure_guide.py`: 6 checks (clock, stance, hedge window, budget, card render, put-log row).
+
 ## 6.5.0 · 2026-11-14
 
 The daily chart (scanner, watchlist and ticker lookup) is drawn like the TradingView "Ext·RS" indicator v7.5 with Fabio's settings (`chart_view.py`).

@@ -1,0 +1,59 @@
+"""Unit checks for exposure_guide.py (MRS v8) and put_log.py (run: python test_exposure_guide.py)."""
+import pandas as pd
+import exposure_guide as eg
+import put_log as pl
+
+
+def test_vol_band():
+    m = eg.VIX_MEDIAN
+    assert eg.vol_band(m - 0.01) == 'CALM' and eg.vol_band(m) == 'WIDE' and eg.vol_band(1.5 * m) == 'STRESSED'
+    assert eg.vol_band(None) is None and eg.vol_band(float('nan')) is None
+
+
+def test_clock_and_stance():
+    assert eg.clock(pd.Series([3, 0])) == ('IN DIP', 0)
+    assert eg.clock(pd.Series([0] + [3] * 20)) == ('EARLY', 20)
+    assert eg.clock(pd.Series([0] + [2] * 21)) == ('MID', 21)
+    assert eg.clock(pd.Series([0] + [2] * 61)) == ('LATE', 61)
+    assert eg.stance(1) == 'PRESS' and eg.stance(2) == 'PRESS' and eg.stance(0) == 'NORMAL' and eg.stance(3) == 'EASE'
+    assert eg.stance(None) is None
+
+
+def test_hedge_window():
+    assert eg.hedge_window(pd.Series([3] * 10 + [2])) == ('trend start', 0)
+    assert eg.hedge_window(pd.Series([2] * 10 + [3, 3])) == ('trend end', 1)
+    assert eg.hedge_window(pd.Series([2] * 20)) is None
+    assert eg.hedge_window(pd.Series([3] * 5 + [2] + [2] * 6)) is None          # started 6 sessions ago: window over
+
+
+def test_unit_size_and_caps():
+    assert abs(eg.unit_size(100, 97.5) - 0.60) < 1e-9          # 1.5% / 2.5% stop
+    assert eg.unit_size(100, 99.5) == 1.0 and eg.unit_size(100, 101) is None
+    assert eg.BUDGET == {'PRESS': (0.0075, 0.04, 1.0), 'NORMAL': (0.0075, 0.03, 1.0), 'EASE': (0.00375, 0.015, 0.6)}
+
+
+def test_card_renders():
+    s = dict(A=dict(open=True, entry=700.0, stop=680.0), B=dict(open=False), rb_level=690.0, bo_level=760.0)
+    for ph in ([0, 0], [0] + [1] * 30, [0] + [2] * 80, [2] * 70 + [3]):
+        for vix in (14.0, 20.0, 30.0, None):
+            h = eg.card_html(s, pd.Series(ph), vix, pl.latest(None), None, 'Fri 13 Nov 2026')
+            assert 'MRS v8' in h and 'Swing open risk' in h and 'Hedge' in h, (ph, vix)
+    assert 'not available' in eg.card_html({}, None, 15.0)
+    assert 'Stance' in eg.explainer_md()
+
+
+def test_put_log_row():
+    q = {'2026-12-18': {675: (2.25, 2.29), 712: (4.84, 4.91), 750: (12.62, 12.74)},
+         '2027-02-19': {675: (7.03, 7.11), 710: (11.27, 11.38), 750: (20.74, 20.90)}}
+    ch = lambda e: pd.DataFrame([dict(strike=k, bid=b, ask=a, lastPrice=0) for k, (b, a) in q.get(e, {}).items()])
+    r = pl.build_row(749.56, '2026-11-13', list(q), ch, 0.0432, 19.29, 20.62)
+    assert r['pl_p5_60_k'] == 710 and abs(r['pl_p5_60_mid'] - 11.325) < 1e-9 and abs(r['pl_p5_60_iv'] - 0.1883) < 2e-4
+    assert abs(r['pl_p10_20_mod'] / r['pl_p10_20_mid'] - 0.265) < 0.01          # the 13 Nov chain check
+    assert r['pl_src'] == 'yahoo ba'
+    assert pl.latest(pd.DataFrame([dict(date='2026-11-13', **r)]))['strike'] == 710
+
+
+if __name__ == '__main__':
+    for n, f in list(globals().items()):
+        if n.startswith('test_'):
+            f(); print('ok', n)

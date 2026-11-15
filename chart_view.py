@@ -10,6 +10,8 @@ Shows the last ~12 months of daily candles with:
   Volume pane   (4 Nov 2026) daily volume bars (teal up / orange down day) and the 50-day average, under the price
   Base overlay  (3 Nov 2026) the current base from StockScanner/bases.py on this chart's own (unadjusted) prices:
                 shaded base, the cup's left lip / low / right lip, the handle, and the pivot line
+v8 (15 Nov 2026): candles teal up / orange down again (no SPY phase colours); EMA 21 light teal, SMA 50 bright
+  grey, SMA 200 orange, SMA 250 dashed orange. The rest of v6.5 stays (ATR lines, markers).
 v6.5 (14 Nov 2026): drawn like the TradingView "Ext·RS" indicator v7.5 (see figure()): candles in the SPY phase colour,
   SMA 50 / 200 / 250, SMA 50 +/- 2..5 ATR lines, Deep dip / chase / R1 markers. The EMA 10 and the 52W / 21D high lines
   above are replaced (EMA 21 and the highs are in the legend).
@@ -158,7 +160,7 @@ def _add_pivots(fig, h, v):
 # ── v6.5 (14 Nov 2026): the chart drawn like the TradingView "Ext·RS" indicator v7.5 (Fabio's settings) ──────────────
 PH_COL = {0: '#85cac5', 1: '#649995', 2: '#e8dccb', 3: '#8a847c'}       # Dip zone / Recovery / Trend / Out
 PH_NAME = {0: 'Dip zone', 1: 'Recovery', 2: 'Trend', 3: 'Out'}
-S50_COL, S200_COL, E21_COL = 'rgba(201,193,183,0.65)', '#b9805a', '#9b958f'
+S50_COL, S200_COL, E21_COL = '#e6e6e6', '#f4a062', '#a6e3de'   # v8 (15 Nov 2026): SMA 50 bright grey, SMA 200/250 orange, EMA 21 light teal
 ATR_UP_COL, ATR_DN_COL = '#b9805a', '#649995'
 ATR_UP, ATR_DN, ATR_N = (2, 3, 4, 5), (2, 3, 4, 5), 20  # SMA 50 + / - k ATR(14), drawn over the last 20 sessions
 MK_COL = dict(dd='#76ff03', dw='#9e9e9e', ch='#ff5252', os='#ffeb3b')
@@ -257,35 +259,29 @@ def figure(h: pd.DataFrame, ticker: str, height: int = 520, base: dict = None, s
     lv = levels(h)
     fig = go.Figure()
 
-    # candles in the SPY phase colour
-    ph_all = spy_phase(spy)
+    # candles: teal up / orange down (v8, 15 Nov 2026: the SPY phase colours are gone; the phase lives on the MRS card)
+    ph_all = spy_phase(spy)                     # still used for the breakout-in-dip-zone marker
     if ph_all is not None:
         ph = ph_all.reindex(v.index).fillna(3).astype(int).to_numpy()
     else:
         ph = np.full(len(v), 3)
-    for p in (0, 1, 2, 3):
-        m = ph == p
-        if not m.any():
-            continue
-        col = PH_COL[p]
-        w = lambda s_: s_.where(m)
-        fig.add_trace(go.Candlestick(
-            x=x, open=w(v['Open']), high=w(v['High']), low=w(v['Low']), close=w(v['Close']),
-            name=f'SPY {PH_NAME[p].lower()}', showlegend=False,
-            increasing=dict(line=dict(color=col, width=1), fillcolor='rgba(0,0,0,0)'),
-            decreasing=dict(line=dict(color=col, width=1), fillcolor=col)))
+    fig.add_trace(go.Candlestick(
+        x=x, open=v['Open'], high=v['High'], low=v['Low'], close=v['Close'], name=ticker, showlegend=False,
+        increasing=dict(line=dict(color=UP, width=1), fillcolor=UP),
+        decreasing=dict(line=dict(color=DOWN, width=1), fillcolor=DOWN)))
     fig.add_trace(go.Scatter(x=xf, y=[float(c.iloc[-1])] * FUTURE, mode='markers', marker=dict(opacity=0),
                              hoverinfo='skip', showlegend=False))
 
-    # moving averages (EMA 21 and the highs: click in the legend)
+    # moving averages (v8, 15 Nov 2026: Fabio's original set): EMA 21 light teal, SMA 50 bright grey,
+    # SMA 200 orange, SMA 250 dashed orange
+    fig.add_trace(go.Scatter(x=x, y=e21.iloc[-BARS:], name='EMA 21', mode='lines',
+                             line=dict(color=E21_COL, width=1.3), hoverinfo='skip'))
     fig.add_trace(go.Scatter(x=x, y=s50.iloc[-BARS:], name='SMA 50', mode='lines',
-                             line=dict(color=S50_COL, width=1), hoverinfo='skip'))
+                             line=dict(color=S50_COL, width=1.3), hoverinfo='skip'))
     fig.add_trace(go.Scatter(x=x, y=s200.iloc[-BARS:], name='SMA 200', mode='lines',
-                             line=dict(color=S200_COL, width=1), hoverinfo='skip'))
+                             line=dict(color=S200_COL, width=1.5), hoverinfo='skip'))
     fig.add_trace(go.Scatter(x=x, y=s250.iloc[-BARS:], name='SMA 250', mode='lines',
-                             line=dict(color=S200_COL, width=1, dash='dash'), hoverinfo='skip'))
-    fig.add_trace(go.Scatter(x=x, y=e21.iloc[-BARS:], name='EMA 21 (exit trail)', mode='lines', visible='legendonly',
-                             line=dict(color=E21_COL, width=1), hoverinfo='skip'))
+                             line=dict(color=S200_COL, width=1.2, dash='dash'), hoverinfo='skip'))
     for y, col, dash, lbl in ((lv['hi52'], HI52_COL, 'dash', '52W high'), (lv['hi21'], HI20_COL, 'dot', '21D high')):
         if np.isfinite(y):
             fig.add_trace(go.Scatter(x=[x[0], x[-1]], y=[y, y], name=f'{lbl} {y:,.2f}', mode='lines',
@@ -340,15 +336,7 @@ def figure(h: pd.DataFrame, ticker: str, height: int = 520, base: dict = None, s
     _add_base(fig, v, base_info(h) if base is None else base)
     _add_pivots(fig, h, v)
 
-    # SPY phase key (top left)
-    if ph_all is not None:
-        today = PH_NAME[int(ph[-1])]
-        key = ' '.join(f'<span style="color:{PH_COL[p]}">■ {PH_NAME[p]}</span>' for p in (0, 1, 2, 3))
-        ktxt = f'SPY phase today: <b style="color:{PH_COL[int(ph[-1])]}">{today.upper()}</b>   {key}'
-    else:
-        ktxt = '<span style="color:#9b958f">SPY phase not available right now (candles in the Out colour)</span>'
-    fig.add_annotation(xref='paper', yref='paper', x=0.0, y=1.0, xanchor='left', yanchor='top', showarrow=False,
-                       text=ktxt, font=dict(size=10, color='#c9c1b7'), bgcolor='rgba(18,18,18,0.75)')
+    # (v8, 15 Nov 2026: the SPY phase key is removed with the phase colours)
 
     # volume pane (4 Nov 2026): bars coloured by the candle, 50-day average line; its own axis under the price
     has_vol = 'Volume' in v.columns and pd.to_numeric(v['Volume'], errors='coerce').fillna(0).gt(0).any()

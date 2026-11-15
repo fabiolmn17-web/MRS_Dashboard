@@ -427,18 +427,11 @@ def panel_html(snap: dict) -> str:
               + '</div></div>')
     else:
         h += f'<div class="tile"><div class="lab">Effective bets</div><div class="sub">Industry prices not available.</div></div>'
-    # 4. Insurance cost
-    if _fin(snap['cost']):
-        pc = snap['cost_pct']
-        h += (f'<div class="tile"><div class="lab">Insurance cost {_ev("Descriptive")}</div>'
-              f'<div style="display:flex;align-items:baseline;gap:8px;"><span class="big num" style="color:{INK};">{snap["cost"] * 100:.2f}%</span>'
-              f'<span class="sub">of SPY per month</span></div>'
-              f'<div class="sub">3-month SPY put, 10% out of the money · VIX3M {snap["vix3m"]:.1f} · '
-              f'{"—" if not _fin(pc) else _ord(int(round(pc * 100))) + " percentile since 2008"}</div>'
-              f'{_meter(pc, 0, 1, {"cheap": 0.2, "median": 0.5, "dear": 0.8}, GRAD)}'
-              f'<div class="act">{insurance_sentence(snap["bandg"], snap["trend"], snap["inverted"])}</div></div>')
-    else:
-        h += '<div class="tile"><div class="lab">Insurance cost</div><div class="sub">VIX3M not available.</div></div>'
+    # 4. Insurance cost: retired in v8.0.0 (15 Nov 2026). The modelled 3-month 10% OTM put underpriced the real
+    #    chain by about 25% (IBKR check, 13 Nov 2026) and its "roll" advice contradicts Layer 3. The hedge now lives
+    #    on the MRS v8 card (60-session ~5% OTM put, real quotes from put_log.py). put3m_cost is still logged.
+    h += ('<div class="tile"><div class="lab">Insurance</div><div class="sub">Moved to the hedge tile on the MRS v8 '
+          'card (real put quotes). Never roll puts.</div></div>')
     h += '</div>'
     # 5. Vol guide (collapsed by default)
     inv = snap['invested']

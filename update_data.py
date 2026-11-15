@@ -131,6 +131,26 @@ def main():
     except Exception as e:
         print(f'  Allocation log skipped: {e}')
 
+    # 3d. SPY put forward log (put_log.py, MRS v8, 15 Nov 2026): real put quotes, 20 / 60 sessions, ATM / 5% / 10% OTM.
+    #     Columns pl_* in mrs_history.csv. Never blocks the update.
+    try:
+        import put_log
+        pday, prow = put_log.fetch_row()
+        mask = pd.to_datetime(hist['date']).dt.normalize() == pd.Timestamp(pday).normalize()
+        if mask.any():
+            for k, v in prow.items():
+                if k not in hist.columns:
+                    hist[k] = np.nan
+                if isinstance(v, str):
+                    hist[k] = hist[k].astype(object)
+                hist.loc[mask, k] = v
+            print(f"  Put log {pd.Timestamp(pday).date()}: 60-session 5% OTM {prow.get('pl_p5_60_k')} mid "
+                  f"{prow.get('pl_p5_60_mid')} (model {prow.get('pl_p5_60_mod')}) | {prow.get('pl_src')}")
+        else:
+            print(f'  Put log skipped: session {pd.Timestamp(pday).date()} not in history')
+    except Exception as e:
+        print(f'  Put log skipped: {e}')
+
     # 4. Save
     pipeline.save_history(hist, HIST_PATH)
     print(f'\n  Saved {len(hist)} rows to {HIST_PATH.name}')

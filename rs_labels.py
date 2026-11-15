@@ -176,7 +176,7 @@ def label_info(s: pd.Series, spy: pd.Series, hold: int = HOLD_DAYS) -> Optional[
 
 
 # ── buy-leaders helpers ─────────────────────────────────────────────────────────
-def momentum_light(spy: pd.Series, band: str) -> dict:
+def momentum_light(spy: pd.Series, band: str = None, crash: bool = None) -> dict:
     """Momentum ON when SPY is above its close 252 sessions ago and the MRS band is not RISK-OFF.
 
     Otherwise CAUTION: momentum-crash state (Daniel-Moskowitz). momentum_rs_persistence: leader-minus-laggard
@@ -187,16 +187,20 @@ def momentum_light(spy: pd.Series, band: str) -> dict:
     spy = spy.dropna()
     r12 = float(spy.iloc[-1] / spy.iloc[-252] - 1) if len(spy) >= 252 else np.nan
     up = (not np.isnan(r12)) and r12 > 0
-    off = band == 'RISK-OFF'
+    # v8.1.0 (15 Nov 2026): the composite MRS band is retired; the momentum-crash state is the v8 dip window
+    # (IN DIP or <= 20 sessions after the last DIP ZONE day; RS1: leaders worst, laggards best there). The old band
+    # is used only when no v8 state is passed.
+    off = bool(crash) if crash is not None else band == 'RISK-OFF'
     on = up and not off
     if on:
-        why = 'SPY above its level 252 sessions ago and MRS not RISK-OFF'
+        why = ('SPY above its level 252 sessions ago and outside the dip window' if crash is not None else
+               'SPY above its level 252 sessions ago and MRS not RISK-OFF')
     else:
         parts = []
         if not up:
             parts.append('SPY below its level 252 sessions ago')
         if off:
-            parts.append('MRS in RISK-OFF')
+            parts.append('SPY in the dip window (DIP ZONE or ≤ 20 sessions after)' if crash is not None else 'MRS in RISK-OFF')
         why = ' and '.join(parts) if parts else 'SPY 12-month return unavailable'
     return {'on': on, 'spy_12m': r12, 'risk_off': off, 'why': why}
 

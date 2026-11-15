@@ -12,6 +12,7 @@ import re
 import pandas as pd
 
 from market_state import EXT_COL, MOM_COL, chip
+from state_view import RS_MODE_TIP
 import heat_score
 
 TEAL, TEAL_M, ORANGE, ORANGE_M, COPPER, DIM = '#85cac5', '#649995', '#f4a062', '#b9805a', '#e3b48e', '#9b958f'
@@ -45,6 +46,35 @@ def _score_col(v):
         return DIM
     v = float(v)
     return TEAL if v >= 1.0 else TEAL_M if v >= 0.5 else ORANGE if v <= -1.0 else ORANGE_M if v <= -0.5 else DIM
+
+
+# v8.1.0 (15 Nov 2026): RS colours follow the market state (state_view.rs_mode; set by app.py before build_html).
+#   'invert'  dip window (IN DIP or <= 20 sessions after): laggards did best, leaders worst (RS1, S3 rerun) -> flipped
+#   'neutral' calm trend: leaders = laggards (RS1-a failed) -> grey
+#   'normal'  as before
+RS_MODE = 'normal'
+RS_GREY = '#8a847c'
+
+
+def _rs_col(v):
+    """Colour of an RS score (held label score) under RS_MODE."""
+    if _nan(v):
+        return DIM
+    if RS_MODE == 'neutral':
+        return RS_GREY
+    return _score_col(-float(v) if RS_MODE == 'invert' else v)
+
+
+def _rr_col(rr):
+    """Colour of the RS rating (1-99) under RS_MODE."""
+    if _nan(rr):
+        return DIM
+    rr = float(rr)
+    if RS_MODE == 'neutral':
+        return RS_GREY
+    if RS_MODE == 'invert':
+        return COPPER if rr >= 80 else '#e8dccb' if rr >= 50 else TEAL
+    return TEAL if rr >= 80 else '#e8dccb' if rr >= 50 else COPPER
 
 
 def _s(v):
@@ -114,8 +144,9 @@ def quality_html(r):
     if len(fl) > 2:
         out += f' <span class="sub" title="{_e("; ".join(fl))}">+{len(fl) - 2}</span>'
     if _truthy(r.get('base_bo_ftd')):
-        out += (' <span title="Breakout within 20 sessions after a follow-through day on SPY">'
-                + chip('FTD', TEAL, True) + '</span>')
+        out += (' <span title="Breakout within 20 sessions after a follow-through day on SPY. Commentary only: in C2 '
+                '(15 Nov 2026) waiting for a follow-through day did not help (early entries after one +0.03R vs +0.22R '
+                'without).">' + chip('FTD', DIM, False) + '</span>')
     if _truthy(r.get('db_sk3')):
         lv = r.get('db_sk3_level')
         out += (f' <span title="{_e("Shakeout+3: the close cleared 10% above the double-bottom shakeout low " + ("" if _nan(lv) else f"({float(lv):,.2f})") + " in the last 3 sessions")}">'
@@ -438,7 +469,7 @@ def _row(r, today, sec_label, sec_score, leader_hold, yf_to_sector, clickable=Fa
     tag_html = chip(tag, TEAL, True) if tag else ''
     pend = _s(r.get('pending_label'))
     pend_html = f' <span style="color:#e3b48e;font-size:0.66rem;">→ {_e(pend.title())}</span>' if pend else ''
-    rs_html = (f'<b style="color:{_score_col(hs)};">{"" if _nan(hs) else f"{float(hs):+.1f}"} {_e(lab)}</b>'
+    rs_html = (f'<b style="color:{_rs_col(hs)};" title="{_e(RS_MODE_TIP.get(RS_MODE, ""))}">{"" if _nan(hs) else f"{float(hs):+.1f}"} {_e(lab)}</b>'
                f' <span class="sub">{"" if _nan(days) else str(int(float(days))) + "d"}</span> {tag_html}{pend_html}')
     ext = r.get('ext_atr')
     ez = _s(r.get('ext_zone'))
@@ -477,7 +508,8 @@ def _row(r, today, sec_label, sec_score, leader_hold, yf_to_sector, clickable=Fa
               f'and trend tag, industry (group state + leader), sector, 52-week high, trend. Describes leadership, not a return '
               f'forecast: 2009–26, top-quartile heat earned the same as the universe (±0.3 pp a month). Descriptive.">'
               f'<span style="display:inline-block;min-width:30px;border-radius:3px;padding:0 5px;font-family:IBM Plex Mono,'
-              f'monospace;font-weight:700;color:#121212;background:{hc_};">{int(float(hs_))}</span></td>')
+              f'monospace;font-weight:700;color:{hc_};background:#24211e;border:1px solid #3a3632;">'
+              f'{int(float(hs_))}</span></td>')   # v8.1.0: muted (describes leadership, no edge)
     h += (f'<td class="l" data-s="{_e(sect)}"><span style="color:{_score_col(ssc)};">{_e(sect)}</span>'
           f'{" <span class=sub>" + _e(sec_label.get(sect, "").title()) + "</span>" if sec_label.get(sect) else ""}</td>')
     cl = r.get('close')
@@ -489,9 +521,9 @@ def _row(r, today, sec_label, sec_score, leader_hold, yf_to_sector, clickable=Fa
         h += f'<td class="num" data-s="{_sv(r.get(k))}" style="color:{_col(r.get(k))};">{_pct(r.get(k))}</td>'
     # RS rating (3 Nov 2026): percentile 1-99 across the scanned universe; >= 80 = the Growth screen's RS gate
     rr = r.get('rs_rating')
-    rr_c = DIM if _nan(rr) else TEAL if float(rr) >= 80 else '#e8dccb' if float(rr) >= 50 else COPPER
+    rr_c = _rr_col(rr)
     h += (f'<td class="num" data-s="{_sv(rr)}" style="color:{rr_c};" title="RS rating: weighted 12-month performance '
-          f'(last quarter x2) ranked 1-99 across the scanned universe; 80+ = top 20%">'
+          f'(last quarter x2) ranked 1-99 across the scanned universe; 80+ = top 20%. {_e(RS_MODE_TIP.get(RS_MODE, ""))}">'
           f'{"—" if _nan(rr) else int(float(rr))}</td>')
     h += (f'<td class="num" data-s="{_sv(ext)}">{"—" if _nan(ext) else f"{float(ext):+.2f}"} '
           f'{chip(ez, EXT_COL.get(ez, DIM), ez in ("Near", "Just below"))}</td>')

@@ -34,6 +34,9 @@ import risk_panel
 import allocation
 import context_card
 import today_card
+import exposure_guide          # v8.0.0 (15 Nov 2026): MRS v8 card (visual; words in a closed fold)
+import put_log                 # v8.0.0: daily SPY put log (pl_* columns), price on the hedge tile
+import state_view              # v8.1.0: scanner / leaders / laggards read through the v8 state
 import scan_view
 import heat_score
 import chart_view
@@ -47,7 +50,7 @@ try:
 except Exception:
     _PROC_START = None
 for _m in (pipeline, rs_labels, risk_dial, sector_view, rotation_view, market_state, risk_panel, allocation, scan_view,
-           chart_view, watchlist, heat_score):
+           chart_view, watchlist, heat_score, exposure_guide, put_log, state_view):
     try:
         _mt = os.path.getmtime(_m.__file__)
         _seen = getattr(_m, '_mrs_mtime', None)
@@ -711,8 +714,31 @@ if _scan_part.exists():
                 + _scan_part.read_text(encoding='utf-8').strip()[:140])
     except Exception:
         pass
+# ── v8.1.0 (15 Nov 2026): the v8 market state, computed once here so the card, the momentum light, the scanner and
+#    the leader / laggard lists all read the same state (SPY phase code, clock, VIX band). ────────────────────────────
+@st.cache_data(ttl=3 * 3600, show_spinner=False)
+def _eg_spy():
+    """SPY daily OHLCV, 10 years (chart_view.fetch): phase series, clock and the follow-through-day footnote."""
+    return chart_view.fetch('SPY')
+
+
+_v8, _eg_h, _eg_ph = {}, None, None
+try:
+    _eg_h = _eg_spy()
+    _eg_src = _eg_h if _eg_h is not None and len(_eg_h) else (load_alloc_inputs() or {}).get('SPY')
+    _eg_ph = chart_view.spy_phase(_eg_src)
+    if _eg_ph is not None and len(_eg_ph):
+        _v8_b, _v8_n = exposure_guide.clock(_eg_ph)
+        _v8_vix = float(last.get('vix', np.nan))
+        _v8 = dict(code=int(_eg_ph.iloc[-1]), bucket=_v8_b, n=_v8_n,
+                   vb=exposure_guide.vol_band(_v8_vix if _v8_vix == _v8_vix else None))
+except Exception as _v8_err:
+    print(f'[v8 state] {_v8_err}')
+scan_view.RS_MODE = state_view.rs_mode(_v8)
+_crash = state_view.crash_window(_v8) if _v8 else None
+
 _bp = _band_profile(hist)
-_mom_light = rs_labels.momentum_light(hist.sort_values('date').set_index('date')['spy'].astype(float), reg)
+_mom_light = rs_labels.momentum_light(hist.sort_values('date').set_index('date')['spy'].astype(float), reg, crash=_crash)
 _leaders = rs_labels.leaders_shortlist(_ind_df)
 _added, _dropped = rs_labels.shortlist_changes(_ind_df)
 
@@ -835,6 +861,7 @@ def _gl_header() -> dict:
 # v6.4 (14 Nov 2026): the Today card replaces the decision strip; it is filled below, once the SPY phase
 # and the pedal snapshot are known. The decision strip code (market_state.decision_strip_html) is kept.
 _show_all = bool(st.session_state.get('show_all', False))
+_guide_slot = st.empty()          # v8.0.0: MRS v8 card (clock x phase x VIX) on top
 _today_slot = st.empty()
 _health_slot = st.empty()          # filled at the end of the run with the load-health line
 
@@ -875,10 +902,24 @@ if _rp_snap is None and not any(h[0] == 'Risk today panel' for h in _HEALTH):
 _ctx_ext = _rp_snap.get('ext_atr') if _rp_snap else None
 st.session_state['_ctx'] = (reg, _deep, _al_states.get('SPY'), _ctx_ext)
 st.session_state['_ctx_chase'] = bool(_al_states.get('SPY')) and context_card.chasing(_al_states.get('SPY'), _ctx_ext)
+# ── v8.0.0 (15 Nov 2026): MRS v8 card: clock x SPY phase x VIX -> stance, budget, tickets, exit, where to look, hedge.
+#    Visual on top; the words are in a fold under it, closed by default (exposure_guide.explainer_md()).
+try:
+    _eg_vix = float(last.get('vix', np.nan))
+    with _guide_slot.container():
+        st.markdown(exposure_guide.card_html(_al_states.get('SPY'), _eg_ph, _eg_vix if _eg_vix == _eg_vix else None,
+                                             put=put_log.latest(hist), spy_ohlcv=_eg_h,
+                                             date_txt=f'{last_dt:%a %d %b %Y}'), unsafe_allow_html=True)
+        with st.expander('What each part of the card means', expanded=False):
+            st.markdown(exposure_guide.explainer_md())
+except Exception as _eg_err:
+    print(f'[mrs v8 card] {_eg_err}')
+    _health('MRS v8 card', _eg_err)
 try:
     _since = ' · '.join(x for x in [(_changes[0] if _changes and str(_changes[0]).startswith('MRS') else ''),
                                     (_bhl if '_bhl' in globals() and _bhl else '')] if x)
-    _today_slot.markdown(today_card.card_html(
+    _today_slot.container().expander('MRS v6 score card (retiring: shown for comparison until mid-December)',
+                                     expanded=_show_all).markdown(today_card.card_html(
         mrs, reg, rcol, f"{_ordinal(int(round(ctx['percentile'])))} percentile since {ctx['start'].year}", _deep,
         (ctx['p10'] if _deep == 'DEEP RISK-OFF' else ctx['p90']), _al_states.get('SPY'), _ctx_ext, _rp_snap,
         since=_since, levels={'VIX': _f('vix', '{:.2f}'), 'SPX': _f('spx', '{:,.0f}')},
@@ -927,7 +968,8 @@ with st.expander('Market detail: levels and changes, risk panel, SPY / QQQ ticke
         _health('Leaders list', _ld_err)
 
     try:
-        st.markdown(market_state.avoid_html(rs_labels.laggards_shortlist(_ind_df), _hold_df), unsafe_allow_html=True)
+        st.markdown(market_state.avoid_html(rs_labels.laggards_shortlist(_ind_df), _hold_df, crash=bool(_crash)),
+                    unsafe_allow_html=True)
     except Exception as _av_err:
         print(f'[avoid] {_av_err}')
         _health('Avoid list', _av_err)
@@ -1395,13 +1437,13 @@ def _scan_counts_html(sd):
                                 ('No faults', (bt != '') & sd['base_faults'].fillna('').astype(str).isin(['', 'None', 'nan'])
                                  if 'base_faults' in sd.columns else pd.Series(False, index=sd.index), '#85cac5'),
                                 ('Formed in a correction', tb('base_in_corr'), '#e3b48e'),
-                                ('Breakout ≤ 20d after FTD', tb('base_bo_ftd'), '#85cac5')]),
+                                ('Breakout ≤ 20d after FTD (commentary)', tb('base_bo_ftd'), '#8a847c')]),
         ('Pivot', [('Near pivot', bs == 'Near pivot', '#e3b48e'), ('Broke out today', bs == 'Broke out today', '#85cac5'),
                    ('Broke out ≤ 5 sessions', bs.str.startswith('Broke out'), '#85cac5')]),
-        ('Heat score', [('Hot 80+', pd.to_numeric(sd['heat_score'], errors='coerce') >= 80
-                         if 'heat_score' in sd.columns else pd.Series(False, index=sd.index), '#85cac5'),
+        ('Heat score (describes, no edge)', [('Hot 80+', pd.to_numeric(sd['heat_score'], errors='coerce') >= 80
+                         if 'heat_score' in sd.columns else pd.Series(False, index=sd.index), '#8a847c'),
                         ('Warm 65–79', pd.to_numeric(sd['heat_score'], errors='coerce').between(65, 79.99)
-                         if 'heat_score' in sd.columns else pd.Series(False, index=sd.index), '#649995')]),
+                         if 'heat_score' in sd.columns else pd.Series(False, index=sd.index), '#6e675f')]),
         ('Industry leaders', [('Leader', sd['ind_role'].fillna('').astype(str).str.startswith('Leader')
                                if 'ind_role' in sd.columns else pd.Series(False, index=sd.index), '#e3b48e'),
                               ('In a leading industry', sd['ind_role'].fillna('').astype(str).eq('Leader · leading industry')
@@ -1779,10 +1821,11 @@ if _scan_df is not None and len(_scan_df) > 0:
     _c3 = st.expander('More filters: squeeze, base faults, correction, depth', expanded=_show_all)   # v6.4
     if hasattr(st, 'pills'):
         with _c1:
+            st.markdown(state_view.scan_strip_html(_v8), unsafe_allow_html=True)   # v8.1.0: how each scan did here
             st.pills('Long  ·  momentum list', _LONG_K, format_func=_fmt_scan, selection_mode='single',
                      key='ms_pick_long', on_change=_pick, args=('long',))
         with _c2:
-            with st.expander('Short scans (untested)', expanded=(_cur in _SHORT_K) or _show_all):   # v6.4: folded
+            with st.expander('Short scans · tested (SB1): avoid in the dip window', expanded=(_cur in _SHORT_K) or _show_all):   # v8.1.0 label; not locked
                 st.pills('Short  ·  short list', _SHORT_K, format_func=_fmt_scan, selection_mode='single',
                          key='ms_pick_short', on_change=_pick, args=('short',))
     else:                                               # older Streamlit

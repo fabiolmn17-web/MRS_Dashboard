@@ -481,11 +481,22 @@ def _rs_bar(v, lim: float = 0.20) -> str:
             f'</span><span class="num" style="color:{col};min-width:46px;text-align:right;">{_pct(v)}</span></span>')
 
 
-def avoid_html(lag: pd.DataFrame, hold_df: pd.DataFrame = None) -> str:
-    h = CSS + ('<div class="ld" style="margin-top:14px;"><div class="hdr"><span class="ttl" style="color:#f4a062;">'
-               'Avoid: laggards — don\'t buy them for a catch-up outside RISK-OFF</span>' + ev('Tested') + '</div>')
+def avoid_html(lag: pd.DataFrame, hold_df: pd.DataFrame = None, crash: bool = False) -> str:
+    """crash (v8.1.0): SPY in the dip window (IN DIP or <= 20 sessions after the last DIP ZONE day). The list was tested
+    against the old RISK-OFF band; the dip window is its v8 stand-in. In the window the list is shown dimmed under a
+    'rebound window' banner (laggards rebounded then; RS1: laggards did best in the dip zone). Nothing is hidden."""
+    if crash:
+        h = CSS + ('<div class="ld" style="margin-top:14px;"><div class="hdr"><span class="ttl" style="color:#85cac5;">'
+                   'Laggards: rebound window, not an avoid list today</span>' + ev('Tested') + '</div>'
+                   '<div class="note" style="font-size:0.80rem;color:#e8dccb;margin:-2px 0 6px 0;">SPY is in the dip '
+                   'window. Here laggard industries rebounded with the market (+0.7 pp vs SPY a month, tested in the old '
+                   'RISK-OFF band) and laggard stocks were the better longs (RS1). Shorts from this list lost.</div>'
+                   '<div style="opacity:0.55;">')
+    else:
+        h = CSS + ('<div class="ld" style="margin-top:14px;"><div class="hdr"><span class="ttl" style="color:#f4a062;">'
+                   'Avoid: laggards — don\'t buy them for a catch-up outside the dip window</span>' + ev('Tested') + '</div><div>')
     if lag is None or len(lag) == 0:
-        h += '<div class="note" style="font-size:0.78rem;">No industry passes the laggard filter today.</div></div>'
+        h += '<div class="note" style="font-size:0.78rem;">No industry passes the laggard filter today.</div></div></div>'
         return h.replace('\n', ' ')
     h += '<table><thead><tr>'
     for lbl, cls in [('Industry', 'l'), ('ETF', 'l'), ('Sector', 'l'), ('Label', 'l'), ('RS 1M', ''),
@@ -520,5 +531,5 @@ def avoid_html(lag: pd.DataFrame, hold_df: pd.DataFrame = None) -> str:
               '−1.0), with a ≥5% squeeze in 56% of months (every industry: 52%). Not beta-adjusted. '
               f'{ev("Provisional")} Across all bands laggards lag SPY slightly (0.3 pp a month, 1.0 pp over 3 months; CIs '
               'include 0). Shorting them vs shorting any industry: no edge shown (audit v2, 8 Nov 2026).')
-    h += '</div>'
+    h += '</div></div>'
     return h.replace('\n', ' ')
