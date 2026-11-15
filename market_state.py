@@ -519,10 +519,11 @@ def avoid_html(lag: pd.DataFrame, hold_df: pd.DataFrame = None, crash: bool = Fa
         h += f'<td class="l">{_weak_holdings(hold_df, r["ETF"])}</td>'
         h += '</tr>'
     h += '</tbody></table>'
-    h += ('<div class="note" style="font-size:0.80rem;color:#f3ece2;margin-top:6px;"><b>Use: outside RISK-OFF these '
-          'industries lagged SPY by about 1 pp a month: don\'t buy them for a catch-up. In RISK-OFF they rebounded with the '
-          'market (+0.7 pp vs SPY a month) and outright shorts lost 2.7% a month, with a ≥5% squeeze in 56% of months: '
-          'no shorts from this list in RISK-OFF; elsewhere only with a setup of its own and a tight stop.</b></div>')
+    h += ('<div class="note" style="font-size:0.80rem;color:#f3ece2;margin-top:6px;"><b>Use: outside the dip window '
+          'these industries lagged SPY by about 1 pp a month: don\'t buy them for a catch-up. In the dip window they '
+          'rebounded with the market (+0.7 pp vs SPY a month) and outright shorts lost 2.7% a month, with a ≥5% squeeze in '
+          '56% of months: no shorts from this list then; elsewhere only with a setup of its own and a tight stop.</b> '
+          '<span style="color:#a89f95;">(Tested on the old RISK-OFF band; the v8 dip window stands in for it.)</span></div>')
     h += _how('How this list is built and what is tested',
               'Industry ETFs, held labels. On the list: structural laggard (−1.5) whose RS 1M is not positive, or '
               'underperforming (−0.5) with 3M weaker than 6M (1Y−, 6M+, 3M−). Sorted weakest RS 3M first. Weakest holdings = top-10 holdings with RS '

@@ -746,13 +746,17 @@ _added, _dropped = rs_labels.shortlist_changes(_ind_df)
 import html as _html_mod
 _esc = lambda x: _html_mod.escape(str(x))
 _changes = []
-_h2 = hist.dropna(subset=['mrs_score']).sort_values('date')
-if len(_h2) >= 2:
-    _prev_s = float(_h2['mrs_score'].iloc[-2])
-    _prev_r = pipeline.regime_label(_prev_s)
-    _dcol = '#85cac5' if mrs > _prev_s else ('#f4a062' if mrs < _prev_s else '#a89f95')
-    _changes.append(f'MRS {_prev_s:+.2f} → <b style="color:{_dcol};">{mrs:+.2f}</b>'
-                    + (f' · <b>{_prev_r} → {reg}</b>' if _prev_r != reg else ''))
+# v8.2.0 (15 Nov 2026): the composite MRS score is retired from the page; the line shows the v8 stance and clock.
+try:
+    if _eg_ph is not None and len(_eg_ph) >= 2:
+        _st_now, _st_prev = exposure_guide.stance(int(_eg_ph.iloc[-1])), exposure_guide.stance(int(_eg_ph.iloc[-2]))
+        _st_col = {'PRESS': '#85cac5', 'NORMAL': '#f3ece2', 'EASE': '#e3b48e'}
+        _ck = f"{_v8.get('bucket', '')}{(' ' + str(_v8['n'])) if _v8.get('n') else ''}"
+        _changes.append(('MRS v8 ' + (f'{_st_prev} → ' if _st_prev != _st_now else '')
+                         + f'<b style="color:{_st_col.get(_st_now, "#a89f95")};">{_st_now}</b>'
+                         + (' (unchanged)' if _st_prev == _st_now else '') + f' · clock {_esc(_ck)}'))
+except Exception:
+    pass
 _ld_moves = [f'<b style="color:#85cac5;">+ {_esc(x)}</b>' for x in _added['Industry']] if len(_added) else []
 _ld_moves += [f'<b style="color:#f4a062;">− {_esc(x)}</b>' for x in _dropped['Industry']] if len(_dropped) else []
 if _ld_moves:
@@ -891,7 +895,7 @@ try:
     with st.spinner('Loading the risk panel…'):
         _rp_spy, _rp_v3, _rp_cl = load_risk_inputs(_rp_etfs)
     if _rp_spy is not None and len(_rp_spy):
-        _rp_snap = risk_panel.build_snapshot(hist, _rp_spy, _rp_v3, _rp_cl, pipeline.regime_label)
+        _rp_snap = risk_panel.build_snapshot(hist, _rp_spy, _rp_v3, _rp_cl, pipeline.regime_label, phase=_eg_ph)
         st.session_state['_spy_ext_atr'] = _rp_snap.get('ext_atr')     # 9 Nov 2026: depth context on Deep dip
 except Exception as _rp_err:
     print(f'[risk panel] {_rp_err}')
@@ -915,7 +919,19 @@ try:
 except Exception as _eg_err:
     print(f'[mrs v8 card] {_eg_err}')
     _health('MRS v8 card', _eg_err)
-try:
+# v8.2.0 (15 Nov 2026): Risk today (rebuilt on the v8 state) sits open under the card, out of the Market detail fold.
+with _today_slot.container():
+    if _rp_snap is not None:
+        try:
+            st.markdown(risk_panel.panel_html(_rp_snap), unsafe_allow_html=True)
+        except Exception as _rp_err:
+            print(f'[risk panel] {_rp_err}')
+            _health('Risk today panel', _rp_err)
+            st.caption('Risk today panel could not be built this time.')
+    else:
+        st.caption('Risk today panel: SPY history not available right now.')
+# v8.2.0: the MRS v6 score card is retired and no longer drawn (today_card.card_html kept for reference).
+if False:
     _since = ' · '.join(x for x in [(_changes[0] if _changes and str(_changes[0]).startswith('MRS') else ''),
                                     (_bhl if '_bhl' in globals() and _bhl else '')] if x)
     _today_slot.container().expander('MRS v6 score card (retiring: shown for comparison until mid-December)',
@@ -924,32 +940,19 @@ try:
         (ctx['p10'] if _deep == 'DEEP RISK-OFF' else ctx['p90']), _al_states.get('SPY'), _ctx_ext, _rp_snap,
         since=_since, levels={'VIX': _f('vix', '{:.2f}'), 'SPX': _f('spx', '{:,.0f}')},
         fresh='Data as of: ' + ' · '.join(_fresh), date_txt=f'{last_dt:%a %d %b %Y}'), unsafe_allow_html=True)
-except Exception as _cx_err:
-    print(f'[today card] {_cx_err}')
-    _health('Today card', _cx_err)
+# (end of the retired v6 score card block)
 
 # ── v6.4 (14 Nov 2026): Market detail fold (inventory: fold) ───────────────────────────────────────────
-with st.expander('Market detail: levels and changes, risk panel, SPY / QQQ tickets, leaders, avoid, rotation',
+with st.expander('Market detail: levels and changes, SPY / QQQ tickets, leaders, laggards, rotation',
                  expanded=_show_all):
     try:
         st.markdown(today_card.detail_html(
             [f'VIX {_f("vix", "{:.2f}")} · SPX {_f("spx", "{:,.0f}")} · Zero γ {_f("zero_gamma", "{:,.0f}")}'
              + ''.join(f' · {k} {v}' for k, v in _gl_header().items())] + _changes,
-            market_state.rotation_line(reg), _deep_line), unsafe_allow_html=True)
+            '', ''), unsafe_allow_html=True)   # v8.2.0: rotation / deep-state lines were keyed to the retired MRS band
     except Exception as _dt_err:
         print(f'[market detail] {_dt_err}')
-    # ── Risk today panel (v5): pedal, today's state, effective bets, insurance cost, vol guide ──────────
-    #    v6.3.1 (13 Nov 2026): the snapshot is built above, with the Market context card (one SPY-vs-50-day number).
-    if True:   # v6.4: inside the Market detail fold
-        if _rp_snap is not None:
-            try:
-                st.markdown(risk_panel.panel_html(_rp_snap), unsafe_allow_html=True)
-            except Exception as _rp_err:
-                print(f'[risk panel] {_rp_err}')
-                _health('Risk today panel', _rp_err)
-                st.caption('Risk today panel could not be built this time.')
-        else:
-            st.caption('Risk today panel: SPY history not available right now.')
+    # v8.2.0: Risk today moved out of this fold (it is open under the MRS v8 card).
 
     # ── Allocation rule card (10 Nov 2026): SPY / QQQ rebound + breakout tickets ────────────────────────
     #    The SPY state also feeds the stock-entry guide line on the scanner (computed even when the card is hidden).
@@ -2081,7 +2084,7 @@ with st.expander('Sectors and industries: relative strength vs SPY', expanded=_s
 # ══════════════════════════════════════════════════════════════════════════════
 # WHY THE MODEL SAYS THIS (diagnostics, in tabs)
 # ══════════════════════════════════════════════════════════════════════════════
-if st.toggle('Why the model says this: score components, history, put/call', value=_show_all):   # v6.4: folded
+if st.toggle('Retired MRS v6 score: components, history, put/call (reference only)', value=False):   # v8.2.0: retired, off
     st.markdown('<div class="section-header" style="margin-top:10px;">Why the model says this</div>', unsafe_allow_html=True)
     _t_comp, _t_hist, _t_ch, _t_pc = st.tabs(['Score components & states', 'MRS, SPX and VIX history', 'Component history', 'Put/call context'])
     with _t_comp:

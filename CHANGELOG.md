@@ -7,6 +7,26 @@ Versions follow `docs/PROCESS.md`:
 
 The current version is in `VERSION` and in the page footer. Entries before 6.3.1 were reconstructed from the commit history and the project notes on 13 Nov 2026.
 
+## 8.2.0 · 2026-11-15
+
+The retired MRS score is off the page, and **Risk today** is rebuilt on the v8 state and shown open under the MRS v8 card.
+
+- **Risk today** (`risk_panel.py`), four visual tiles:
+  - **SPY vs its 50-day:** the ATR gauge and the sell-off episode day. In the dip zone it adds the tested wide-both-ways numbers (5%+ up 31% vs 17%, 7%+ drop 27% vs 14%).
+  - **This state:** SPY's next-20-session distribution since 2008 for today's SPY phase × VIX width (P10–P90 bar, ≥5% up / down, fast drop of 7%), against all days. Descriptive.
+  - **Clock:** C1 per-trade quality by sessions since the last DIP ZONE day (mean R and P(≥3R)), with today's bucket lit. It is per trade, not size.
+  - **Effective bets:** unchanged (Tested).
+  - **Removed from display:**
+    - the pedal (its NORMAL / DIP ZONE / EASE OFF names clashed with the v8 stance, and EASE OFF needed the retired RISK-OFF band);
+    - the MRS-band cell;
+    - the Insurance tile (the hedge is on the card);
+    - the volatility-target guide (not part of the v8 framework).
+  - The nightly forward-log columns are still written.
+- **Since last session:** "MRS −3.77 → −4.54" is replaced by the v8 stance and clock ("MRS v8 EASE (unchanged) · clock EARLY 9"). The rotation and deep-state lines, both keyed to the retired band, are removed.
+- **The MRS v6 score card is no longer drawn.** The bottom diagnostics toggle is renamed "Retired MRS v6 score … (reference only)" and is off.
+- **Laggards note:** "outside RISK-OFF" now reads "outside the dip window", with the note that the test used the old band.
+- New `test_risk_panel_v8.py`: 3 checks.
+
 ## 8.1.0 · 2026-11-15
 
 The scanner and the leader and laggard lists now read the v8 market state (new `state_view.py`): colour and chips, nothing hidden or locked.

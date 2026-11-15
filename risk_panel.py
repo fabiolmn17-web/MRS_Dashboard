@@ -15,6 +15,15 @@ Desk lines built on studies/mrs_risk_control (steps 1-4) and studies/model_portf
                   Cost per month and its percentile since 2008; state sentence from step 3. Descriptive.
   Vol guide       invested share for a 10% volatility target on 21-session realised SPY vol, cap 60%. Descriptive.
 
+v8.2.0 (15 Nov 2026): the panel is rebuilt on the MRS v8 state and shown open under the v8 card. The MRS band, the
+pedal, the insurance tile and the volatility guide are no longer shown (the band is retired; the pedal's names clashed
+with the v8 stance; the hedge is on the card; the vol-target guide is not part of the v8 framework). Tiles now:
+  SPY vs its 50-day  ATR gauge and sell-off episode; in the dip zone the tested wide-both-ways numbers (Tested)
+  This state         20-session SPY distribution since 2008 for today's SPY phase x VIX width (v8 cell). Descriptive.
+  Clock              C1 per-trade quality by sessions since the last DIP ZONE day (random stock entries; in sample)
+  Effective bets     unchanged (Tested)
+The forward-log columns (pedal, cell, put3m_cost, vt_invested) are still written by the nightly update.
+
 Labels and texts follow the MRS evidence audit v2 (8 Nov 2026, studies/_framework/audit/mrs_risk_control): REBOUND
 WINDOW and EASE OFF Tested; effective bets Tested; vol guide Provisional; today's cell and insurance cost Descriptive.
 
@@ -37,6 +46,12 @@ CORR_Q = [0.143, 0.288, 0.338, 0.367, 0.394, 0.417, 0.443, 0.458, 0.476, 0.492, 
           0.615, 0.638, 0.667, 0.699, 0.784, 0.841]
 START = '2008-05-12'
 MIN_CELL_DAYS = 150
+VIX_MEDIAN = 17.56                                  # MRS v8 width: expanding median of the VIX since 1990 (13 Nov 2026)
+PH_TXT = {0: 'DIP ZONE', 1: 'ticket A open', 2: 'ticket B open', 3: 'no ticket'}
+# C1 (15 Nov 2026): random uptrend stock entries, runner exit, 2009-26, survivorship-free; by sessions since SPY's last
+# DIP ZONE day. (bucket, mean R, P(>= 3R)). Tested by episode bootstrap, in sample.
+C1_CLOCK = [('IN DIP', 0.30, 0.097), ('EARLY', 0.18, 0.090), ('MID', 0.09, 0.080), ('LATE', -0.06, 0.070)]
+C1_LBL = {'IN DIP': 'In the dip', 'EARLY': '1–20 after', 'MID': '21–60', 'LATE': '60+'}
 
 
 def _e(s):
@@ -165,6 +180,65 @@ def sell_off_episode(ext_atr: pd.Series):
             break
         j = prev[0]
     return n - j, idx[j]
+
+
+def vol_band(v):
+    if not _fin(v):
+        return np.nan
+    return 'CALM' if v < VIX_MEDIAN else ('WIDE' if v < 1.5 * VIX_MEDIAN else 'STRESSED')
+
+
+def phase_series(spy: pd.DataFrame):
+    """Per-session SPY phase (0 DIP ZONE, 1 A open, 2 B open, 3 no ticket) from the allocation replay, as
+    chart_view.spy_phase. None without an open column or on error."""
+    try:
+        import allocation as _al
+        x = spy.rename(columns=str.lower)
+        if not {'open', 'high', 'low', 'close'} <= set(x.columns) or len(x) < 60:
+            return None
+        dd = _al.indicators(x[['open', 'high', 'low', 'close']])
+        n = len(dd)
+        def _open(trades):
+            m = np.zeros(n, bool)
+            for t in trades:
+                m[t['i']:(t['j'] if t['j'] is not None else n)] = True
+            return m
+        a = _open(_al.replay(dd, _al.rebound_entries(dd), dd['sma50'].values))
+        b = _open(_al.replay(dd, _al.breakout_entries(dd), dd['ema21'].values))
+        E = dd['E'].values
+        ph = np.where(~np.isfinite(E), 3, np.where(E <= -1, 0, np.where(a, 1, np.where(b, 2, 3))))
+        return pd.Series(ph, index=pd.to_datetime(dd.index).normalize())
+    except Exception:
+        return None
+
+
+def clock_of(ph: pd.Series):
+    """(bucket, sessions since the last DIP ZONE day) for the last session of ph."""
+    if ph is None or not len(ph):
+        return None, None
+    p = np.asarray(ph.values, int)
+    z = np.flatnonzero(p == 0)
+    if not len(z):
+        return 'LATE', None
+    k = len(p) - 1 - int(z[-1])
+    return ('IN DIP' if k == 0 else 'EARLY' if k <= 20 else 'MID' if k <= 60 else 'LATE'), k
+
+
+def v8_cell(d: pd.DataFrame, ph_hist: pd.Series, vix_hist: pd.Series, code_now: int, vix_now: float) -> dict:
+    """20-session SPY stats since 2008 for today's v8 cell (SPY phase x VIX width); falls back to the phase alone when
+    the cell has fewer than MIN_CELL_DAYS days."""
+    x = d.dropna(subset=['f20']).copy()
+    x['ph'] = ph_hist.reindex(x.index).ffill() if ph_hist is not None else np.nan
+    x['vb'] = vix_hist.reindex(x.index).ffill().map(vol_band) if vix_hist is not None else np.nan
+    vb_now = vol_band(vix_now)
+    cell = x[(x['ph'] == code_now) & (x['vb'] == vb_now)]
+    scope = 'cell'
+    if len(cell) < MIN_CELL_DAYS:
+        cell, scope = x[x['ph'] == code_now], 'phase'
+    def st(g):
+        return dict(n=len(g), p10=g['f20'].quantile(.1), p50=g['f20'].median(), p90=g['f20'].quantile(.9),
+                    up5=(g['f20'] > .05).mean(), dn5=(g['f20'] < -.05).mean(), fast=(g['mae20'] <= -.07).mean())
+    return dict(scope=scope, code=code_now, vb=vb_now, vix=vix_now, cell=st(cell), all=st(x))
 
 
 def snapshot(d: pd.DataFrame, rho: float, neff: float, vix: float, vix3m: float, cost_hist: pd.Series) -> dict:
@@ -375,40 +449,73 @@ def normal_tails(snap: dict) -> str:
         return ''
 
 
+def _clock_bars(bucket: str) -> str:
+    """C1: mean R and P(>= 3R) of a random stock entry by sessions since SPY's last DIP ZONE day; today's bucket lit."""
+    out = ''
+    top = max(r for _, r, _ in C1_CLOCK)
+    for b, r, p3 in C1_CLOCK:
+        on = b == bucket
+        col = (TEAL if r >= 0.15 else (INK if r >= 0 else ORANGE)) if on else '#3a3632'
+        w = max(abs(r) / top, 0.04) * 100
+        out += (f'<div class="row"><span style="width:78px;color:{INK if on else DIM};font-weight:{700 if on else 400};">'
+                f'{C1_LBL[b]}</span><div class="trk" style="height:12px;">'
+                f'<div style="position:absolute;left:0;top:0;bottom:0;width:{w:.0f}%;background:{col};border-radius:3px;"></div></div>'
+                f'<span class="num" style="width:104px;text-align:right;color:{col if on else DIM};font-weight:{700 if on else 400};">'
+                f'{r:+.2f}R · {p3 * 100:.0f}%</span></div>')
+    return out + ('<div class="sub">Mean R of a random stock entry and its chance of reaching 3R, by sessions since '
+                  'SPY\'s last DIP ZONE day (C1, 2009–26). Per trade, not size: adding size in the dip window deepened the '
+                  'account drawdown (v8 sizing).</div>')
+
+
 def panel_html(snap: dict) -> str:
-    p = snap['pedal']; col = PEDAL_COL[p]
-    head, body, evk = PEDAL_TXT[p]
-    if p == 'NORMAL':
-        body += ' ' + normal_tails(snap)
-    segs = ''.join(f'<div style="background:{PEDAL_COL[k] if k == p else "#24211e"};"></div>' for k in ('EASE OFF', 'NORMAL', 'PRESS'))
-    seg_lbl = ''.join(f'<span style="flex:1;text-align:center;color:{PEDAL_COL[k] if k == p else DIM};font-weight:{700 if k == p else 400};">{PEDAL_NAME[k]}</span>'
-                      for k in ('EASE OFF', 'NORMAL', 'PRESS'))
+    """v8.2.0: Risk today on the MRS v8 state (no MRS band, no pedal)."""
+    v8 = snap.get('v8') or {}
     ep = snap.get('ep_day')
-    ep_txt = (f' Sell-off episode: <b style="color:{INK};">day {ep}</b> (started {pd.Timestamp(snap["ep_start"]):%d %b}).'
+    ext = snap.get('ext_atr')
+    h = CSS + ('<div class="rp"><div class="k">Risk today · what the next 20 sessions looked like in this state, '
+               'and how many bets the book really holds</div><div class="grid">')
+    # 1. SPY vs its 50-day (+ the tested dip-zone numbers when below -1 ATR)
+    inz = _fin(ext) and ext <= -1
+    ecol = TEAL if inz else INK
+    ep_txt = (f'Sell-off episode <b style="color:{INK};">day {ep}</b> (started {pd.Timestamp(snap["ep_start"]):%d %b}). '
               if ep else '')
-    h = CSS + '<div class="rp"><div class="k">Risk today · how much risk the book can carry</div><div class="grid">'
-    # 1. Pedal
-    r12 = snap.get('r12')
-    ease_txt = (f'EASE OFF needs RISK-OFF <b>and</b> SPY below its level of a year ago '
-                f'(now {_pct(r12)} over 12 months).' if _fin(r12) else 'EASE OFF needs RISK-OFF and SPY below its level of a year ago.')
-    h += (f'<div class="tile"><div class="lab">Pedal {_ev(evk) if evk else ""}</div>'
-          f'<div class="big" style="color:{col};">{PEDAL_NAME[p]}</div>'
-          f'<div class="seg">{segs}</div><div style="display:flex;font-size:0.66rem;letter-spacing:0.05em;margin-top:-4px;">{seg_lbl}</div>'
-          f'<div class="act"><b>{head}</b> {body}</div>'
-          f'<div class="sub" style="margin-top:2px;">SPY vs its 50-day: <b class="num" style="color:{INK};">{snap["ext_atr"]:+.2f} ATR</b>. '
-          f'Dip zone (rebound window) below −1 ATR.{ep_txt}</div>{_atr_gauge(snap["ext_atr"])}'
-          f'<div class="sub">{ease_txt}</div></div>')
-    # 2. Today's state
-    cs = snap['cell']; c, a = cs['cell'], cs['all']
-    state_txt = (f'<b>{_e(snap["band"])}</b> · SPY 12-month {snap["trend"]} · {EXT_TXT[snap["ext"]]}')
-    scope = '' if cs['scope'] == 'cell' else ' <span style="color:#f8d6b4;">(band only: too few days in the exact state)</span>'
-    fast_c = ORANGE if c['fast'] > a['fast'] * 1.3 else (TEAL if c['fast'] < a['fast'] * 0.7 else INK)
-    h += (f'<div class="tile"><div class="lab">Today\'s state · next 20 sessions, since 2008 {_ev("Descriptive")}</div>'
-          f'<div class="act">{state_txt}{scope}</div>'
-          f'{_range_svg(c, a)}{_split_bar(c["up5"], c["dn5"], a["up5"], a["dn5"])}'
-          f'<div class="act">Fast drop of 7% or more: <b class="num" style="color:{fast_c};">{c["fast"] * 100:.0f}%</b> '
-          f'<span class="sub">of cases (all days {a["fast"] * 100:.0f}%) · {c["n"]:,} days</span></div></div>')
-    # 3. Effective bets
+    dz = ('<div class="act"><b>Dip zone: wide both ways.</b> SPY rose 5%+ within 20 sessions on 31% of these days (17% '
+          'at the same VIX) and dropped 7%+ on 27% (14%). Long setups at a level that holds; every stop stands.</div>'
+          if inz else
+          f'<div class="sub">The dip zone starts at −1 ATR (the rebound window for ticket A).</div>')
+    h += (f'<div class="tile"><div class="lab">SPY vs its 50-day {_ev("Tested") if inz else ""}</div>'
+          f'<div style="display:flex;align-items:baseline;gap:8px;"><span class="big num" style="color:{ecol};">'
+          f'{ext:+.2f}</span><span class="sub">ATR(14)</span></div>{_atr_gauge(ext)}'
+          f'<div class="sub">{ep_txt}</div>{dz}</div>')
+    # 2. This state (v8 cell)
+    if v8.get('cell'):
+        c, a = v8['cell'], v8['all']
+        vb = v8.get('vb')
+        vcol = TEAL if vb == 'CALM' else (ORANGE if vb == 'WIDE' else '#e07a5f')
+        state_txt = (f'<b>SPY {PH_TXT.get(v8["code"], "?")}</b> · VIX <b style="color:{vcol};">'
+                     f'{(v8["vix"] if _fin(v8["vix"]) else float("nan")):.1f} {_e(vb)}</b>')
+        scope = ('' if v8['scope'] == 'cell' else
+                 ' <span style="color:#f8d6b4;">(phase only: too few days at this VIX width)</span>')
+        fast_c = ORANGE if c['fast'] > a['fast'] * 1.3 else (TEAL if c['fast'] < a['fast'] * 0.7 else INK)
+        h += (f'<div class="tile"><div class="lab">This state · SPY next 20 sessions, since 2008 {_ev("Descriptive")}</div>'
+              f'<div class="act">{state_txt}{scope}</div>'
+              f'{_range_svg(c, a)}{_split_bar(c["up5"], c["dn5"], a["up5"], a["dn5"])}'
+              f'<div class="act">Fast drop of 7% or more: <b class="num" style="color:{fast_c};">{c["fast"] * 100:.0f}%</b> '
+              f'<span class="sub">of cases (all days {a["fast"] * 100:.0f}%) · {c["n"]:,} days</span></div></div>')
+    else:
+        h += '<div class="tile"><div class="lab">This state</div><div class="sub">SPY phase not available right now.</div></div>'
+    # 3. Clock (C1)
+    b = v8.get('bucket')
+    if b:
+        ns = v8.get('n_since')
+        btxt = 'in the dip zone today' if b == 'IN DIP' else (f'{ns} sessions since the last DIP ZONE day' if ns is not None else 'no dip in the history')
+        bcol = TEAL if b in ('IN DIP', 'EARLY') else (INK if b == 'MID' else COPPER)
+        h += (f'<div class="tile"><div class="lab">Clock · quality of a new trade {_ev("Tested")}</div>'
+              f'<div style="display:flex;align-items:baseline;gap:8px;"><span class="big" style="color:{bcol};">{_e(b)}</span>'
+              f'<span class="sub">{_e(btxt)}</span></div>{_clock_bars(b)}</div>')
+    else:
+        h += '<div class="tile"><div class="lab">Clock</div><div class="sub">SPY phase not available right now.</div></div>'
+    # 4. Effective bets (unchanged, Tested)
     if _fin(snap['rho']):
         terc = corr_tercile(snap['rho']); stress = CORR_STRESS_P90[terc]; neff_s = 5 / (1 + 4 * stress)
         flag = snap['trend'] == 'down' or snap['inverted']
@@ -423,30 +530,12 @@ def panel_html(snap: dict) -> str:
               f'<div class="sub">In a stress month this has dropped to about <b style="color:{INK};">{neff_s:.1f} bets</b>.</div>'
               f'<div class="act"><b>Count names that move together as one position; no more than half of the open '
               f'risk in one sector.</b>'
-              + (' <span style="color:#f4a062;"><b>Correlation runs highest in this state: treat the book as about 1.5 bets.</b></span>' if flag else '')
+              + (' <span style="color:#f4a062;"><b>Correlation runs highest when SPY is below its level of a year ago or '
+                 'the VIX curve is inverted: treat the book as about 1.5 bets.</b></span>' if flag else '')
               + '</div></div>')
     else:
-        h += f'<div class="tile"><div class="lab">Effective bets</div><div class="sub">Industry prices not available.</div></div>'
-    # 4. Insurance cost: retired in v8.0.0 (15 Nov 2026). The modelled 3-month 10% OTM put underpriced the real
-    #    chain by about 25% (IBKR check, 13 Nov 2026) and its "roll" advice contradicts Layer 3. The hedge now lives
-    #    on the MRS v8 card (60-session ~5% OTM put, real quotes from put_log.py). put3m_cost is still logged.
-    h += ('<div class="tile"><div class="lab">Insurance</div><div class="sub">Moved to the hedge tile on the MRS v8 '
-          'card (real put quotes). Never roll puts.</div></div>')
-    h += '</div>'
-    # 5. Vol guide (collapsed by default)
-    inv = snap['invested']
-    if _fin(inv) and _fin(snap['rv']):
-        h += (f'<details class="vg"><summary class="lab" style="display:list-item;cursor:pointer;">Book volatility guide '
-              f'· {inv * 100:.0f}% invested {_ev("Provisional")}</summary>'
-              f'<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:8px;">'
-              f'<div class="trk" style="flex:0 0 260px;">'
-              f'<div style="position:absolute;left:0;top:0;bottom:0;width:{inv * 100:.0f}%;background:{TEAL_M};border-radius:3px;"></div>'
-              f'<div title="cap 60%" style="position:absolute;left:60%;top:-4px;bottom:-4px;width:3px;background:{COPPER};"></div></div>'
-              f'<span class="sub">SPY realized volatility (21 days) <b class="num" style="color:{INK};">{snap["rv"] * 100:.1f}%</b>. '
-              f'A 10% volatility target would hold <b class="num" style="color:{INK};">{inv * 100:.0f}% invested</b> (cap 60%, copper line). '
-              f'Reviewed weekly. In the 2008–2026 replay, weekly volatility scaling cut the max drawdown by about 12 pp '
-              f'(−19.5% vs −31.2%) at a similar or better Sharpe than holding the same average exposure.</span></div></details>')
-    h += '</div>'
+        h += '<div class="tile"><div class="lab">Effective bets</div><div class="sub">Industry prices not available.</div></div>'
+    h += '</div></div>'
     return h.replace('\n', ' ')
 
 
@@ -463,7 +552,7 @@ def fetch_inputs(etfs, workers: int = 8):
     import yfinance as yf
     from concurrent.futures import ThreadPoolExecutor
     spy = yf.Ticker('SPY').history(period='max', auto_adjust=True)
-    spy = pd.DataFrame({c.lower(): _norm(spy[c]) for c in ('High', 'Low', 'Close')}) if spy is not None and len(spy) else None
+    spy = pd.DataFrame({c.lower(): _norm(spy[c]) for c in ('Open', 'High', 'Low', 'Close')}) if spy is not None and len(spy) else None
     try:
         v3 = yf.Ticker('^VIX3M').history(period='max')
         v3 = _norm(v3['Close']) if v3 is not None and len(v3) else None
@@ -482,8 +571,11 @@ def fetch_inputs(etfs, workers: int = 8):
     return spy, v3, closes
 
 
-def build_snapshot(hist: pd.DataFrame, spy: pd.DataFrame, v3: pd.Series, closes: pd.DataFrame, label_fn) -> dict:
-    """hist = mrs_history (date, mrs_score, vix). Returns the snapshot for the last SPY session."""
+def build_snapshot(hist: pd.DataFrame, spy: pd.DataFrame, v3: pd.Series, closes: pd.DataFrame, label_fn,
+                   phase: pd.Series = None) -> dict:
+    """hist = mrs_history (date, mrs_score, vix). Returns the snapshot for the last SPY session.
+    phase (v8.2.0): today's SPY phase series as the MRS card has it (chart_view.spy_phase); the history of the phase for
+    the 20-session statistics is replayed here on the full SPY history."""
     h = hist.dropna(subset=['mrs_score']).sort_values('date')
     mrs = pd.Series(h['mrs_score'].astype(float).values, index=pd.to_datetime(h['date']))
     d = spy_states(spy, mrs, label_fn)
@@ -491,4 +583,17 @@ def build_snapshot(hist: pd.DataFrame, spy: pd.DataFrame, v3: pd.Series, closes:
     vix = float(pd.to_numeric(h['vix'], errors='coerce').dropna().iloc[-1]) if 'vix' in h else np.nan
     v3s = v3.dropna() if v3 is not None else pd.Series(dtype=float)
     vix3m = float(v3s.iloc[-1]) if len(v3s) else np.nan
-    return snapshot(d, rho, neff, vix, vix3m, put_cost_series(v3s[v3s.index >= '2008-01-01']) if len(v3s) else None)
+    snap = snapshot(d, rho, neff, vix, vix3m, put_cost_series(v3s[v3s.index >= '2008-01-01']) if len(v3s) else None)
+    try:   # v8.2.0: the v8 cell and the clock
+        ph_hist = phase_series(spy)
+        ph_now = phase if (phase is not None and len(phase)) else ph_hist
+        if ph_now is not None and len(ph_now):
+            hv = hist.dropna(subset=['vix']).sort_values('date')
+            vix_hist = pd.Series(pd.to_numeric(hv['vix'], errors='coerce').values, index=pd.to_datetime(hv['date']).dt.normalize())
+            vix_hist = vix_hist[~vix_hist.index.duplicated(keep='last')]
+            v8 = v8_cell(d, ph_hist if ph_hist is not None else ph_now, vix_hist, int(ph_now.iloc[-1]), vix)
+            v8['bucket'], v8['n_since'] = clock_of(ph_now)
+            snap['v8'] = v8
+    except Exception as _e8:
+        print(f'[risk panel v8] {_e8}')
+    return snap
