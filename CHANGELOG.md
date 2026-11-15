@@ -7,6 +7,31 @@ Versions follow `docs/PROCESS.md`:
 
 The current version is in `VERSION` and in the page footer. Entries before 6.3.1 were reconstructed from the commit history and the project notes on 13 Nov 2026.
 
+## 8.3.1 · 2026-11-15
+
+Market detail fold brought in line with v8:
+- **Allocation card footer:** "100% of the allocated capital while a ticket is open" is replaced by the v8 sizing (one unit per ticket risking 1.5% of NLV at its stop).
+- **Leaders list in the dip window (Momentum CAUTION):**
+  - the title reads "Leading industries — context in the dip window, not a buy list";
+  - the text follows RS1 / R1 instead of the unconfirmed "+0.6 pp industry rebound";
+  - "size by the swing-size line" (a retired MRS-band line) becomes "size by the MRS v8 card's swing budget".
+
+## 8.3.0 · 2026-11-15
+
+- **Morning data check** (new `data_check.py`): one strip on top of the page.
+  - **What it checks:** every automatic source against the last completed NYSE session (New York close, NYSE holiday calendar): daily update, VIX, put log, SPY prices, SPY tickets, Risk today inputs, sectors, industries, scanner.
+  - **Chip status:**
+    - ✓ teal = current;
+    - ! copper = one session late;
+    - ✕ orange = older or missing;
+    - · grey = put log waiting for its first nightly run.
+  - **Header:** "DATA · ALL CURRENT", "n LATE" or "n ISSUES". The load-health issues list follows it; it replaces the v6.3.2 health line.
+- **Chart (`chart_view.py`), as in the TradingView Ext·RS v8.0 indicator:**
+  - **ATR zones:** the ATR(14) zones from the SMA 50 are faint shading under the candles (below −1/−2, −2/−3, −3/−5 teal, darker further down; above +2/+3, +3/+5 copper), with labels at the right edge. The dotted ATR lines are gone.
+  - **21-day high:** dotted over the last 60 sessions, with a label.
+- **Laggards banner (dip window):** it no longer cites the +0.7 pp industry rebound. R1 found laggard *industries* did not beat leading ones after beta; the banner now points to laggard *stocks* (RS1).
+- New `test_data_check.py`: 2 checks.
+
 ## 8.2.0 · 2026-11-15
 
 The retired MRS score is off the page, and **Risk today** is rebuilt on the v8 state and shown open under the MRS v8 card.

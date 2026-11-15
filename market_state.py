@@ -146,10 +146,11 @@ def light_detail(light: dict) -> str:
     # SPY; in CAUTION the leader-minus-laggard gap shrinks because laggards rebound. "Leaders reverse hard": not found.
     if light['on']:
         return (f'{r12_txt}{light["why"]}: normal momentum backdrop. Leaders have matched SPY (−0.1 pp a month) and '
-                'beaten laggards by about +0.4 pp (not significant). Normal size.')
-    return (f'{r12_txt}{light["why"]}: momentum-crash state. Leaders lose their edge over laggards because laggards '
-            'rebound (+0.6 pp vs SPY a month); leaders have not lagged SPY. Don\'t short laggards; size leaders by the '
-            'swing-size line.')
+                'beaten laggards by about +0.4 pp (not significant). Size by the MRS v8 card\'s swing budget.')
+    # v8.3.1 (15 Nov 2026): the CAUTION text follows RS1 / R1 (the +0.6 pp industry rebound was not confirmed by R1).
+    return (f'{r12_txt}{light["why"]}: momentum-crash state. Prior-leader stocks did worst here and laggard stocks best '
+            '(RS1); at the industry-ETF level leaders and laggards did about the same after beta (R1). Read this list as '
+            'context, not a buy list. Don\'t short laggards; size by the MRS v8 card\'s swing budget.')
 
 
 def light_ev(light: dict) -> str:
@@ -246,7 +247,9 @@ def _how(summary: str, body: str) -> str:
 
 def leaders_html(short: pd.DataFrame, light: dict, hold_df: pd.DataFrame = None, as_of: str = None,
                  dropped: pd.DataFrame = None) -> str:
-    h = CSS + '<div class="ld"><div class="hdr"><span class="ttl">Leaders to buy — industries first</span>'
+    ttl = ('Leaders to buy — industries first' if light.get('on') else
+           'Leading industries — context in the dip window, not a buy list')     # v8.3.1
+    h = CSS + f'<div class="ld"><div class="hdr"><span class="ttl">{ttl}</span>'
     h += light_html(light) + ev(light_ev(light)) + '</div>'
     h += (f'<div class="note" style="font-size:0.80rem;color:#e8dccb;margin:-2px 0 4px 0;">{_e(light_detail(light))}</div>'
           '<div class="note" style="font-size:0.80rem;color:#e8dccb;margin:0 0 8px 0;">Where to look first for longs, '
@@ -489,8 +492,9 @@ def avoid_html(lag: pd.DataFrame, hold_df: pd.DataFrame = None, crash: bool = Fa
         h = CSS + ('<div class="ld" style="margin-top:14px;"><div class="hdr"><span class="ttl" style="color:#85cac5;">'
                    'Laggards: rebound window, not an avoid list today</span>' + ev('Tested') + '</div>'
                    '<div class="note" style="font-size:0.80rem;color:#e8dccb;margin:-2px 0 6px 0;">SPY is in the dip '
-                   'window. Here laggard industries rebounded with the market (+0.7 pp vs SPY a month, tested in the old '
-                   'RISK-OFF band) and laggard stocks were the better longs (RS1). Shorts from this list lost.</div>'
+                   'window. Laggard <b>stocks</b> were the better longs here (RS1: +0.62R vs +0.19R for leaders); laggard '
+                   '<b>industries</b> as a group did not beat leading ones after beta (R1, 15 Nov 2026), so look for '
+                   'beaten-down names, not beaten-down sectors. Shorts from this list lost.</div>'
                    '<div style="opacity:0.55;">')
     else:
         h = CSS + ('<div class="ld" style="margin-top:14px;"><div class="hdr"><span class="ttl" style="color:#f4a062;">'

@@ -10,6 +10,8 @@ Shows the last ~12 months of daily candles with:
   Volume pane   (4 Nov 2026) daily volume bars (teal up / orange down day) and the 50-day average, under the price
   Base overlay  (3 Nov 2026) the current base from StockScanner/bases.py on this chart's own (unadjusted) prices:
                 shaded base, the cup's left lip / low / right lip, the handle, and the pivot line
+v8.3.0 (15 Nov 2026): ATR(14) zones from the SMA 50 as faint shading (no lines), the 21D high visible over the last
+  60 sessions with a label, as in the TradingView Ext·RS v8.0 indicator.
 v8 (15 Nov 2026): candles teal up / orange down again (no SPY phase colours); EMA 21 light teal, SMA 50 bright
   grey, SMA 200 orange, SMA 250 dashed orange. The rest of v6.5 stays (ATR lines, markers).
 v6.5 (14 Nov 2026): drawn like the TradingView "Ext·RS" indicator v7.5 (see figure()): candles in the SPY phase colour,
@@ -165,6 +167,8 @@ ATR_UP_COL, ATR_DN_COL = '#b9805a', '#649995'
 ATR_UP, ATR_DN, ATR_N = (2, 3, 4, 5), (2, 3, 4, 5), 20  # SMA 50 + / - k ATR(14), drawn over the last 20 sessions
 MK_COL = dict(dd='#76ff03', dw='#9e9e9e', ch='#ff5252', os='#ffeb3b')
 FUTURE = 9                                              # empty sessions at the right edge, for the ATR labels
+ZN_DN, ZN_UP = '100,153,149', '185,128,90'                # v8.3.0 zone fill colours (rgb of #649995 / #b9805a)
+H21_N = 60                                              # v8.3.0: 21D high line over the last 60 sessions
 
 
 def _etfs() -> set:
@@ -259,6 +263,22 @@ def figure(h: pd.DataFrame, ticker: str, height: int = 520, base: dict = None, s
     lv = levels(h)
     fig = go.Figure()
 
+    # v8.3.0 (15 Nov 2026): ATR(14) zones from the SMA 50 as faint shading under the candles, as in the TradingView
+    # Ext·RS v8.0 indicator: below -1/-2, -2/-3, -3/-5 (teal, darker further down), above +2/+3, +3/+5 (copper). One legend
+    # entry toggles them. Drawn first so the candles sit on top.
+    first_z = True
+    for lo_k, hi_k, col, a in ((-2, -1, ZN_DN, 0.08), (-3, -2, ZN_DN, 0.11), (-5, -3, ZN_DN, 0.14),
+                               (2, 3, ZN_UP, 0.08), (3, 5, ZN_UP, 0.11)):
+        ylo = (s50 + lo_k * a14).iloc[-BARS:]; yhi = (s50 + hi_k * a14).iloc[-BARS:]
+        if not np.isfinite(ylo.iloc[-1]) or not np.isfinite(yhi.iloc[-1]):
+            continue
+        fig.add_trace(go.Scatter(x=x, y=ylo, mode='lines', line=dict(width=0), hoverinfo='skip', showlegend=False,
+                                 legendgroup='atrz'))
+        fig.add_trace(go.Scatter(x=x, y=yhi, mode='lines', line=dict(width=0), fill='tonexty',
+                                 fillcolor=f'rgba({col},{a})', hoverinfo='skip', name='ATR zones (SMA 50)', legendgroup='atrz',
+                                 showlegend=first_z))
+        first_z = False
+
     # candles: teal up / orange down (v8, 15 Nov 2026: the SPY phase colours are gone; the phase lives on the MRS card)
     ph_all = spy_phase(spy)                     # still used for the breakout-in-dip-zone marker
     if ph_all is not None:
@@ -282,28 +302,26 @@ def figure(h: pd.DataFrame, ticker: str, height: int = 520, base: dict = None, s
                              line=dict(color=S200_COL, width=1.5), hoverinfo='skip'))
     fig.add_trace(go.Scatter(x=x, y=s250.iloc[-BARS:], name='SMA 250', mode='lines',
                              line=dict(color=S200_COL, width=1.2, dash='dash'), hoverinfo='skip'))
-    for y, col, dash, lbl in ((lv['hi52'], HI52_COL, 'dash', '52W high'), (lv['hi21'], HI20_COL, 'dot', '21D high')):
-        if np.isfinite(y):
-            fig.add_trace(go.Scatter(x=[x[0], x[-1]], y=[y, y], name=f'{lbl} {y:,.2f}', mode='lines',
-                                     visible='legendonly', line=dict(color=col, width=1, dash=dash), hoverinfo='skip'))
+    if np.isfinite(lv['hi52']):
+        fig.add_trace(go.Scatter(x=[x[0], x[-1]], y=[lv['hi52']] * 2, name=f'52W high {lv["hi52"]:,.2f}', mode='lines',
+                                 visible='legendonly', line=dict(color=HI52_COL, width=1, dash='dash'), hoverinfo='skip'))
+    if np.isfinite(lv['hi21']):     # v8.3.0: visible, dotted, last H21_N sessions (the breakout level), as in TradingView
+        xh = x[-H21_N:]
+        fig.add_trace(go.Scatter(x=xh, y=[lv['hi21']] * len(xh), name=f'21D high {lv["hi21"]:,.2f}', mode='lines',
+                                 line=dict(color=HI20_COL, width=1, dash='dot'), hoverinfo='skip'))
 
-    # ATR(14) lines from the SMA 50, last ATR_N sessions, labels at the right edge (one legend entry toggles all)
-    xa = x[-ATR_N:]
-    first_atr = True
+    # v8.3.0: zone labels at the right edge (the dotted ATR lines are gone) and the 21D high label
     lab_x, lab_y, lab_t, lab_c = [], [], [], []
-    for k in [-q for q in ATR_DN][::-1] + list(ATR_UP):
-        yk = (s50 + k * a14).iloc[-ATR_N:]
-        if not np.isfinite(yk.iloc[-1]):
-            continue
-        col = ATR_UP_COL if k > 0 else ATR_DN_COL
-        fig.add_trace(go.Scatter(x=xa, y=yk, mode='lines', name='SMA 50 ± ATR lines', legendgroup='atr',
-                                 showlegend=first_atr, line=dict(color=col, width=1, dash='dot'), hoverinfo='skip'))
-        first_atr = False
-        lab_x.append(xf[1]); lab_y.append(float(yk.iloc[-1]))
-        lab_t.append(f'{"+" if k > 0 else "−"}{abs(k)} ATR'); lab_c.append(col)
+    for k in (-1, -2, -3, -5, 2, 3, 5):
+        yk = float((s50 + k * a14).iloc[-1])
+        if np.isfinite(yk):
+            lab_x.append(xf[1]); lab_y.append(yk); lab_t.append(f'{"+" if k > 0 else "−"}{abs(k)} ATR')
+            lab_c.append(ATR_UP_COL if k > 0 else ATR_DN_COL)
+    if np.isfinite(lv['hi21']):
+        lab_x.append(xf[1]); lab_y.append(float(lv['hi21'])); lab_t.append(f'21D {lv["hi21"]:,.2f}'); lab_c.append(HI20_COL)
     if lab_x:
         fig.add_trace(go.Scatter(x=lab_x, y=lab_y, mode='text', text=lab_t, textposition='middle right',
-                                 textfont=dict(size=9, color=lab_c), legendgroup='atr', showlegend=False,
+                                 textfont=dict(size=9, color=lab_c), legendgroup='atrz', showlegend=False,
                                  hoverinfo='skip', cliponaxis=False))
 
     # markers (same rules as the scanner and the TradingView indicator)

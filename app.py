@@ -37,6 +37,7 @@ import today_card
 import exposure_guide          # v8.0.0 (15 Nov 2026): MRS v8 card (visual; words in a closed fold)
 import put_log                 # v8.0.0: daily SPY put log (pl_* columns), price on the hedge tile
 import state_view              # v8.1.0: scanner / leaders / laggards read through the v8 state
+import data_check              # v8.3.0: morning data check strip (every automatic source vs the expected session)
 import scan_view
 import heat_score
 import chart_view
@@ -50,7 +51,7 @@ try:
 except Exception:
     _PROC_START = None
 for _m in (pipeline, rs_labels, risk_dial, sector_view, rotation_view, market_state, risk_panel, allocation, scan_view,
-           chart_view, watchlist, heat_score, exposure_guide, put_log, state_view):
+           chart_view, watchlist, heat_score, exposure_guide, put_log, state_view, data_check):
     try:
         _mt = os.path.getmtime(_m.__file__)
         _seen = getattr(_m, '_mrs_mtime', None)
@@ -865,6 +866,7 @@ def _gl_header() -> dict:
 # v6.4 (14 Nov 2026): the Today card replaces the decision strip; it is filled below, once the SPY phase
 # and the pedal snapshot are known. The decision strip code (market_state.decision_strip_html) is kept.
 _show_all = bool(st.session_state.get('show_all', False))
+_check_slot = st.empty()          # v8.3.0: morning data check strip, filled at the end of the run
 _guide_slot = st.empty()          # v8.0.0: MRS v8 card (clock x phase x VIX) on top
 _today_slot = st.empty()
 _health_slot = st.empty()          # filled at the end of the run with the load-health line
@@ -2697,22 +2699,40 @@ if st.toggle('Retired MRS v6 score: components, history, put/call (reference onl
                 st.write('PC SMA-10 data not available.')
 
 
-# ── Load health line (v6.3.2): fills the slot under the decision strip ─────────────────────────────────────
+# ── v8.3.0 (15 Nov 2026): morning data check on top of the page (replaces the v6.3.2 health line). Every automatic
+#    source against the last completed NYSE session; hover a chip for what feeds it. The load-health issues follow it.
 try:
-    if _HEALTH:
-        _hl = ' · '.join(f'<b>{_esc(a)}</b> ({_esc(b)})' for a, b in _HEALTH)
-        _health_slot.markdown(
-            f'<div style="font-size:0.78rem;color:#f3ece2;border:1px solid #f4a062;border-left:4px solid #f4a062;'
-            f'border-radius:4px;background:#2a1c13;padding:5px 10px;margin:-4px 0 10px 0;">'
-            f'<b style="color:#f4a062;">Data issues this run ({len(_HEALTH)}):</b> {_hl}. '
-            f'<span style="color:#a89f95;">A reload in a few minutes usually clears a fetch failure; a stale or missing '
-            f'nightly file points to the GitHub Actions run.</span>'
-            f'</div>', unsafe_allow_html=True)
-    else:
-        _health_slot.markdown('<div style="font-size:0.70rem;color:#6e675f;margin:-6px 0 8px 0;">'
-                              '✓ All sections loaded and current.</div>', unsafe_allow_html=True)
+    def _dmax(x):
+        try:
+            return pd.Timestamp(x).normalize() if x is not None and pd.notna(x) else None
+        except Exception:
+            return None
+    _hd = hist.copy(); _hd['date'] = pd.to_datetime(_hd['date'])
+    _pl_pending = 'pl_p5_60_mid' not in _hd.columns or _hd['pl_p5_60_mid'].dropna().empty
+    _items = [
+        ('Daily update', _dmax(_hd['date'].max()), 'mrs_history.csv, the nightly GitHub Action (update_data.py).', False),
+        ('VIX', _dmax(_hd.dropna(subset=['vix'])['date'].max()) if 'vix' in _hd else None,
+         'VIX close in the daily update: the card\'s width line.', False),
+        ('Put log', None if _pl_pending else _dmax(_hd.dropna(subset=['pl_p5_60_mid'])['date'].max()),
+         'SPY put quotes logged by the daily update (put_log.py): the hedge tile.', _pl_pending),
+        ('SPY prices', _dmax(_eg_h.index.max()) if _eg_h is not None and len(_eg_h) else None,
+         'SPY daily bars from Yahoo, live: phase, clock, follow-through day.', False),
+        ('SPY tickets', _dmax(_al_states['SPY'].get('date')) if _al_states.get('SPY') else None,
+         'Allocation replay (tickets A / B, stops) from Yahoo, live.', False),
+        ('Risk today', _dmax(_rp_snap.get('date')) if _rp_snap else None,
+         'SPY, VIX3M and industry closes from Yahoo, live: Risk today panel.', False),
+        ('Sectors', _dmax(_sec_closes.index.max()) if _sec_closes is not None and len(_sec_closes) else None,
+         'Sector ETF closes from Yahoo, live.', False),
+        ('Industries', _dmax(pd.to_datetime(_ind_df['last_bar'], errors='coerce').max())
+         if _ind_df is not None and 'last_bar' in _ind_df.columns else None,
+         'industry_rs.csv from the nightly industry job.', False),
+        ('Scanner', _dmax(pd.to_datetime(_scan_df['data_through'].iloc[0], errors='coerce'))
+         if _scan_df is not None and len(_scan_df) and 'data_through' in _scan_df.columns else None,
+         'scan_results.csv from the nightly scanner job.', False),
+    ]
+    _check_slot.markdown(data_check.strip_html(_items, _HEALTH, data_check.expected_session()), unsafe_allow_html=True)
 except Exception as _hl_err:
-    print(f'[health] {_hl_err}')
+    print(f'[data check] {_hl_err}')
 
 # ── Footer ─────────────────────────────────────────────────────────────────────
 last_upd = hist['date'].max()
