@@ -7,6 +7,10 @@ Versions follow `docs/PROCESS.md`:
 
 The current version is in `VERSION` and in the page footer. Entries before 6.3.1 were reconstructed from the commit history and the project notes on 13 Nov 2026.
 
+## 8.3.2 · 2026-11-15
+
+- The Market detail fold is open by default; the Watchlist table and chart is folded by default (Fabio).
+
 ## 8.3.1 · 2026-11-15
 
 Market detail fold brought in line with v8:

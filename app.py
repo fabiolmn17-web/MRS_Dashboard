@@ -946,7 +946,7 @@ if False:
 
 # ── v6.4 (14 Nov 2026): Market detail fold (inventory: fold) ───────────────────────────────────────────
 with st.expander('Market detail: levels and changes, SPY / QQQ tickets, leaders, laggards, rotation',
-                 expanded=_show_all):
+                 expanded=True):   # v8.3.2: open by default (Fabio, 15 Nov 2026)
     try:
         st.markdown(today_card.detail_html(
             [f'VIX {_f("vix", "{:.2f}")} · SPX {_f("spx", "{:,.0f}")} · Zero γ {_f("zero_gamma", "{:,.0f}")}'
@@ -1105,7 +1105,7 @@ def _wl_section_body():
     """v5.4: the watchlist sits in a collapsible section (open by default; the open/closed state is kept while the
     page is open)."""
     st.markdown('<div class="section-header">Watchlist</div>', unsafe_allow_html=True)
-    with st.expander('Watchlist table and chart (click to open / close)', expanded=True):
+    with st.expander('Watchlist table and chart (click to open / close)', expanded=_show_all):   # v8.3.2: folded by default
         _wl_inner()
 
 
