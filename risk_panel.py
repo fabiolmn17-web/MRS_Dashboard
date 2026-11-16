@@ -254,7 +254,8 @@ def snapshot(d: pd.DataFrame, rho: float, neff: float, vix: float, vix3m: float,
     return dict(date=d.index[-1], band=last['band'], bandg=bg, trend=tr, ext=ex, ext_atr=float(last['ext_atr']),
                 r12=float(last['r12']) if _fin(last.get('r12')) else np.nan,
                 pedal=pedal(bg, tr, ex), ep_day=ep_day, ep_start=ep_start, cell=cs, rho=rho, neff=neff, inverted=bool(_fin(vix) and _fin(vix3m) and vix > vix3m),
-                vix=vix, vix3m=vix3m, cost=cost, cost_pct=pct, rv=rv, invested=inv)
+                vix=vix, vix3m=vix3m, cost=cost, cost_pct=pct, rv=rv, invested=inv,
+                ext_hist=[float(x) for x in d['ext_atr'].iloc[-60:]])   # 8.4.1: sparkline
 
 
 def log_row(snap: dict) -> dict:
@@ -639,6 +640,31 @@ def density_svg(f_cell, f_all, W=520, H=170) -> str:
     return ''.join(g) + key
 
 
+def ext_spark_svg(xs, W=420, H=110) -> str:
+    """8.4.1: SPY distance from its 50-day in ATR(14), last 60 sessions, with the DIP ZONE (<= -1) shaded."""
+    x = np.asarray([v for v in (xs or []) if _fin(v)], float)
+    if len(x) < 5:
+        return ''
+    lo, hi = min(x.min(), -1.6) - 0.2, max(x.max(), 1.0) + 0.2
+    L, R, Tp, B = 4, 30, 6, 14
+    X = lambda i: L + i / (len(x) - 1) * (W - L - R)
+    Y = lambda v: Tp + (hi - v) / (hi - lo) * (H - Tp - B)
+    g = [f'<svg viewBox="0 0 {W} {H}" width="100%" style="display:block">',
+         f'<rect x="{L}" y="{Y(-1):.1f}" width="{W - L - R}" height="{H - B - Y(-1):.1f}" fill="rgba(133,202,197,0.16)"/>']
+    for v, lab in ((0, '50d'), (-1, '−1')):
+        g.append(f'<line x1="{L}" x2="{W - R}" y1="{Y(v):.1f}" y2="{Y(v):.1f}" stroke="{"#3a3632" if v == 0 else "#649995"}" '
+                 f'stroke-dasharray="{"" if v == 0 else "3,3"}"/><text x="{W - R + 4}" y="{Y(v) + 3.5:.1f}" fill="#6e675f" '
+                 f'font-size="10" font-family="IBM Plex Mono, monospace">{lab}</text>')
+    pts = ' '.join(f'{X(i):.1f},{Y(v):.1f}' for i, v in enumerate(x))
+    g.append(f'<polyline points="{pts}" fill="none" stroke="#f3ece2" stroke-width="1.6"/>')
+    for i, v in enumerate(x):
+        if v <= -1:
+            g.append(f'<circle cx="{X(i):.1f}" cy="{Y(v):.1f}" r="2" fill="#85cac5"/>')
+    g.append(f'<circle cx="{X(len(x) - 1):.1f}" cy="{Y(x[-1]):.1f}" r="3.5" fill="#f3ece2"/>'
+             f'<text x="{L}" y="{H - 2}" fill="#6e675f" font-size="10" font-family="IBM Plex Mono, monospace">60 sessions</text></svg>')
+    return ''.join(g)
+
+
 def _odds(lbl, v, va, col):
     import ui
     return (f'<div style="display:flex;flex-direction:column;font-size:12px;color:#a89f95">'
@@ -661,7 +687,8 @@ def panel_v9_html(snap: dict) -> str:
                    [(zx / 2, 'dip zone'), (50, '50-day'), (94, '+3')])
           + (f'<div class="atn-sm">sell-off day <b style="color:#f3ece2">{ep}</b> · started {pd.Timestamp(snap["ep_start"]):%d %b}</div>' if ep else '')
           + ('<div class="atn-sm" style="margin-top:6px">Dip zone: wide both ways (5%+ up 31% vs 17%; 7%+ drop 27% vs 14%).</div>' if inz
-             else '<div class="atn-sm" style="margin-top:6px">The dip zone starts at −1 ATR.</div>') + '</div>')
+             else '<div class="atn-sm" style="margin-top:6px">The dip zone starts at −1 ATR.</div>')
+          + ext_spark_svg(snap.get('ext_hist')) + '</div>')
     if v8.get('cell'):
         c, a = v8['cell'], v8['all']
         vb = v8.get('vb'); vcol = TEAL if vb == 'CALM' else ORANGE
@@ -669,7 +696,7 @@ def panel_v9_html(snap: dict) -> str:
         t2 = (f'<div class="atn-tile"><div class="atn-tl">This state · SPY next 20 sessions, since 2008 {ui.tag("Descriptive")}</div>'
               f'<div class="atn-sm" style="margin-bottom:2px"><b style="color:#f3ece2">SPY {PH_TXT.get(v8["code"], "?")}</b> · VIX '
               f'<b style="color:{vcol}">{(v8["vix"] if _fin(v8["vix"]) else float("nan")):.1f} {_e(vb)}</b>{scope} · {c["n"]:,} days</div>'
-              f'{density_svg(v8.get("f_cell", []), v8.get("f_all", []), W=620, H=150)}'
+              f'{density_svg(v8.get("f_cell", []), v8.get("f_all", []), W=620, H=170)}'
               f'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px 14px;margin-top:6px">'
               + _odds('≥5% up', c['up5'], a['up5'], TEAL) + _odds('≥5% down', c['dn5'], a['dn5'], ORANGE)
               + _odds('7% fast drop', c['fast'], a['fast'], ORANGE)
@@ -684,12 +711,13 @@ def panel_v9_html(snap: dict) -> str:
             col = (TEAL if r >= 0.15 else (INK if r >= 0 else ORANGE)) if on else '#3a3632'
             rows += (f'<div style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:{INK if on else DIM}">'
                      f'<span style="width:64px;font-weight:{700 if on else 400}">{C1_LBL[bb]}</span><div style="flex:1">'
-                     + ui.bar([(0, max(abs(r), 0.02) / 0.30 * 100, col)], margin='7px 0')
+                     + ui.bar([(0, max(abs(r), 0.02) / 0.30 * 100, col)], margin='7px 0', height=12)
                      + f'</div><span style="width:96px;text-align:right;font-family:IBM Plex Mono,monospace;color:{col if on else DIM}">'
                      f'{r:+.2f}R · {p3 * 100:.0f}%</span></div>')
         t3 = (f'<div class="atn-tile"><div class="atn-tl">Clock · quality of a new trade {ui.tag("Tested · in sample")}</div>'
               f'<div class="atn-val" style="color:{TEAL if b in ("IN DIP", "EARLY") else (INK if b == "MID" else COPPER)}">{_e(b)}'
-              f'{"" if not v8.get("n_since") else " " + str(v8["n_since"])}</div>{rows}'
+              f'{"" if not v8.get("n_since") else " " + str(v8["n_since"])}</div>'
+              f'<div style="display:flex;flex-direction:column;justify-content:space-evenly;flex:1;min-height:150px">{rows}</div>'
               '<div class="atn-sm" style="font-size:11px;margin-top:4px">mean R · P(≥3R) of a random stock entry (C1). Per trade, not size.</div></div>')
     else:
         t3 = '<div class="atn-tile"><div class="atn-tl">Clock</div><div class="atn-sm">not available right now.</div></div>'
@@ -708,4 +736,9 @@ def panel_v9_html(snap: dict) -> str:
         t4 = '<div class="atn-tile"><div class="atn-tl">Effective bets</div><div class="atn-sm">Industry prices not available.</div></div>'
     return ('<div style="background:#121212;border:1px solid #2a2724;border-radius:6px;padding:14px 16px 12px 16px;margin:2px 0 12px 0">'
             + ui.kicker('Risk today', 'what the next 20 sessions looked like in this state · how many bets the book holds')
-            + '<div style="display:grid;grid-template-columns:0.95fr 2.2fr 1.15fr 1fr;gap:10px">' + t1 + t2 + t3 + t4 + '</div></div>').replace('\n', ' ')
+            + '<div style="display:grid;grid-template-columns:1.05fr 2.1fr 1.15fr;gap:10px;align-items:stretch">'
+            + t2.replace('<div class="atn-tile">', '<div class="atn-tile" style="grid-column:2;grid-row:1 / span 2">', 1)
+            + t1.replace('<div class="atn-tile">', '<div class="atn-tile" style="grid-column:1;grid-row:1">', 1)
+            + t4.replace('<div class="atn-tile">', '<div class="atn-tile" style="grid-column:1;grid-row:2">', 1)
+            + t3.replace('<div class="atn-tile">', '<div class="atn-tile" style="grid-column:3;grid-row:1 / span 2;display:flex;flex-direction:column">', 1)
+            + '</div></div>').replace('\n', ' ')

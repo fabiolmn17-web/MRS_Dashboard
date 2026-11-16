@@ -7,6 +7,19 @@ Versions follow `docs/PROCESS.md`:
 
 The current version is in `VERSION` and in the page footer. Entries before 6.3.1 were reconstructed from the commit history and the project notes on 13 Nov 2026.
 
+## 8.4.1 · 2026-11-16
+
+Layout pass on the live page (Fabio: smaller SPY chart, less unused black space, more room for the data visuals). Same numbers.
+- **MRS v8 card:**
+  - SPY chart: 120 sessions instead of 160, in a narrower tile (about half the card).
+  - The right tile fills the space with two new visuals under compact rings:
+    - **Distance to the next stance:** one price axis with SPY against the levels that change the stance (DIP ZONE line → NORMAL, 50-day / A unlock, B trigger → PRESS, open-ticket stops), each with its % distance;
+    - **Swing budget by stance:** PRESS / NORMAL / EASE as bars (cap on a 0–4% scale), today's highlighted.
+- **Risk today:**
+  - "SPY vs its 50-day" and "Effective bets" are stacked in one column.
+  - The distribution and the clock tiles use the full height.
+  - New 60-session sparkline of SPY's distance from its 50-day in ATR, with the DIP ZONE shaded.
+
 ## 8.4.0 · 2026-11-16
 
 Design audit: one ATN component set for the whole page, plus a new Vol surface panel (Fabio's picks: card B with candles + A's detail row; Risk today B curve + A bars; Gamma Live + Yahoo backup). Notes: `claude/mrs_design_8_4.md`.

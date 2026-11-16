@@ -40,6 +40,13 @@ PH_NAME = {0: 'DIP', 1: 'A', 2: 'B', 3: 'NONE'}
 HEDGE_WINDOW = 5              # sessions after a trend start / end in which the 60-session put is the rule
 
 
+def _fin(x):
+    try:
+        return x is not None and np.isfinite(float(x))
+    except (TypeError, ValueError):
+        return False
+
+
 def _e(s):
     return _html.escape(str(s), quote=True)
 
@@ -418,29 +425,104 @@ PH_BAND = {0: ('rgba(133,202,197,0.40)', 'DIP ZONE'), 1: ('rgba(100,153,149,0.24
 
 
 def rings_html(ph: pd.Series, vix) -> str:
+    """8.4.1: three compact rings (clock, VIX width, open-risk cap)."""
     code = int(ph.iloc[-1]) if ph is not None and len(ph) else None
     st_ = stance(code)
     bucket, n = clock(ph)
     vb = vol_band(vix)
     def ring(frac, col, big, cap, sub):
-        return (f'<div style="display:flex;flex-direction:column;align-items:center;gap:6px;">'
-                f'<div class="atn-ring" style="background:conic-gradient({col} {max(min(frac, 1), 0.02) * 360:.0f}deg,#24211e 0)"><div>{_e(big)}</div></div>'
-                f'<div class="atn-tl" style="margin:0">{_e(cap)}</div><div class="atn-sm" style="font-size:11.5px;color:#6e675f;margin-top:-4px">{_e(sub)}</div></div>')
+        return (f'<div style="display:flex;flex-direction:column;align-items:center;gap:4px;">'
+                f'<div class="atn-ring sm" style="background:conic-gradient({col} {max(min(frac, 1), 0.02) * 360:.0f}deg,#24211e 0)"><div>{_e(big)}</div></div>'
+                f'<div class="atn-tl" style="margin:0">{_e(cap)}</div><div class="atn-sm" style="font-size:11px;color:#6e675f;margin-top:-4px">{_e(sub)}</div></div>')
     if bucket is None or st_ is None:
         return '<div class="atn-sm">State not available right now.</div>'
     ccol = TEAL if bucket in ('IN DIP', 'EARLY') else (INK if bucket == 'MID' else COPPER)
     cfrac = 1.0 if bucket == 'IN DIP' else (n or 0) / 60
     vcol = TEAL if vb == 'CALM' else ORANGE
     cap = SWING_CAP[st_]
-    return ('<div style="display:flex;justify-content:space-around;margin:4px 0 2px 0;">'
+    return ('<div style="display:flex;justify-content:space-around;margin:2px 0 0 0;">'
             + ring(cfrac, ccol, 'DIP' if bucket == 'IN DIP' else str(n), f'Clock · {bucket.lower()}', 'sessions since the dip')
             + ring(((vix or 10) - 10) / 30, vcol, f'{vix:.1f}' if vix else '–', f'VIX · {(vb or "n/a").lower()}', f'median {VIX_MEDIAN:.1f}')
             + ring(cap / max(SWING_CAP.values()), STANCE_COL[st_], f'{cap * 100:.1f}%', 'Open risk', f'of a {max(SWING_CAP.values()) * 100:.0f}% max')
-            + '</div>'
-            + f'<div class="atn-sm" style="margin-top:14px;text-align:center"><b style="color:{INK}">{BUDGET[st_][0] * 100:.3g}% a trade</b> · '
-              f'≈ {int(round(cap / BUDGET[st_][0]))} trades at full risk' + (f' · swing gross ≤ {BUDGET[st_][2] * 100:.0f}%' if BUDGET[st_][2] < 1 else '') + '</div>'
-            + '<div class="atn-sm" style="text-align:center;font-size:11.5px;color:#6e675f;margin-top:4px">stance by SPY phase: A / B open = PRESS · '
-              'DIP ZONE = NORMAL · no ticket = EASE</div>')
+            + '</div>')
+
+
+def budget_html(ph: pd.Series) -> str:
+    """8.4.1: the three stance budgets as bars (cap on a 0-4% scale), today's highlighted."""
+    import ui
+    code = int(ph.iloc[-1]) if ph is not None and len(ph) else None
+    now = stance(code)
+    rows = ''
+    for st_, when in (('PRESS', 'A / B open'), ('NORMAL', 'DIP ZONE'), ('EASE', 'no ticket')):
+        rt, cap, g = BUDGET[st_]
+        on = st_ == now
+        col = STANCE_COL[st_] if on else '#3a3632'
+        rows += (f'<div style="display:grid;grid-template-columns:118px 1fr 196px;align-items:center;gap:10px;'
+                 f'font-size:12px;color:{INK if on else DIM}"><span><b style="font-weight:{700 if on else 500}">{st_}</b> '
+                 f'<span style="color:{MUTED if on else DIM};font-size:11px">{when}</span></span><div>'
+                 + ui.bar([(0, cap / 0.04 * 100, col)], margin='5px 0', height=8)
+                 + f'</div><span style="font-family:IBM Plex Mono,monospace;text-align:right">{rt * 100:.3g}% · ≤ {cap * 100:.1f}%'
+                 + (f' · gross {g * 100:.0f}%' if g < 1 else '') + '</span></div>')
+    return (f'<div class="atn-tl" style="margin:10px 0 2px 0">Swing budget by stance <span style="font-size:10px;'
+            f'letter-spacing:.06em;color:#6e675f;text-transform:none">a trade · open-risk cap</span></div>' + rows)
+
+
+def levels_svg(s: dict, W: int = 880, H: int = 104) -> str:
+    """8.4.1: where SPY is against the levels that change the stance (allocation state: dip line, 50-day, B trigger,
+    open-ticket stops), as one price axis."""
+    if not s or not _fin(s.get('close')):
+        return ''
+    c = float(s['close'])
+    lv = []
+    A, B = s.get('A') or {}, s.get('B') or {}
+    if _fin(s.get('rb_level')):
+        lv.append((float(s['rb_level']), 'DIP ZONE', 'NORMAL', TEAL))
+    if _fin(s.get('sma50')):
+        if A.get('open'):
+            lv.append((float(s['sma50']), '50-day', 'A exit line', INK))
+        elif s.get('in_selloff'):
+            lv.append((float(s['sma50']), 'A unlocks', 'above 50-day', TEAL_D))
+        else:
+            lv.append((float(s['sma50']), '50-day', '', DIM))
+    if A.get('open') and _fin(A.get('stop')):
+        lv.append((float(A['stop']), 'A stop', '', ORANGE))
+    if B.get('open'):
+        if _fin(B.get('stop')):
+            lv.append((float(B['stop']), 'B stop', '', ORANGE))
+    elif _fin(s.get('bo_level')):
+        lv.append((float(s['bo_level']), 'B buys', 'PRESS', COPPER))
+    if not lv:
+        return ''
+    xs = [v for v, *_ in lv] + [c]
+    lo, hi = min(xs), max(xs)
+    pad = max((hi - lo) * 0.10, c * 0.004)
+    lo, hi = lo - pad, hi + pad
+    L, R = 8, 8
+    X = lambda v: L + (v - lo) / (hi - lo) * (W - L - R)
+    ya = 58
+    g = [f'<svg viewBox="0 0 {W} {H}" width="100%" style="display:block">',
+         f'<rect x="{L}" y="{ya - 5}" width="{W - L - R}" height="10" rx="3" fill="#1f1d1b"/>']
+    dip = next((v for v, n, *_ in lv if n == 'DIP ZONE'), None)
+    if dip is not None:
+        g.append(f'<rect x="{L}" y="{ya - 5}" width="{max(X(dip) - L, 0):.1f}" height="10" rx="3" fill="rgba(133,202,197,0.38)"/>')
+    bo = next((v for v, n, *_ in lv if n == 'B buys'), None)
+    if bo is not None:
+        g.append(f'<rect x="{X(bo):.1f}" y="{ya - 5}" width="{max(W - R - X(bo), 0):.1f}" height="10" rx="3" fill="rgba(227,180,142,0.32)"/>')
+    for k, (v, name, sub, col) in enumerate(sorted(lv)):
+        x = X(v); up = k % 2 == 0
+        g.append(f'<line x1="{x:.1f}" x2="{x:.1f}" y1="{ya - 9}" y2="{ya + 9}" stroke="{col}" stroke-width="2"/>')
+        ty = 18 if up else 96
+        anchor = 'start' if x < 60 else ('end' if x > W - 60 else 'middle')
+        g.append(f'<text x="{x:.1f}" y="{ty}" text-anchor="{anchor}" fill="{col}" font-size="11" font-family="Barlow, sans-serif" '
+                 f'font-weight="600">{_e(name)}{(" → " + _e(sub)) if sub else ""}</text>'
+                 f'<text x="{x:.1f}" y="{ty + (13 if up else -13)}" text-anchor="{anchor}" fill="#a89f95" font-size="10.5" '
+                 f'font-family="IBM Plex Mono, monospace">{v:,.2f} ({(v / c - 1) * 100:+.1f}%)</text>')
+    xc = X(c)
+    g.append(f'<polygon points="{xc - 6:.1f},{ya - 15} {xc + 6:.1f},{ya - 15} {xc:.1f},{ya - 7}" fill="{INK}"/>'
+             f'<line x1="{xc:.1f}" x2="{xc:.1f}" y1="{ya - 8}" y2="{ya + 8}" stroke="{INK}" stroke-width="3"/>')
+    g.append('</svg>')
+    return (f'<div class="atn-tl" style="margin:12px 0 0 0">Distance to the next stance <span style="font-size:10px;'
+            f'letter-spacing:.06em;color:#6e675f;text-transform:none">SPY {c:,.2f} · closes decide</span></div>' + ''.join(g))
 
 
 def detail_html(spy_state: dict, ph: pd.Series, put: dict = None, spy_ohlcv: pd.DataFrame = None) -> str:
@@ -488,7 +570,7 @@ def detail_html(spy_state: dict, ph: pd.Series, put: dict = None, spy_ohlcv: pd.
             + f'<div class="atn-sm" style="font-size:11px;color:#6e675f;margin-top:6px">{_e(" · ".join(foot))}</div>').replace('\n', ' ')
 
 
-def ribbon_svg(spy_ohlcv: pd.DataFrame, ph: pd.Series, n: int = 160, W: int = 760, H: int = 236) -> str:
+def ribbon_svg(spy_ohlcv: pd.DataFrame, ph: pd.Series, n: int = 120, W: int = 640, H: int = 270) -> str:
     """Static SVG: SPY daily candles for the last n sessions with the SPY phase as background bands (one HTML block, so
     the card keeps one shell; no Streamlit layout inside the card)."""
     if spy_ohlcv is None or ph is None or len(spy_ohlcv) < 20:
@@ -548,7 +630,8 @@ def card_v9_html(spy_state, ph: pd.Series, vix, put: dict = None, spy_ohlcv: pd.
         return ui.CSS() + '<div class="atn-k">MRS v8 <b>· SPY history not available right now: no stance</b></div>'
     return ('<div style="background:#121212;border:1px solid #2a2724;border-radius:6px;padding:14px 16px 10px 16px;margin:2px 0 6px 0">'
             + header_html(spy_state, ph, vix, date_txt)
-            + '<div style="display:grid;grid-template-columns:1.45fr 1fr;gap:10px;">'
-            + f'<div class="atn-tile"><div class="atn-tl">SPY · last 160 sessions with its phase {ui.tag("Tested")}</div>{ribbon_svg(spy_ohlcv, ph)}</div>'
-            + f'<div class="atn-tile"><div class="atn-tl">Clock · width · budget {ui.tag("Tested · v8 sizing")}</div>{rings_html(ph, vix)}</div></div>'
+            + '<div style="display:grid;grid-template-columns:1fr 1.15fr;gap:10px;align-items:stretch">'
+            + f'<div class="atn-tile"><div class="atn-tl">SPY · last 120 sessions with its phase {ui.tag("Tested")}</div>{ribbon_svg(spy_ohlcv, ph)}</div>'
+            + f'<div class="atn-tile"><div class="atn-tl">Clock · width · budget {ui.tag("Tested · v8 sizing")}</div>{rings_html(ph, vix)}'
+            + levels_svg(spy_state) + budget_html(ph) + '</div></div>'
             + detail_html(spy_state, ph, put, spy_ohlcv) + '</div>').replace('\n', ' ')

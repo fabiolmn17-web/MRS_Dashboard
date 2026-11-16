@@ -88,6 +88,8 @@ def CSS() -> str:
 .atn-lbls span{{position:absolute;transform:translateX(-50%);white-space:nowrap}}
 .atn-chip{{display:inline-block;font-family:{DISPLAY};font-weight:600;font-size:12px;padding:3px 9px;border-radius:4px;background:#24211e;color:{t['ink']};white-space:nowrap;margin:2px 3px 2px 0}}
 .atn-ring{{width:96px;height:96px;border-radius:50%;display:grid;place-items:center}}
+.atn-ring.sm{{width:78px;height:78px}}
+.atn-ring.sm > div{{width:60px;height:60px;font-size:16px}}
 .atn-ring > div{{width:74px;height:74px;border-radius:50%;background:{t['tile']};display:grid;place-items:center;font-family:{MONO};font-weight:600;font-size:18px;color:{t['ink']}}}
 .atn-row .pill{{display:inline-block;min-width:40px;text-align:center;font-family:{DISPLAY};font-size:12px;font-weight:700;padding:3px 7px;margin:2px 4px 2px 0;border-radius:4px;border:1px solid {t['line2']};color:{t['dim']}}}
 .atn-row .dot{{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:5px;vertical-align:-1px}}
