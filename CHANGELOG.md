@@ -7,6 +7,16 @@ Versions follow `docs/PROCESS.md`:
 
 The current version is in `VERSION` and in the page footer. Entries before 6.3.1 were reconstructed from the commit history and the project notes on 13 Nov 2026.
 
+## 8.5.3 · 2026-11-16
+
+While the US session is open, the stance badge shows the stance at the **last close**, and a dashed label beside it shows the live reading, marked provisional: e.g. "Mon 16 Nov · live: NORMAL if SPY closes below 752.91 (now 744.98) · provisional". After 16:05 New York time the label disappears and the badge shows the day's stance. The rings, filter line, levels and budget bars keep showing the live bar. (Fabio, 16 Nov: the badge switched from EASE to NORMAL intraday while the header still showed Friday's date.)
+
+## 8.5.2 · 2026-11-16
+
+Layout (Fabio: smaller SPY chart, more room for the rings and visuals).
+- MRS v8 card: the SPY chart column narrows (about 37% of the width instead of 47%); the clock / width / budget column widens.
+- The "Distance to the next stance" axis is capped at 980 px wide, so its labels stay about 12 px on a 2560 px screen.
+
 ## 8.5.1 · 2026-11-16
 
 Wording (Fabio: the setups still frame discretionary trades when the state is conducive).

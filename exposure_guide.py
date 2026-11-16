@@ -455,20 +455,70 @@ The price on the tile comes from the daily put log.
 
 
 # ══ 8.4.0 (16 Nov 2026): card layout B (Fabio's pick): header, SPY candles with the phase as bands + rings, A's detail row ══
-def header_html(spy_state, ph: pd.Series, vix, date_txt: str = '', f200=None) -> str:
+CLOSE_ET = (16, 5)            # 8.5.3: after 16:05 New York time the day's bar counts as a close
+
+
+def live_bar(spy_ohlcv: pd.DataFrame, now=None) -> bool:
+    """True when the last SPY bar is today's session and the US close has not happened yet (New York time)."""
+    if spy_ohlcv is None or not len(spy_ohlcv):
+        return False
+    try:
+        from zoneinfo import ZoneInfo
+        now = now or pd.Timestamp.now(tz=ZoneInfo('America/New_York'))
+        last = pd.Timestamp(spy_ohlcv.index[-1])
+        last = last.tz_convert('America/New_York') if last.tzinfo else last
+        return last.date() == now.date() and (now.hour, now.minute) < CLOSE_ET
+    except Exception:
+        return False
+
+
+def provisional(spy_state, ph: pd.Series, spy_ohlcv: pd.DataFrame, now=None):
+    """8.5.3: while the session is open, the stance at the last close (settled) and the live reading (provisional).
+    Returns None after the close, else dict(settled, live, line, price, date)."""
+    if ph is None or len(ph) < 2 or not live_bar(spy_ohlcv, now):
+        return None
+    f_now, f_prev = filter200(spy_ohlcv), filter200(spy_ohlcv, upto=-1)
+    settled, live = stance(int(ph.iloc[-2]), f_prev), stance(int(ph.iloc[-1]), f_now)
+    s = spy_state or {}
+    price = float(spy_ohlcv.rename(columns=str.lower)['close'].iloc[-1])
+    line = float(s['rb_level']) if _fin(s.get('rb_level')) else None
+    return dict(settled=settled, live=live, line=line, price=price, code=int(ph.iloc[-1]), code_prev=int(ph.iloc[-2]),
+                date=pd.Timestamp(spy_ohlcv.index[-1]))
+
+
+def _prov_html(pv) -> str:
+    if not pv:
+        return ''
+    now = f'(now {pv["price"]:,.2f})'
+    if pv['live'] == pv['settled']:
+        txt = f'live bar agrees: {pv["live"]} {now} · provisional until the close'
+    elif pv['code'] == 0 and pv['code_prev'] != 0 and pv['line']:
+        txt = f'live: {pv["live"]} if SPY closes below {pv["line"]:,.2f} {now} · provisional'
+    elif pv['code_prev'] == 0 and pv['code'] != 0 and pv['line']:
+        txt = f'live: {pv["live"]} if SPY closes above {pv["line"]:,.2f} {now} · provisional'
+    else:
+        txt = f'live: {pv["live"]} if this holds at the close {now} · provisional'
+    col = STANCE_COL.get(pv['live'], INK)
+    return (f'<span style="font-family:Barlow,sans-serif;font-weight:700;font-size:13px;letter-spacing:.06em;padding:3px 10px;'
+            f'border:1px dashed {col};border-radius:5px;color:{col};white-space:nowrap">{_e(pv["date"].strftime("%a %d %b") + " · " + txt)}</span>')
+
+
+def header_html(spy_state, ph: pd.Series, vix, date_txt: str = '', f200=None, prov=None) -> str:
     import ui
     code = int(ph.iloc[-1]) if ph is not None and len(ph) else None
     st_ = stance(code, f200)
+    if prov:                                   # 8.5.3: the badge shows the stance at the last close while the session is open
+        st_, code = prov['settled'], prov['code_prev']
     if st_ is None:
         return ui.CSS() + '<div class="atn-k">MRS v8 <b>· SPY history not available right now: no stance</b></div>'
     rt, cap, g = BUDGET[st_]
     sub = f'{date_txt} · swing {rt * 100:.3g}% a trade · open risk ≤ {cap * 100:.1f}%' + (f' · swing gross ≤ {g * 100:.0f}%' if g < 1 else '')
     if code == 0 and st_ == 'EASE':
         sub += ' · DIP ZONE without a rising 200-day: small budget'
-    return (f'<div style="display:flex;align-items:center;gap:14px;margin:2px 0 6px 0;">'
+    return (f'<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:2px 0 6px 0;">'
             f'<span style="font-family:Barlow,sans-serif;font-weight:800;font-size:30px;letter-spacing:.08em;padding:2px 18px;'
             f'border-radius:5px;color:#0a0a0a;background:{STANCE_COL[st_]};">{st_}</span>'
-            f'<div class="atn-k" style="margin:0">MRS v8 <b>· {_e(sub)}</b></div></div>')
+            f'<div class="atn-k" style="margin:0">MRS v8 <b>· {_e(sub)}</b></div>' + _prov_html(prov) + '</div>')
 
 
 PH_BAND = {0: ('rgba(133,202,197,0.40)', 'DIP ZONE'), 1: ('rgba(100,153,149,0.24)', 'ticket A open'),
@@ -574,7 +624,7 @@ def levels_svg(s: dict, W: int = 880, H: int = 104, f200=None) -> str:
     L, R = 8, 8
     X = lambda v: L + (v - lo) / (hi - lo) * (W - L - R)
     ya = 58
-    g = [f'<svg viewBox="0 0 {W} {H}" width="100%" style="display:block">',
+    g = [f'<svg viewBox="0 0 {W} {H}" width="100%" style="display:block;max-width:980px;margin:0 auto">',   # 8.5.2: text ~12px at 2560
          f'<rect x="{L}" y="{ya - 5}" width="{W - L - R}" height="10" rx="3" fill="#1f1d1b"/>']
     dip = next((v for v, n, *_ in lv if n == 'DIP ZONE'), None)
     if dip is not None:
@@ -645,7 +695,7 @@ def detail_html(spy_state: dict, ph: pd.Series, put: dict = None, spy_ohlcv: pd.
             + f'<div class="atn-sm" style="font-size:11px;color:#6e675f;margin-top:6px">{_e(" · ".join(foot))}</div>').replace('\n', ' ')
 
 
-def ribbon_svg(spy_ohlcv: pd.DataFrame, ph: pd.Series, n: int = 120, W: int = 640, H: int = 270) -> str:
+def ribbon_svg(spy_ohlcv: pd.DataFrame, ph: pd.Series, n: int = 120, W: int = 600, H: int = 300) -> str:
     """Static SVG: SPY daily candles for the last n sessions with the SPY phase as background bands (one HTML block, so
     the card keeps one shell; no Streamlit layout inside the card)."""
     if spy_ohlcv is None or ph is None or len(spy_ohlcv) < 20:
@@ -698,15 +748,17 @@ def ribbon_svg(spy_ohlcv: pd.DataFrame, ph: pd.Series, n: int = 120, W: int = 64
     return f'<div class="atn-sm" style="font-size:11px;margin-bottom:2px">{key}</div>' + ''.join(g)
 
 
-def card_v9_html(spy_state, ph: pd.Series, vix, put: dict = None, spy_ohlcv: pd.DataFrame = None, date_txt: str = '') -> str:
+def card_v9_html(spy_state, ph: pd.Series, vix, put: dict = None, spy_ohlcv: pd.DataFrame = None, date_txt: str = '',
+                 now=None) -> str:
     """8.4.0 card (layout B + A's detail row) as one HTML block."""
     import ui
     if ph is None or not len(ph):
         return ui.CSS() + '<div class="atn-k">MRS v8 <b>· SPY history not available right now: no stance</b></div>'
     f200 = filter200(spy_ohlcv) if spy_ohlcv is not None else None
+    prov = provisional(spy_state, ph, spy_ohlcv, now)
     return ('<div style="background:#121212;border:1px solid #2a2724;border-radius:6px;padding:14px 16px 10px 16px;margin:2px 0 6px 0">'
-            + header_html(spy_state, ph, vix, date_txt, f200)
-            + '<div style="display:grid;grid-template-columns:1fr 1.15fr;gap:10px;align-items:stretch">'
+            + header_html(spy_state, ph, vix, date_txt, f200, prov)
+            + '<div style="display:grid;grid-template-columns:0.8fr 1.35fr;gap:10px;align-items:stretch">'
             + f'<div class="atn-tile"><div class="atn-tl">SPY · last 120 sessions with its phase {ui.tag("Tested")}</div>{ribbon_svg(spy_ohlcv, ph)}</div>'
             + f'<div class="atn-tile"><div class="atn-tl">Clock · width · budget {ui.tag("Tested · v8 sizing")}</div>{rings_html(ph, vix, f200)}'
             + filter_html(f200) + levels_svg(spy_state, f200=f200) + budget_html(ph, f200) + '</div></div>'

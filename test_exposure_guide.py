@@ -39,6 +39,25 @@ def test_filter200():
     assert eg._look('IN DIP')[0] == eg.LOOK_DIP and eg._look('EARLY')[0] == eg.LOOK_ELSE
 
 
+def test_provisional_live_bar():
+    import numpy as np
+    from zoneinfo import ZoneInfo
+    idx = pd.bdate_range(end='2026-11-16', periods=300)
+    c = np.linspace(600, 760, 300)
+    spy = pd.DataFrame({'Open': c, 'High': c * 1.003, 'Low': c * 0.997, 'Close': c, 'Volume': 1e6}, index=idx)
+    ny = lambda h, m: pd.Timestamp(2026, 11, 16, h, m, tz=ZoneInfo('America/New_York'))
+    assert eg.live_bar(spy, ny(12, 0)) and not eg.live_bar(spy, ny(16, 10)) and not eg.live_bar(spy.iloc[:-1], ny(12, 0))
+    ph = pd.Series([3] * 299 + [0], index=idx)                    # dropped into the DIP ZONE intraday
+    st = dict(rb_level=752.89)
+    pv = eg.provisional(st, ph, spy, ny(12, 0))
+    assert pv['settled'] == 'EASE' and pv['live'] == 'NORMAL' and pv['line'] == 752.89
+    h = eg.card_v9_html(st, ph, 19.3, None, spy, 'Fri 13 Nov 2026', now=ny(12, 0))
+    assert 'provisional' in h and 'closes below 752.89' in h and '>EASE<' in h
+    assert eg.provisional(st, ph, spy, ny(16, 30)) is None
+    h2 = eg.card_v9_html(st, ph, 19.3, None, spy, 'Mon 16 Nov 2026', now=ny(16, 30))
+    assert 'provisional' not in h2 and '>NORMAL<' in h2
+
+
 def test_hedge_window():
     assert eg.hedge_window(pd.Series([3] * 10 + [2])) == ('trend start', 0)
     assert eg.hedge_window(pd.Series([2] * 10 + [3, 3])) == ('trend end', 1)
