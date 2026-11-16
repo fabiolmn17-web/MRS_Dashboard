@@ -46,6 +46,7 @@ def test_card_v9_renders():
         assert '<svg' in h and 'atn-ring' in h and 'atn-row' in h
         assert h.count('<div') == h.count('</div>'), (ph_last, h.count('<div'), h.count('</div>'))
         assert 'MRS score' not in h
+        assert '200-day filter' in h
     assert 'not available' in eg.card_v9_html({}, None, 15.0)
     assert 'The picture.' in eg.explainer_md()
 

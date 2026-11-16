@@ -7,6 +7,22 @@ Versions follow `docs/PROCESS.md`:
 
 The current version is in `VERSION` and in the page footer. Entries before 6.3.1 were reconstructed from the commit history and the project notes on 13 Nov 2026.
 
+## 8.5.1 · 2026-11-16
+
+Wording (Fabio: the setups still frame discretionary trades when the state is conducive).
+- **Scanner strip:** the chip says whether the **state paid** for that scan's setups (▲ the state paid · ● about flat · ▼ lagged · ○ untested), not "works / no edge". Hover text adds: use it to frame entry, stop and target; the return came from the state. In the DIP ZONE the deep dip and pullback chips follow the 200-day filter (ON: ▲; OFF: ●, dips kept falling).
+- **Card, Where to look** outside the dip zone: "setups frame the trade · the state carries it" (was "no pattern beats random").
+- **Explainer:** the setups find clean structures and set entry, stop and target; the state decides whether to trade and how big.
+
+## 8.5.0 · 2026-11-16
+
+Rule change after the out-of-sample checks (2001–08 on the survivorship-free 2000 panel, and the S&P 500 since 1963). Notes: `claude/mrs_oos_2000_2008_findings.md`, `claude/mrs_df1_spx_dip_filter_findings.md`.
+- **New 200-day filter** on the MRS v8 card: ON when SPY closes above its 200-day and the 200-day is higher than 20 sessions ago. On the S&P 500 since 1963, dips below a falling 200-day fell another 10% within 60 sessions 45% of the time, against 12% above a rising one.
+- **Stance:** a DIP ZONE keeps NORMAL (0.75% a trade, ≤ 3%) only when the filter is ON. Otherwise it is EASE (0.375%, ≤ 1.5%, gross ≤ 60%). PRESS and EASE are unchanged. In the account simulation this beat the previous v8 budget in 2009–26 (CAGR 9.6% vs 9.1%, max drawdown −22.7% vs −25.9%) and in 2001–08 (−1.1% vs −2.9%, −31.9% vs −39.3%).
+- **Clock:** reads with the filter. Above a rising 200-day, early entries were the best and late ones the worst in both periods; below a falling 200-day the early ring turns orange (the dip was not an edge in 2001–08).
+- **Where to look:** in the DIP ZONE, beaten-down names (bottom 40% by 6-month return) rather than prior leaders, tested on 2001–08. Outside the zone: no RS edge, and no chart pattern beats a random entry. "Deep dips" is no longer a place to look.
+- **Scanner strip and RS colours:** deep dip and pullback scans now read "no edge" (no better than a random entry in the same state, 2001–26). The flipped RS colours apply in the DIP ZONE only (the 20 sessions after it showed no RS gap out of sample).
+
 ## 8.4.1 · 2026-11-16
 
 Layout pass on the live page (Fabio: smaller SPY chart, less unused black space, more room for the data visuals). Same numbers.

@@ -10,17 +10,23 @@ States (all ex ante, at the close)
   SPY phase   allocation.py replay: DIP ZONE / A (rebound) open / B (breakout) open / NONE.
   VIX width   VIX against its expanding median since 1990 (17.56 on 13 Nov 2026): CALM < m <= WIDE < 1.5 m <= STRESSED.
               Width, not direction (V1, V4).
-Stance        set by the SPY phase (v8 sizing run, 15 Nov 2026: the v7.1a phase budget beat every clock budget at the
-              account level; pressing in the dip / early window raised the drawdown 4.6-9 points):
+200-day       8.5.0 (16 Nov 2026, DF1): F-UP = SPY close > SMA200 and SMA200 above its value 20 sessions ago.
+              SPX 1963-2026: dips below a falling 200-day fell another 10% within 60 sessions in 45% of episodes,
+              vs 12% above a rising one (both eras, same vol mix).
+Stance        set by the SPY phase and, in the DIP ZONE, the 200-day filter (v8 sizing 15 Nov; OOS 2001-08 + DF1 16 Nov):
               PRESS = ticket A or B open: 0.75% a trade, swing open risk <= 4%;
-              NORMAL = DIP ZONE: 0.75% a trade, <= 3%;
-              EASE = no ticket: 0.375% a trade, <= 1.5%, swing gross <= 60%.
-              The clock stays on the card as the per-trade context (C1: early entries beat late ones, in sample).
+              NORMAL = DIP ZONE with SPY above a rising 200-day: 0.75% a trade, <= 3%;
+              EASE = no ticket, or DIP ZONE without F-UP: 0.375% a trade, <= 1.5%, swing gross <= 60%.
+              (V71F: beat the v8 budget in 2001-08 and 2009-26.) Pressing in the dip raised the drawdown in both eras.
+              The clock stays on the card as per-trade context; it held only above a rising 200-day (2001-08 OOS).
+Where to look In the DIP ZONE, beaten-down names (bottom 40% by 6-month return) beat prior leaders (RS1-b, tested
+              2001-08, same direction 2009-26). After the zone, no RS edge. No chart pattern beat a random entry (S2).
 Budget        SPY tickets one unit each at 1.5% NLV risk (Fabio, 15 Nov 2026); account gross <= 100%, core first; no margin.
 Exit          +2R -> break-even, then trail the 21 EMA or structure; no profit cap.
 Hedge         only the ~60-session ~5% OTM SPY put, bought in the 5 sessions after a trend start (ticket B opens) or a
               trend end (B -> no ticket); never roll short-dated puts. Price: the daily put log (put_log.py).
-Not on the card (decided 15 Nov 2026): composite MRS score, short book, FTD as a rule, RS tilt, margin, rolling puts.
+Not on the card (decided 15 Nov 2026): composite MRS score, short book, FTD as a rule, RS tilt, margin, rolling puts,
+deep dips as a place to look (16 Nov: no better than a random entry, 2001-26).
 """
 import html as _html
 import numpy as np
@@ -31,8 +37,10 @@ INK, MUTED, DIM, LINE, BG = '#f3ece2', '#a89f95', '#6e675f', '#2a2724', '#121212
 VIX_MEDIAN = 17.56            # expanding median of the VIX since 1990-01-02, as of 2026-11-13
 CORE_RISK = 0.015             # SPY ticket unit risk (Fabio, 15 Nov 2026)
 BUDGET = {'PRESS': (0.0075, 0.04, 1.00), 'NORMAL': (0.0075, 0.03, 1.00), 'EASE': (0.00375, 0.015, 0.60)}  # risk a trade,
-#          swing open-risk cap, swing gross cap (fractions of NLV). v8 sizing run (15 Nov 2026), 500 paths, 2009-26:
-#          CAGR 9.1%, max DD -25.9%, beat a flat 3% cap on return / drawdown in 79% of paths.
+#          swing open-risk cap, swing gross cap (fractions of NLV). 8.5.0 rule V71F (NORMAL only in the DIP ZONE with
+#          SPY above a rising 200-day), 500 paths: 2009-26 CAGR 9.6%, max DD -22.7%; 2001-08 CAGR -1.1%, max DD -31.9%
+#          (v8 before: 9.1% / -25.9% and -2.9% / -39.3%).
+F200_SLOPE = 20               # sessions over which the 200-day's slope is read (DF1)
 SWING_CAP = {k: v[1] for k, v in BUDGET.items()}
 SWING_RISK = BUDGET['NORMAL'][0]
 STANCE_COL = {'PRESS': TEAL, 'NORMAL': INK, 'EASE': COPPER}
@@ -74,11 +82,38 @@ def clock(ph: pd.Series):
     return ('EARLY' if n <= 20 else ('MID' if n <= 60 else 'LATE')), int(n)
 
 
-def stance(code):
-    """Budget stance from the SPY phase code (0 DIP ZONE, 1 A open, 2 B open, 3 no ticket)."""
+def filter200(ohlc: pd.DataFrame, upto: int = None):
+    """8.5.0 (DF1): SPY against its 200-day at the last close (or at row `upto`, exclusive end).
+    Returns dict(state='F-UP'|'F-MIX'|'F-DN', close, sma, slope) or None when there are fewer than 220 closes."""
+    try:
+        s = ohlc.rename(columns=str.lower)['close'].astype(float).dropna()
+    except Exception:
+        return None
+    if upto is not None:
+        s = s.iloc[:upto]
+    if len(s) < 200 + F200_SLOPE:
+        return None
+    sma = s.rolling(200).mean()
+    c, m, slope = float(s.iloc[-1]), float(sma.iloc[-1]), float(sma.iloc[-1] - sma.iloc[-1 - F200_SLOPE])
+    st_ = 'F-UP' if (c > m and slope > 0) else ('F-DN' if (c < m and slope < 0) else 'F-MIX')
+    return dict(state=st_, close=c, sma=m, slope=slope)
+
+
+def _fs(f200):
+    """The filter state string from a filter200() dict or a plain state string."""
+    return f200.get('state') if isinstance(f200, dict) else f200
+
+
+def stance(code, f200=None):
+    """Budget stance from the SPY phase code (0 DIP ZONE, 1 A open, 2 B open, 3 no ticket) and, in the DIP ZONE, the
+    200-day filter (8.5.0): NORMAL only when SPY is above a rising 200-day; otherwise (or unknown) EASE."""
     if code is None:
         return None
-    return 'PRESS' if code in (1, 2) else ('NORMAL' if code == 0 else 'EASE')
+    if code in (1, 2):
+        return 'PRESS'
+    if code == 0:
+        return 'NORMAL' if _fs(f200) == 'F-UP' else 'EASE'
+    return 'EASE'
 
 
 def hedge_window(ph: pd.Series):
@@ -188,7 +223,7 @@ def _clock_tile(bucket, n):
     segs = [(12, TEAL), (28, TEAL_D), (35, '#3a3632'), (25, '#5a4636')]
     lab = [(12, 'DIP'), (28, '1–20'), (35, '21–60'), (25, '60+')]
     nn = '' if n in (None, 0) else f' · {n}'
-    return (f'<div class="tile">{_tag("Per trade · in sample")}<div class="k">Clock · sessions since the dip</div>'
+    return (f'<div class="tile">{_tag("Per trade · above a rising 200-day")}<div class="k">Clock · sessions since the dip</div>'
             f'<div class="val" style="color:{col};">{_e(bucket)}{nn}</div>{_bar(segs, f, lab)}</div>')
 
 
@@ -277,15 +312,22 @@ def _exit_tile():
     return f'<div class="tile">{_tag("Tested")}<div class="k">Exit</div><div class="lad">{lad}</div></div>'
 
 
+LOOK_DIP = ('▲ beaten-down names', '▼ prior leaders')          # 8.5.0: RS1-b, DIP ZONE only (tested 2001-08)
+LOOK_ELSE = ('no RS edge', 'setups frame the trade · the state carries it')   # 8.5.1; S2 2001-26, RS1-b''
+
+
+def _look(bucket):
+    """(chips, tag) for Where to look: the RS line only inside the DIP ZONE."""
+    if bucket == 'IN DIP':
+        return LOOK_DIP, 'Tested · 2001–08'
+    return LOOK_ELSE, 'Tested (null)'
+
+
 def _look_tile(st_, bucket):
-    if bucket in ('IN DIP', 'EARLY'):
-        body = (f'<div class="lad"><span class="st" style="background:{TEAL};color:#0a0a0a;">▲ laggards · dips</span>'
-                f'<span class="st" style="color:{MUTED};">▼ prior leaders</span></div>')
-        tag = 'Tested'
-    else:
-        body = (f'<div class="lad"><span class="st">setups you trust</span>'
-                f'<span class="st" style="color:{MUTED};">no leader edge</span></div>')
-        tag = 'Tested (null)'
+    (a, b), tag = _look(bucket)
+    sty = f'background:{TEAL};color:#0a0a0a;' if bucket == 'IN DIP' else ''
+    body = (f'<div class="lad"><span class="st" style="{sty}">{_e(a)}</span>'
+            f'<span class="st" style="color:{MUTED};">{_e(b)}</span></div>')
     return f'<div class="tile">{_tag(tag)}<div class="k">Where to look</div>{body}</div>'
 
 
@@ -312,7 +354,7 @@ def card_html(spy_state: dict, ph: pd.Series, vix, put: dict = None, spy_ohlcv: 
               date_txt: str = '') -> str:
     code = int(ph.iloc[-1]) if ph is not None and len(ph) else None
     bucket, n = clock(ph)
-    st_ = stance(code)
+    st_ = stance(code, filter200(spy_ohlcv) if spy_ohlcv is not None else None)
     vb = vol_band(vix)
     h = CSS + '<div class="v8"><div class="top">'
     if st_ is None:
@@ -346,17 +388,24 @@ The dotted copper line is today, labelled with the clock. The three rings, from 
 - **VIX:** the ring fills from 10 to 40; teal when CALM, orange when WIDE or STRESSED.
 - **Open risk:** today's swing cap against the 4% maximum.
 
-**Stance (the big badge).** How much risk the swing book may carry. It is set by the SPY phase:
+Under the rings, the **200-day filter** line shows SPY against its 200-day and whether a DIP ZONE keeps the normal budget.
+
+**Stance (the big badge).** How much risk the swing book may carry. It is set by the SPY phase and, in the DIP ZONE, by the 200-day filter:
 - **PRESS:** ticket A or B is open. 0.75% a trade, open risk up to 4%.
-- **NORMAL:** SPY is in the DIP ZONE. 0.75% a trade, up to 3%.
-- **EASE:** no ticket is open. 0.375% a trade, up to 1.5%, swing gross up to 60%.
+- **NORMAL:** SPY is in the DIP ZONE **and above a rising 200-day**. 0.75% a trade, up to 3%.
+- **EASE:** no ticket is open, or SPY is in the DIP ZONE without a rising 200-day. 0.375% a trade, up to 1.5%, swing gross up to 60%.
 
-In the v8 sizing run (500 paths, 2009–2026, random entries), this budget beat every alternative. Against a flat 3% cap it gave:
-- CAGR 9.1% vs 7.5%;
-- max drawdown −25.9% vs −28.8%;
-- better return per unit of drawdown in 79% of paths.
+Account simulation (500 paths, random entries, survivorship-free stocks), this budget against the previous v8 budget:
+- 2009–2026: CAGR 9.6% vs 9.1%, max drawdown −22.7% vs −25.9%;
+- 2001–2008 (out of sample, two bear markets): CAGR −1.1% vs −2.9%, max drawdown −31.9% vs −39.3%.
 
-Raising the budget in the dip and in the 20 sessions after it (the clock) did the opposite: drawdowns 4.6 to 9 points deeper. Dips can keep falling.
+Raising the budget in the dip and in the 20 sessions after it did the opposite in both periods: drawdowns 5 to 15 points deeper. Dips can keep falling.
+
+**200-day filter.** ON when SPY closes above its 200-day and the 200-day is higher than {F200_SLOPE} sessions ago. On the S&P 500 since 1963 (259 dip episodes):
+- dips above a rising 200-day: 12% fell another 10% within 60 sessions; median +4.0% after 60 sessions;
+- dips below a falling 200-day: 45% fell another 10%; median 0.0%.
+
+The gap held in 1963–94 and 1995–2026, and at the same volatility. It tells which dips tend to keep falling, not which way the next move goes: the biggest rebounds also start below a falling 200-day.
 
 **Clock.** Sessions since SPY's last close in the DIP ZONE, which is a close at least 1 ATR(14) below the 50-day.
 - DIP: in the zone today.
@@ -364,7 +413,7 @@ Raising the budget in the dip and in the 20 sessions after it (the clock) did th
 - 21–60: mid.
 - 60+: late.
 
-The clock tells you about the quality of each trade, not how big to be. In C1, stock entries in the dip and the 20 sessions after it beat entries late in an old trend: +0.24R a trade and +2 points of P(≥ 3R). Late in an old trend, entries lost money on average, so be choosy there. Two limits: in sample, and it holds for stocks, not for the index.
+The clock tells you about the quality of each trade, not how big to be. **With SPY above a rising 200-day**, stock entries in the dip and the 20 sessions after it were the best and entries 60+ sessions into a trend the worst, in 2001–08 and in 2009–26 alike (about +0.15R early vs −0.06R late). **Below a falling 200-day the dip is not an edge:** in 2001–08 entries there lost about −0.3R. The ring turns orange in that case.
 
 **SPY phase.** Which SPY ticket is open: DIP zone, A (rebound), B (breakout) or none. It sets the stance.
 
@@ -383,8 +432,8 @@ These are trades with crash protection, not the engine that beats SPY: out of sa
 **Exit.** Initial stop by structure or about 1.5–2 ATR(14). Past +2R, move the stop to break-even, then trail the 21 EMA or structure. No profit cap.
 The best 1% of trades made more than the whole book (111% of net P&L).
 
-**Where to look.** In the dip and early after it, prior laggards and deep dips beat the prior 6-month leaders (RS1).
-Later in a trend, leaders showed no extra right tail. Your own selection is what the forward log measures.
+**Where to look.** In the DIP ZONE itself, beaten-down names (the bottom 40% by 6-month return) beat the prior 6-month leaders: tested on 2001–08 (−0.31R for leaders), same direction in 2009–26. Once SPY has left the zone, there is no RS edge either way.
+Use the setups (deep dip, 21 EMA or 50-day pullback, breakout, base) to find clean structures and to frame entry, stop and target. Their return came from the market state: in 2001–2026 none beat a random uptrend entry in the same state. So the state decides whether to trade and how big; the setup decides where the entry, stop and target go. Your own selection is what the forward log measures.
 
 **Hedge.** The only hedge rule kept is a ~60-session put about 5% below SPY, bought in the {HEDGE_WINDOW} sessions after:
 
@@ -401,19 +450,21 @@ The price on the tile comes from the daily put log.
 
 **Footer.** The last follow-through day is commentary only: in C2, waiting for one did not help.
 
-*Not on this card on purpose: the composite MRS score, the short book, RS ranking, margin.*
+*Not on this card on purpose: the composite MRS score, the short book, RS ranking, margin, deep dips as a place to look.*
 """
 
 
 # ══ 8.4.0 (16 Nov 2026): card layout B (Fabio's pick): header, SPY candles with the phase as bands + rings, A's detail row ══
-def header_html(spy_state, ph: pd.Series, vix, date_txt: str = '') -> str:
+def header_html(spy_state, ph: pd.Series, vix, date_txt: str = '', f200=None) -> str:
     import ui
     code = int(ph.iloc[-1]) if ph is not None and len(ph) else None
-    st_ = stance(code)
+    st_ = stance(code, f200)
     if st_ is None:
         return ui.CSS() + '<div class="atn-k">MRS v8 <b>· SPY history not available right now: no stance</b></div>'
     rt, cap, g = BUDGET[st_]
     sub = f'{date_txt} · swing {rt * 100:.3g}% a trade · open risk ≤ {cap * 100:.1f}%' + (f' · swing gross ≤ {g * 100:.0f}%' if g < 1 else '')
+    if code == 0 and st_ == 'EASE':
+        sub += ' · DIP ZONE without a rising 200-day: small budget'
     return (f'<div style="display:flex;align-items:center;gap:14px;margin:2px 0 6px 0;">'
             f'<span style="font-family:Barlow,sans-serif;font-weight:800;font-size:30px;letter-spacing:.08em;padding:2px 18px;'
             f'border-radius:5px;color:#0a0a0a;background:{STANCE_COL[st_]};">{st_}</span>'
@@ -424,10 +475,10 @@ PH_BAND = {0: ('rgba(133,202,197,0.40)', 'DIP ZONE'), 1: ('rgba(100,153,149,0.24
            2: ('rgba(227,180,142,0.16)', 'ticket B open')}
 
 
-def rings_html(ph: pd.Series, vix) -> str:
-    """8.4.1: three compact rings (clock, VIX width, open-risk cap)."""
+def rings_html(ph: pd.Series, vix, f200=None) -> str:
+    """8.4.1: three compact rings (clock, VIX width, open-risk cap). 8.5.0: the clock reads with the 200-day filter."""
     code = int(ph.iloc[-1]) if ph is not None and len(ph) else None
-    st_ = stance(code)
+    st_ = stance(code, f200)
     bucket, n = clock(ph)
     vb = vol_band(vix)
     def ring(frac, col, big, cap, sub):
@@ -436,28 +487,51 @@ def rings_html(ph: pd.Series, vix) -> str:
                 f'<div class="atn-tl" style="margin:0">{_e(cap)}</div><div class="atn-sm" style="font-size:11px;color:#6e675f;margin-top:-4px">{_e(sub)}</div></div>')
     if bucket is None or st_ is None:
         return '<div class="atn-sm">State not available right now.</div>'
-    ccol = TEAL if bucket in ('IN DIP', 'EARLY') else (INK if bucket == 'MID' else COPPER)
+    up = _fs(f200) == 'F-UP'
+    ccol = (TEAL if up else ORANGE) if bucket in ('IN DIP', 'EARLY') else (INK if bucket == 'MID' else COPPER)
     cfrac = 1.0 if bucket == 'IN DIP' else (n or 0) / 60
+    csub = ('early = best entries' if up else 'early ≠ edge: 200-day not up') if bucket in ('IN DIP', 'EARLY') else (
+        'late = weakest entries' if bucket == 'LATE' else 'sessions since the dip')
     vcol = TEAL if vb == 'CALM' else ORANGE
     cap = SWING_CAP[st_]
     return ('<div style="display:flex;justify-content:space-around;margin:2px 0 0 0;">'
-            + ring(cfrac, ccol, 'DIP' if bucket == 'IN DIP' else str(n), f'Clock · {bucket.lower()}', 'sessions since the dip')
+            + ring(cfrac, ccol, 'DIP' if bucket == 'IN DIP' else str(n), f'Clock · {bucket.lower()}', csub)
             + ring(((vix or 10) - 10) / 30, vcol, f'{vix:.1f}' if vix else '–', f'VIX · {(vb or "n/a").lower()}', f'median {VIX_MEDIAN:.1f}')
             + ring(cap / max(SWING_CAP.values()), STANCE_COL[st_], f'{cap * 100:.1f}%', 'Open risk', f'of a {max(SWING_CAP.values()) * 100:.0f}% max')
             + '</div>')
 
 
-def budget_html(ph: pd.Series) -> str:
+def filter_html(f200) -> str:
+    """8.5.0: one line with SPY against its 200-day (DF1) and what it switches."""
+    import ui
+    if not isinstance(f200, dict):
+        return (f'<div class="atn-sm" style="margin:10px 0 0 0">200-day filter not available (needs 220 closes): '
+                f'a DIP ZONE gets the small budget.</div>')
+    up = f200['state'] == 'F-UP'
+    col = TEAL if up else ORANGE
+    word = {'F-UP': 'above a rising 200-day', 'F-DN': 'below a falling 200-day', 'F-MIX': '200-day not rising with SPY above it'
+            if f200['close'] > f200['sma'] else 'below a still-rising 200-day'}[f200['state']]
+    eff = ('a DIP ZONE keeps the normal budget (3%) and the early-dip window is the best place to enter' if up else
+           'a DIP ZONE gets the small budget (1.5%): dips here have kept falling')
+    return (f'<div class="atn-tl" style="margin:12px 0 2px 0">200-day filter {ui.tag("Tested · SPX 1963–2026")}</div>'
+            f'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px">'
+            f'<span class="atn-chip" style="background:{col};color:#0a0a0a;font-weight:700">{"ON" if up else "OFF"} · SPY {_e(word)}</span>'
+            f'<span style="font-family:IBM Plex Mono,monospace;color:#a89f95">{f200["close"]:,.2f} vs {f200["sma"]:,.2f} '
+            f'({(f200["close"] / f200["sma"] - 1) * 100:+.1f}%) · slope {f200["slope"]:+.1f} / {F200_SLOPE}d</span></div>'
+            f'<div class="atn-sm" style="font-size:11px;color:#6e675f;margin-top:3px">{_e(eff)}</div>')
+
+
+def budget_html(ph: pd.Series, f200=None) -> str:
     """8.4.1: the three stance budgets as bars (cap on a 0-4% scale), today's highlighted."""
     import ui
     code = int(ph.iloc[-1]) if ph is not None and len(ph) else None
-    now = stance(code)
+    now = stance(code, f200)
     rows = ''
-    for st_, when in (('PRESS', 'A / B open'), ('NORMAL', 'DIP ZONE'), ('EASE', 'no ticket')):
+    for st_, when in (('PRESS', 'A / B open'), ('NORMAL', 'DIP ZONE · 200-day up'), ('EASE', 'no ticket · other dips')):
         rt, cap, g = BUDGET[st_]
         on = st_ == now
         col = STANCE_COL[st_] if on else '#3a3632'
-        rows += (f'<div style="display:grid;grid-template-columns:118px 1fr 196px;align-items:center;gap:10px;'
+        rows += (f'<div style="display:grid;grid-template-columns:200px 1fr 196px;align-items:center;gap:10px;'
                  f'font-size:12px;color:{INK if on else DIM}"><span><b style="font-weight:{700 if on else 500}">{st_}</b> '
                  f'<span style="color:{MUTED if on else DIM};font-size:11px">{when}</span></span><div>'
                  + ui.bar([(0, cap / 0.04 * 100, col)], margin='5px 0', height=8)
@@ -467,7 +541,7 @@ def budget_html(ph: pd.Series) -> str:
             f'letter-spacing:.06em;color:#6e675f;text-transform:none">a trade · open-risk cap</span></div>' + rows)
 
 
-def levels_svg(s: dict, W: int = 880, H: int = 104) -> str:
+def levels_svg(s: dict, W: int = 880, H: int = 104, f200=None) -> str:
     """8.4.1: where SPY is against the levels that change the stance (allocation state: dip line, 50-day, B trigger,
     open-ticket stops), as one price axis."""
     if not s or not _fin(s.get('close')):
@@ -476,7 +550,7 @@ def levels_svg(s: dict, W: int = 880, H: int = 104) -> str:
     lv = []
     A, B = s.get('A') or {}, s.get('B') or {}
     if _fin(s.get('rb_level')):
-        lv.append((float(s['rb_level']), 'DIP ZONE', 'NORMAL', TEAL))
+        lv.append((float(s['rb_level']), 'DIP ZONE', stance(0, f200), TEAL))
     if _fin(s.get('sma50')):
         if A.get('open'):
             lv.append((float(s['sma50']), '50-day', 'A exit line', INK))
@@ -525,7 +599,7 @@ def levels_svg(s: dict, W: int = 880, H: int = 104) -> str:
             f'letter-spacing:.06em;color:#6e675f;text-transform:none">SPY {c:,.2f} · closes decide</span></div>' + ''.join(g))
 
 
-def detail_html(spy_state: dict, ph: pd.Series, put: dict = None, spy_ohlcv: pd.DataFrame = None) -> str:
+def detail_html(spy_state: dict, ph: pd.Series, put: dict = None, spy_ohlcv: pd.DataFrame = None, f200=None) -> str:
     """A's detail row: phase + tickets · exit + where to look · hedge (one tile each), then the footer."""
     import ui
     code = int(ph.iloc[-1]) if ph is not None and len(ph) else None
@@ -540,15 +614,16 @@ def detail_html(spy_state: dict, ph: pd.Series, put: dict = None, spy_ohlcv: pd.
     tk = rows_ + ft_
     t1 = (f'<div class="atn-tile"><div class="atn-tl">SPY phase · tickets {ui.tag("Tested · drawdown control")}</div>{pills}'
           f'<div style="margin-top:6px">{tk}</div></div>')
-    if bucket in ('IN DIP', 'EARLY'):
-        look = (f'<span class="atn-chip" style="background:{TEAL};color:#0a0a0a;">▲ laggards · dips</span>'
-                f'<span class="atn-chip" style="color:{MUTED};">▼ prior leaders</span>')
-    else:
-        look = (f'<span class="atn-chip">setups you trust</span><span class="atn-chip" style="color:{MUTED};">no leader edge</span>')
+    (la, lb), ltag = _look(bucket)
+    lsty = f'background:{TEAL};color:#0a0a0a;' if bucket == 'IN DIP' else ''
+    look = (f'<span class="atn-chip" style="{lsty}">{_e(la)}</span><span class="atn-chip" style="color:{MUTED};">{_e(lb)}</span>'
+            + ('<div class="atn-sm" style="font-size:11px;color:#6e675f">bottom 40% by 6-month return · not prior leaders</div>'
+               if bucket == 'IN DIP' else '<div class="atn-sm" style="font-size:11px;color:#6e675f">use setups for entry, stop and target; '
+               'their return came from the state</div>'))
     t2 = (f'<div class="atn-tile"><div class="atn-tl">Exit {ui.tag("Tested")}</div>'
           f'<span class="atn-chip">stop</span> → <span class="atn-chip">+2R break-even</span> → '
           f'<span class="atn-chip" style="background:{TEAL_D};">trail 21 EMA</span> → <span class="atn-chip" style="background:{TEAL};color:#0a0a0a;">no cap</span>'
-          f'<div class="atn-tl" style="margin-top:10px">Where to look {ui.tag("Tested")}</div>{look}</div>')
+          f'<div class="atn-tl" style="margin-top:10px">Where to look {ui.tag(ltag)}</div>{look}</div>')
     win = hedge_window(ph)
     px = ''
     if put:
@@ -628,10 +703,11 @@ def card_v9_html(spy_state, ph: pd.Series, vix, put: dict = None, spy_ohlcv: pd.
     import ui
     if ph is None or not len(ph):
         return ui.CSS() + '<div class="atn-k">MRS v8 <b>· SPY history not available right now: no stance</b></div>'
+    f200 = filter200(spy_ohlcv) if spy_ohlcv is not None else None
     return ('<div style="background:#121212;border:1px solid #2a2724;border-radius:6px;padding:14px 16px 10px 16px;margin:2px 0 6px 0">'
-            + header_html(spy_state, ph, vix, date_txt)
+            + header_html(spy_state, ph, vix, date_txt, f200)
             + '<div style="display:grid;grid-template-columns:1fr 1.15fr;gap:10px;align-items:stretch">'
             + f'<div class="atn-tile"><div class="atn-tl">SPY · last 120 sessions with its phase {ui.tag("Tested")}</div>{ribbon_svg(spy_ohlcv, ph)}</div>'
-            + f'<div class="atn-tile"><div class="atn-tl">Clock · width · budget {ui.tag("Tested · v8 sizing")}</div>{rings_html(ph, vix)}'
-            + levels_svg(spy_state) + budget_html(ph) + '</div></div>'
-            + detail_html(spy_state, ph, put, spy_ohlcv) + '</div>').replace('\n', ' ')
+            + f'<div class="atn-tile"><div class="atn-tl">Clock · width · budget {ui.tag("Tested · v8 sizing")}</div>{rings_html(ph, vix, f200)}'
+            + filter_html(f200) + levels_svg(spy_state, f200=f200) + budget_html(ph, f200) + '</div></div>'
+            + detail_html(spy_state, ph, put, spy_ohlcv, f200) + '</div>').replace('\n', ' ')

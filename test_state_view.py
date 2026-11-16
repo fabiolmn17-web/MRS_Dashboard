@@ -9,7 +9,8 @@ import market_state
 def test_crash_and_modes():
     assert sv.crash_window({'bucket': 'IN DIP', 'code': 0}) and sv.crash_window({'bucket': 'EARLY', 'code': 1})
     assert not sv.crash_window({'bucket': 'MID', 'code': 2}) and not sv.crash_window({})
-    assert sv.rs_mode({'bucket': 'EARLY', 'code': 3, 'vb': 'CALM'}) == 'invert'
+    assert sv.rs_mode({'bucket': 'IN DIP', 'code': 0, 'vb': 'WIDE'}) == 'invert'
+    assert sv.rs_mode({'bucket': 'EARLY', 'code': 3, 'vb': 'CALM'}) == 'normal'          # 8.5.0: DIP ZONE only
     assert sv.rs_mode({'bucket': 'LATE', 'code': 2, 'vb': 'CALM'}) == 'neutral'
     assert sv.rs_mode({'bucket': 'LATE', 'code': 2, 'vb': 'WIDE'}) == 'normal'
     assert sv.rs_mode({}) == 'normal'
@@ -17,10 +18,17 @@ def test_crash_and_modes():
 
 def test_scan_verdicts():
     v = lambda code, b='MID': {'code': code, 'bucket': b}
-    assert sv.scan_verdict('L_bo', v(1))[0] == 'lagged' and sv.scan_verdict('L_bo', v(2))[0] == 'no edge'
-    assert sv.scan_verdict('L_dip', v(0, 'IN DIP'))[0] == 'works' and sv.scan_verdict('L_dip', v(3))[0] == 'no edge'
+    assert sv.scan_verdict('L_bo', v(1))[0] == 'lagged' and sv.scan_verdict('L_bo', v(2))[0] == 'works'
+    on, off = dict(v(0, 'IN DIP'), f200={'state': 'F-UP'}), dict(v(0, 'IN DIP'), f200={'state': 'F-DN'})
+    assert sv.scan_verdict('L_dip', on)[0] == 'works' and sv.scan_verdict('L_dip', off) == sv.DIP_OFF       # 8.5.1
+    assert sv.scan_verdict('L_dip', v(0, 'IN DIP'))[0] == 'no edge'          # filter unknown: not paying
+    assert sv.scan_verdict('L_pb', dict(v(0, 'IN DIP'), f200='F-UP'))[0] == 'works' and sv.scan_verdict('L_dip', v(3))[0] == 'no edge'
+    assert sv.scan_verdict('L_bases', v(1))[0] == 'untested'
+    h2 = sv.scan_strip_html(on)
+    assert 'frame entry, stop and target' in h2 and 'the state carries it' in h2 and 'no edge' not in h2
     assert sv.scan_verdict('L_bases', v(3))[0] == 'lagged'
-    assert sv.scan_verdict('L_all', v(1, 'EARLY'))[0] == 'lagged' and sv.scan_verdict('L_all', v(2, 'LATE'))[0] == 'no edge'
+    assert sv.scan_verdict('L_all', v(0, 'IN DIP'))[0] == 'lagged' and sv.scan_verdict('L_all', v(1, 'EARLY'))[0] == 'no edge'
+    assert sv.scan_verdict('L_all', v(2, 'LATE'))[0] == 'no edge'
     assert sv.scan_verdict('L_dip', {}) == (None, '')
     h = sv.scan_strip_html(v(1, 'EARLY'))
     assert 'dip window' in h and 'Breakouts' in h and '▼' in h

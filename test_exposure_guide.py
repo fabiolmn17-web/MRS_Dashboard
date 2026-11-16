@@ -15,8 +15,28 @@ def test_clock_and_stance():
     assert eg.clock(pd.Series([0] + [3] * 20)) == ('EARLY', 20)
     assert eg.clock(pd.Series([0] + [2] * 21)) == ('MID', 21)
     assert eg.clock(pd.Series([0] + [2] * 61)) == ('LATE', 61)
-    assert eg.stance(1) == 'PRESS' and eg.stance(2) == 'PRESS' and eg.stance(0) == 'NORMAL' and eg.stance(3) == 'EASE'
+    assert eg.stance(1) == 'PRESS' and eg.stance(2) == 'PRESS' and eg.stance(3) == 'EASE'
+    # 8.5.0: DIP ZONE keeps NORMAL only above a rising 200-day; unknown or other -> EASE
+    assert eg.stance(0, 'F-UP') == 'NORMAL' and eg.stance(0, {'state': 'F-UP'}) == 'NORMAL'
+    assert eg.stance(0, 'F-DN') == 'EASE' and eg.stance(0, 'F-MIX') == 'EASE' and eg.stance(0) == 'EASE'
+    assert eg.stance(1, 'F-DN') == 'PRESS' and eg.stance(3, 'F-UP') == 'EASE'
     assert eg.stance(None) is None
+
+
+def test_filter200():
+    import numpy as np
+    idx = pd.bdate_range('2024-01-01', periods=300)
+    up = pd.DataFrame({'Close': np.linspace(100, 160, 300)}, index=idx)
+    dn = pd.DataFrame({'Close': np.linspace(160, 100, 300)}, index=idx)
+    f = eg.filter200(up)
+    assert f['state'] == 'F-UP' and f['close'] > f['sma'] and f['slope'] > 0
+    assert eg.filter200(dn)['state'] == 'F-DN'
+    mix = pd.DataFrame({'close': np.r_[np.linspace(100, 160, 280), np.full(20, 120.0)]}, index=idx)   # below a rising 200d
+    assert eg.filter200(mix)['state'] == 'F-MIX'
+    assert eg.filter200(up.iloc[:150]) is None and eg.filter200(None) is None
+    assert eg.filter200(up, upto=-1)['close'] < f['close']
+    assert 'not available' in eg.filter_html(None) and 'ON' in eg.filter_html(f) and 'OFF' in eg.filter_html(eg.filter200(dn))
+    assert eg._look('IN DIP')[0] == eg.LOOK_DIP and eg._look('EARLY')[0] == eg.LOOK_ELSE
 
 
 def test_hedge_window():

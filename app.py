@@ -735,7 +735,8 @@ try:
         _v8_b, _v8_n = exposure_guide.clock(_eg_ph)
         _v8_vix = float(last.get('vix', np.nan))
         _v8 = dict(code=int(_eg_ph.iloc[-1]), bucket=_v8_b, n=_v8_n,
-                   vb=exposure_guide.vol_band(_v8_vix if _v8_vix == _v8_vix else None))
+                   vb=exposure_guide.vol_band(_v8_vix if _v8_vix == _v8_vix else None),
+                   f200=exposure_guide.filter200(_eg_src), f200_prev=exposure_guide.filter200(_eg_src, upto=-1))   # 8.5.0
 except Exception as _v8_err:
     print(f'[v8 state] {_v8_err}')
 scan_view.RS_MODE = state_view.rs_mode(_v8)
@@ -753,7 +754,8 @@ _changes = []
 # v8.2.0 (15 Nov 2026): the composite MRS score is retired from the page; the line shows the v8 stance and clock.
 try:
     if _eg_ph is not None and len(_eg_ph) >= 2:
-        _st_now, _st_prev = exposure_guide.stance(int(_eg_ph.iloc[-1])), exposure_guide.stance(int(_eg_ph.iloc[-2]))
+        _st_now = exposure_guide.stance(int(_eg_ph.iloc[-1]), _v8.get('f200'))
+        _st_prev = exposure_guide.stance(int(_eg_ph.iloc[-2]), _v8.get('f200_prev'))
         _st_col = {'PRESS': '#85cac5', 'NORMAL': '#f3ece2', 'EASE': '#e3b48e'}
         _ck = f"{_v8.get('bucket', '')}{(' ' + str(_v8['n'])) if _v8.get('n') else ''}"
         _changes.append(('MRS v8 ' + (f'{_st_prev} → ' if _st_prev != _st_now else '')
