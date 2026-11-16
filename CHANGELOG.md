@@ -7,6 +7,34 @@ Versions follow `docs/PROCESS.md`:
 
 The current version is in `VERSION` and in the page footer. Entries before 6.3.1 were reconstructed from the commit history and the project notes on 13 Nov 2026.
 
+## 8.4.0 · 2026-11-16
+
+Design audit: one ATN component set for the whole page, plus a new Vol surface panel (Fabio's picks: card B with candles + A's detail row; Risk today B curve + A bars; Gamma Live + Yahoo backup). Notes: `claude/mrs_design_8_4.md`.
+
+- **One component set** (new `ui.py`, injected once):
+  - tags: UPPERCASE 9.5px everywhere. TESTED copper fill, PROVISIONAL copper dashed, DESCRIPTIVE grey, MODELLED light-copper dashed; any qualifier in grey after it;
+  - bars: one 10px track with a white pin and triangle head (the card's 12px and Risk today's 16px bars are gone);
+  - tiles, labels, kickers: one size and spacing; numbers in IBM Plex Mono;
+  - colours: ATN tokens only. The non-brand reds (#e07a5f, #7a3a2e, #ff4f5e) and the second muted teal are replaced; adverse = orange;
+  - older cards (allocation, leaders, Market detail) are restyled through the same CSS, without changing their content.
+- **MRS v8 card redrawn** (`exposure_guide.card_v9_html`):
+  - stance badge and budget on top;
+  - SPY candles of the last 160 sessions with the phase as background bands, and a dotted "today · clock" line;
+  - three rings: clock, VIX, open-risk cap;
+  - one detail row: SPY phase and tickets · exit and where to look · hedge;
+  - the explainer fold (closed) explains the picture. `card_html` is kept for reference.
+- **Risk today redrawn** (`risk_panel.panel_v9_html`): the "This state" tile is the distribution itself (SPY next 20 sessions, this state vs all days, P10 / P90 marked) with three odds bars (≥ 5% up, ≥ 5% down, 7% fast drop) pinned at the all-days rate. Same numbers as 8.2.0.
+- **Vol surface panel** (new `vol_core.py`, `vol_view.py`), under Risk today, open. Descriptive.
+  - **Content:** SPY smile (next, Friday, ~30-day expiries; dashed = the session before) and ATM term structure.
+  - **Morning read:** next-expiry straddle and event premium, term slope, 30-day skew, VIX vs 30-day ATM, event hump.
+  - **Maths:** ported unchanged from Gamma Live panels.py v5.9 (checked equal on 12 and 13 Nov).
+  - **Sources:**
+    - Gamma Live pushes its close snapshot after 16:15 ET (`mrs_push.py` v5.9.14 → new workflow `vol_snapshot.yml` → `vol_snapshot.py` → `vol_gl.json`);
+    - the nightly update writes a Yahoo backup (`vol_yahoo.json`);
+    - Gamma Live wins per date, and the panel names its source.
+  - **Data check:** new "Vol surface" chip.
+- Tests: `test_design_84.py`.
+
 ## 8.3.2 · 2026-11-15
 
 - The Market detail fold is open by default; the Watchlist table and chart is folded by default (Fabio).

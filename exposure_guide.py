@@ -26,7 +26,7 @@ import html as _html
 import numpy as np
 import pandas as pd
 
-TEAL, TEAL_D, ORANGE, COPPER, RED = '#85cac5', '#4f8f8a', '#f4a062', '#e3b48e', '#e07a5f'
+TEAL, TEAL_D, ORANGE, COPPER, RED = '#85cac5', '#649995', '#f4a062', '#e3b48e', '#f4a062'   # 8.4.0: ATN tokens only
 INK, MUTED, DIM, LINE, BG = '#f3ece2', '#a89f95', '#6e675f', '#2a2724', '#121212'
 VIX_MEDIAN = 17.56            # expanding median of the VIX since 1990-01-02, as of 2026-11-13
 CORE_RISK = 0.015             # SPY ticket unit risk (Fabio, 15 Nov 2026)
@@ -152,7 +152,8 @@ CSS = ('<style>'
 
 
 def _tag(t):
-    return f'<span class="tag">{_e(t)}</span>'
+    import ui                       # 8.4.0: one evidence tag across the MRS
+    return ui.tag(t)
 
 
 def _bar(segs, pin_frac, labels, align='left'):
@@ -201,7 +202,7 @@ def _vix_tile(vix, vb):
     lo, hi = 10.0, 40.0
     m, m15 = VIX_MEDIAN, 1.5 * VIX_MEDIAN
     w1, w2 = (m - lo) / (hi - lo) * 100, (m15 - m) / (hi - lo) * 100
-    segs = [(w1, TEAL_D), (w2, '#8a5a35'), (100 - w1 - w2, '#7a3a2e')]
+    segs = [(w1, TEAL_D), (w2, '#b9805a'), (100 - w1 - w2, '#f4a062')]
     lab = [(w1, f'calm < {m:.1f}'), (w2, 'wide'), (100 - w1 - w2, f'stressed > {m15:.1f}')]
     col = TEAL if vb == 'CALM' else (ORANGE if vb == 'WIDE' else RED)
     return (f'<div class="tile">{_tag("Tested")}<div class="k">VIX · width of moves</div>'
@@ -230,7 +231,8 @@ def _budget_tile(st_):
             f'{_bar(segs, None, lab, "right")}</div>')
 
 
-def _tickets_tile(s):
+def _ticket_rows(s):
+    """(rows html, footer html) for the two SPY tickets."""
     s = s or {}
     rows = ''
     tot = 0.0
@@ -247,10 +249,18 @@ def _tickets_tile(s):
             hint = ' · locked until a close above the 50-day' if lock else (
                 (f' · buys {"≤" if nm == "A" else ">"} {lvl:.2f}') if lvl else '')
             rows += (f'<div class="sm"><span class="dot" style="border:1px solid {DIM};"></span>{lbl}{_e(hint)}</div>')
+    ft = (f'<div class="ft">{CORE_RISK * 100:.1f}% risk each · core ≈ {min(tot, 1) * 100:.0f}% NLV · gross ≤ 100%, core first</div>' if tot else
+          f'<div class="ft">{CORE_RISK * 100:.1f}% risk each · gross ≤ 100%, core first · no margin</div>')
+    return rows, ft
+
+
+def _tickets_tile(s):
+    rows, ft = _ticket_rows(s)
     return (f'<div class="tile">{_tag("Tested · drawdown control")}<div class="k">SPY tickets · {CORE_RISK * 100:.1f}% risk each</div>'
-            f'<div style="margin-top:5px;">{rows}</div>'
-            + (f'<div class="ft">core ≈ {min(tot, 1) * 100:.0f}% NLV · gross ≤ 100%, core first</div>' if tot else
-               '<div class="ft">gross ≤ 100%, core first · no margin</div>') + '</div>')
+            f'<div style="margin-top:5px;">{rows}</div>{ft}</div>')
+
+
+
 
 
 def _exit_tile():
@@ -318,6 +328,17 @@ def explainer_md() -> str:
     """The words behind each tile (shown in a fold, closed by default)."""
     c = SWING_CAP
     return f"""
+**The picture.** The chart shows SPY's last 160 sessions as candles. The background shows the phase:
+- teal: DIP ZONE;
+- muted teal: ticket A (rebound) open;
+- copper: ticket B (breakout) open;
+- no shading: no ticket.
+
+The dotted copper line is today, labelled with the clock. The three rings, from left to right:
+- **Clock:** sessions since the last DIP ZONE close; the ring is full at 60.
+- **VIX:** the ring fills from 10 to 40; teal when CALM, orange when WIDE or STRESSED.
+- **Open risk:** today's swing cap against the 4% maximum.
+
 **Stance (the big badge).** How much risk the swing book may carry. It is set by the SPY phase:
 - **PRESS:** ticket A or B is open. 0.75% a trade, open risk up to 4%.
 - **NORMAL:** SPY is in the DIP ZONE. 0.75% a trade, up to 3%.
@@ -375,3 +396,159 @@ The price on the tile comes from the daily put log.
 
 *Not on this card on purpose: the composite MRS score, the short book, RS ranking, margin.*
 """
+
+
+# ══ 8.4.0 (16 Nov 2026): card layout B (Fabio's pick): header, SPY candles with the phase as bands + rings, A's detail row ══
+def header_html(spy_state, ph: pd.Series, vix, date_txt: str = '') -> str:
+    import ui
+    code = int(ph.iloc[-1]) if ph is not None and len(ph) else None
+    st_ = stance(code)
+    if st_ is None:
+        return ui.CSS() + '<div class="atn-k">MRS v8 <b>· SPY history not available right now: no stance</b></div>'
+    rt, cap, g = BUDGET[st_]
+    sub = f'{date_txt} · swing {rt * 100:.3g}% a trade · open risk ≤ {cap * 100:.1f}%' + (f' · swing gross ≤ {g * 100:.0f}%' if g < 1 else '')
+    return (f'<div style="display:flex;align-items:center;gap:14px;margin:2px 0 6px 0;">'
+            f'<span style="font-family:Barlow,sans-serif;font-weight:800;font-size:30px;letter-spacing:.08em;padding:2px 18px;'
+            f'border-radius:5px;color:#0a0a0a;background:{STANCE_COL[st_]};">{st_}</span>'
+            f'<div class="atn-k" style="margin:0">MRS v8 <b>· {_e(sub)}</b></div></div>')
+
+
+PH_BAND = {0: ('rgba(133,202,197,0.40)', 'DIP ZONE'), 1: ('rgba(100,153,149,0.24)', 'ticket A open'),
+           2: ('rgba(227,180,142,0.16)', 'ticket B open')}
+
+
+def rings_html(ph: pd.Series, vix) -> str:
+    code = int(ph.iloc[-1]) if ph is not None and len(ph) else None
+    st_ = stance(code)
+    bucket, n = clock(ph)
+    vb = vol_band(vix)
+    def ring(frac, col, big, cap, sub):
+        return (f'<div style="display:flex;flex-direction:column;align-items:center;gap:6px;">'
+                f'<div class="atn-ring" style="background:conic-gradient({col} {max(min(frac, 1), 0.02) * 360:.0f}deg,#24211e 0)"><div>{_e(big)}</div></div>'
+                f'<div class="atn-tl" style="margin:0">{_e(cap)}</div><div class="atn-sm" style="font-size:11.5px;color:#6e675f;margin-top:-4px">{_e(sub)}</div></div>')
+    if bucket is None or st_ is None:
+        return '<div class="atn-sm">State not available right now.</div>'
+    ccol = TEAL if bucket in ('IN DIP', 'EARLY') else (INK if bucket == 'MID' else COPPER)
+    cfrac = 1.0 if bucket == 'IN DIP' else (n or 0) / 60
+    vcol = TEAL if vb == 'CALM' else ORANGE
+    cap = SWING_CAP[st_]
+    return ('<div style="display:flex;justify-content:space-around;margin:4px 0 2px 0;">'
+            + ring(cfrac, ccol, 'DIP' if bucket == 'IN DIP' else str(n), f'Clock · {bucket.lower()}', 'sessions since the dip')
+            + ring(((vix or 10) - 10) / 30, vcol, f'{vix:.1f}' if vix else '–', f'VIX · {(vb or "n/a").lower()}', f'median {VIX_MEDIAN:.1f}')
+            + ring(cap / max(SWING_CAP.values()), STANCE_COL[st_], f'{cap * 100:.1f}%', 'Open risk', f'of a {max(SWING_CAP.values()) * 100:.0f}% max')
+            + '</div>'
+            + f'<div class="atn-sm" style="margin-top:14px;text-align:center"><b style="color:{INK}">{BUDGET[st_][0] * 100:.3g}% a trade</b> · '
+              f'≈ {int(round(cap / BUDGET[st_][0]))} trades at full risk' + (f' · swing gross ≤ {BUDGET[st_][2] * 100:.0f}%' if BUDGET[st_][2] < 1 else '') + '</div>'
+            + '<div class="atn-sm" style="text-align:center;font-size:11.5px;color:#6e675f;margin-top:4px">stance by SPY phase: A / B open = PRESS · '
+              'DIP ZONE = NORMAL · no ticket = EASE</div>')
+
+
+def detail_html(spy_state: dict, ph: pd.Series, put: dict = None, spy_ohlcv: pd.DataFrame = None) -> str:
+    """A's detail row: phase + tickets · exit + where to look · hedge (one tile each), then the footer."""
+    import ui
+    code = int(ph.iloc[-1]) if ph is not None and len(ph) else None
+    bucket, n = clock(ph)
+    pills = ''
+    for p in (0, 1, 2, 3):
+        on = code == p
+        bg = {0: TEAL, 1: TEAL_D, 2: INK, 3: '#9b958f'}[p]
+        sty = f'background:{bg};color:#0a0a0a;border-color:{bg};' if on else ''
+        pills += f'<span class="pill" style="{sty}">{PH_NAME[p]}</span>'
+    rows_, ft_ = _ticket_rows(spy_state)
+    tk = rows_ + ft_
+    t1 = (f'<div class="atn-tile"><div class="atn-tl">SPY phase · tickets {ui.tag("Tested · drawdown control")}</div>{pills}'
+          f'<div style="margin-top:6px">{tk}</div></div>')
+    if bucket in ('IN DIP', 'EARLY'):
+        look = (f'<span class="atn-chip" style="background:{TEAL};color:#0a0a0a;">▲ laggards · dips</span>'
+                f'<span class="atn-chip" style="color:{MUTED};">▼ prior leaders</span>')
+    else:
+        look = (f'<span class="atn-chip">setups you trust</span><span class="atn-chip" style="color:{MUTED};">no leader edge</span>')
+    t2 = (f'<div class="atn-tile"><div class="atn-tl">Exit {ui.tag("Tested")}</div>'
+          f'<span class="atn-chip">stop</span> → <span class="atn-chip">+2R break-even</span> → '
+          f'<span class="atn-chip" style="background:{TEAL_D};">trail 21 EMA</span> → <span class="atn-chip" style="background:{TEAL};color:#0a0a0a;">no cap</span>'
+          f'<div class="atn-tl" style="margin-top:10px">Where to look {ui.tag("Tested")}</div>{look}</div>')
+    win = hedge_window(ph)
+    px = ''
+    if put:
+        px = (f'<div class="atn-sm" style="margin-top:6px">60-session {put["strike"]:.0f} put ≈ <b style="font-family:IBM Plex Mono,monospace;color:#f3ece2">'
+              f'{put["cost_pct"] * 100:.1f}%</b> of SPY' + (f' · IV {put["iv"] * 100:.1f}%' if put.get('iv') == put.get('iv') and put.get('iv') else '')
+              + f' · {put["date"]:%d %b}{" (seed)" if "seed" in put.get("src", "") else ""}</div>')
+    if win:
+        what, k = win
+        hb = (f'<span class="atn-chip" style="background:{TEAL};color:#0a0a0a;">HEDGE WINDOW · {_e(what)}{"" if k == 0 else f" · {k}d ago"}</span>'
+              f'<div class="atn-sm">~60-session put, ~5% below SPY</div>')
+    else:
+        hb = f'<span class="atn-chip" style="color:{MUTED};">no hedge now</span><span class="atn-chip" style="color:{MUTED};">never roll puts</span>'
+    t3 = f'<div class="atn-tile"><div class="atn-tl">Hedge {ui.tag("Modelled + real quotes")}</div>{hb}{px}</div>'
+    f = last_ftd(spy_ohlcv) if spy_ohlcv is not None else None
+    foot = [f'sessions since the dip: {n}' if n is not None else 'no DIP ZONE in the history']
+    if f is not None:
+        foot.append(f'last follow-through day {pd.Timestamp(f):%d %b %Y} (commentary)')
+    return ('<div class="atn-row" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:4px;">' + t1 + t2 + t3 + '</div>'
+            + f'<div class="atn-sm" style="font-size:11px;color:#6e675f;margin-top:6px">{_e(" · ".join(foot))}</div>').replace('\n', ' ')
+
+
+def ribbon_svg(spy_ohlcv: pd.DataFrame, ph: pd.Series, n: int = 160, W: int = 760, H: int = 236) -> str:
+    """Static SVG: SPY daily candles for the last n sessions with the SPY phase as background bands (one HTML block, so
+    the card keeps one shell; no Streamlit layout inside the card)."""
+    if spy_ohlcv is None or ph is None or len(spy_ohlcv) < 20:
+        return '<div class="atn-sm">SPY history not available right now.</div>'
+    s = spy_ohlcv.rename(columns=str.title).iloc[-n:].copy()
+    s.index = pd.to_datetime(s.index).normalize()
+    p = ph.reindex(s.index).ffill().fillna(3).astype(int).values
+    o, h, l, c = (s[k].astype(float).values for k in ('Open', 'High', 'Low', 'Close'))
+    L, R, Tp, B = 6, 52, 22, 20
+    pw, phh = W - L - R, H - Tp - B
+    lo, hi = float(np.nanmin(l)), float(np.nanmax(h)); pad = (hi - lo) * 0.06; lo -= pad; hi += pad
+    X = lambda i: L + (i + 0.5) * pw / len(s)
+    Y = lambda v: Tp + (hi - v) / (hi - lo) * phh
+    bw = max(pw / len(s) * 0.62, 1.2)
+    g = [f'<svg viewBox="0 0 {W} {H}" width="100%" preserveAspectRatio="none" style="display:block">']
+    band = {0: 'rgba(133,202,197,0.30)', 1: 'rgba(100,153,149,0.20)', 2: 'rgba(227,180,142,0.13)'}
+    i = 0
+    while i < len(p):
+        j = i
+        while j + 1 < len(p) and p[j + 1] == p[i]:
+            j += 1
+        if p[i] in band:
+            x0 = L + i * pw / len(s); x1 = L + (j + 1) * pw / len(s)
+            g.append(f'<rect x="{x0:.1f}" y="{Tp}" width="{x1 - x0:.1f}" height="{phh}" fill="{band[p[i]]}"/>')
+        i = j + 1
+    for v in np.linspace(lo + pad, hi - pad, 4):                       # price grid + right labels
+        g.append(f'<line x1="{L}" x2="{L + pw}" y1="{Y(v):.1f}" y2="{Y(v):.1f}" stroke="#2a2724" stroke-width="1"/>'
+                 f'<text x="{L + pw + 6}" y="{Y(v) + 3.5:.1f}" fill="#a89f95" font-size="10" font-family="IBM Plex Mono, monospace">{v:,.0f}</text>')
+    last_m = None
+    for k, d in enumerate(s.index):                                     # month labels
+        if d.month != last_m:
+            last_m = d.month
+            if k > 2:
+                g.append(f'<text x="{X(k):.1f}" y="{H - 5}" fill="#6e675f" font-size="10" font-family="IBM Plex Mono, monospace">{d:%b}</text>')
+    for k in range(len(s)):
+        up = c[k] >= o[k]; col = TEAL if up else ORANGE
+        g.append(f'<line x1="{X(k):.1f}" x2="{X(k):.1f}" y1="{Y(h[k]):.1f}" y2="{Y(l[k]):.1f}" stroke="{col}" stroke-width="1"/>')
+        y0, y1 = sorted((Y(o[k]), Y(c[k])))
+        g.append(f'<rect x="{X(k) - bw / 2:.1f}" y="{y0:.1f}" width="{bw:.1f}" height="{max(y1 - y0, 0.8):.1f}" fill="{col}"/>')
+    bucket, nn = clock(ph)
+    lab = f'today · {bucket}{"" if not nn else " " + str(nn)}'
+    xl = X(len(s) - 1)
+    g.append(f'<line x1="{xl:.1f}" x2="{xl:.1f}" y1="{Tp - 4}" y2="{Tp + phh}" stroke="{COPPER}" stroke-width="1" stroke-dasharray="2,3"/>'
+             f'<text x="{xl - 6:.1f}" y="{Tp - 8}" text-anchor="end" fill="{COPPER}" font-size="11" font-family="IBM Plex Mono, monospace">{_e(lab)}</text>')
+    g.append('</svg>')
+    key = ''.join(f'<span style="margin-right:14px"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;'
+                  f'background:{c_};margin-right:5px;vertical-align:-1px"></span>{nm}</span>'
+                  for c_, nm in (('rgba(133,202,197,0.85)', 'DIP ZONE'), ('rgba(100,153,149,0.8)', 'ticket A open'),
+                                 ('rgba(227,180,142,0.7)', 'ticket B open'), ('#24211e', 'no ticket')))
+    return f'<div class="atn-sm" style="font-size:11px;margin-bottom:2px">{key}</div>' + ''.join(g)
+
+
+def card_v9_html(spy_state, ph: pd.Series, vix, put: dict = None, spy_ohlcv: pd.DataFrame = None, date_txt: str = '') -> str:
+    """8.4.0 card (layout B + A's detail row) as one HTML block."""
+    import ui
+    if ph is None or not len(ph):
+        return ui.CSS() + '<div class="atn-k">MRS v8 <b>· SPY history not available right now: no stance</b></div>'
+    return ('<div style="background:#121212;border:1px solid #2a2724;border-radius:6px;padding:14px 16px 10px 16px;margin:2px 0 6px 0">'
+            + header_html(spy_state, ph, vix, date_txt)
+            + '<div style="display:grid;grid-template-columns:1.45fr 1fr;gap:10px;">'
+            + f'<div class="atn-tile"><div class="atn-tl">SPY · last 160 sessions with its phase {ui.tag("Tested")}</div>{ribbon_svg(spy_ohlcv, ph)}</div>'
+            + f'<div class="atn-tile"><div class="atn-tl">Clock · width · budget {ui.tag("Tested · v8 sizing")}</div>{rings_html(ph, vix)}</div></div>'
+            + detail_html(spy_state, ph, put, spy_ohlcv) + '</div>').replace('\n', ' ')

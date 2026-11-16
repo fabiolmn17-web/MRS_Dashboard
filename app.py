@@ -38,6 +38,8 @@ import exposure_guide          # v8.0.0 (15 Nov 2026): MRS v8 card (visual; word
 import put_log                 # v8.0.0: daily SPY put log (pl_* columns), price on the hedge tile
 import state_view              # v8.1.0: scanner / leaders / laggards read through the v8 state
 import data_check              # v8.3.0: morning data check strip (every automatic source vs the expected session)
+import ui                      # 8.4.0 (16 Nov 2026): one ATN component set (tags, bars, tiles, kickers) for every card
+import vol_view                # 8.4.0: Vol surface panel (Gamma Live close snapshot, Yahoo backup)
 import scan_view
 import heat_score
 import chart_view
@@ -625,6 +627,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 import atn_brand
 atn_brand.inject(st, 'Market Regime Score')
+st.markdown(ui.CSS(), unsafe_allow_html=True)      # 8.4.0: shared components + harmonised older cards
 st.markdown("""<style>
 .metric-card {background:#121212 !important; border:1px solid #2a2724; border-radius:4px !important;}
 .score-number {font-family:'IBM Plex Mono', monospace !important; font-weight:500 !important; letter-spacing:-0.02em;}
@@ -913,7 +916,7 @@ st.session_state['_ctx_chase'] = bool(_al_states.get('SPY')) and context_card.ch
 try:
     _eg_vix = float(last.get('vix', np.nan))
     with _guide_slot.container():
-        st.markdown(exposure_guide.card_html(_al_states.get('SPY'), _eg_ph, _eg_vix if _eg_vix == _eg_vix else None,
+        st.markdown(exposure_guide.card_v9_html(_al_states.get('SPY'), _eg_ph, _eg_vix if _eg_vix == _eg_vix else None,
                                              put=put_log.latest(hist), spy_ohlcv=_eg_h,
                                              date_txt=f'{last_dt:%a %d %b %Y}'), unsafe_allow_html=True)
         with st.expander('What each part of the card means', expanded=False):
@@ -921,17 +924,49 @@ try:
 except Exception as _eg_err:
     print(f'[mrs v8 card] {_eg_err}')
     _health('MRS v8 card', _eg_err)
+# 8.4.0 (16 Nov 2026): Vol surface under Risk today, open. Gamma Live close snapshot (vol_gl.json, pushed from the
+#    trading PC after 16:15 ET), Yahoo chain as the backup (vol_yahoo.json, nightly update). Descriptive.
+@st.cache_data(ttl=600, show_spinner=False)
+def _vol_snaps(_key):
+    return vol_view.merged()
+
+
+_vol_all = {}
+try:
+    _vol_all = _vol_snaps(tuple(p.stat().st_mtime if p.exists() else 0 for p in vol_view.vol_core.FILES.values()))
+except Exception as _vs_err:
+    print(f'[vol surface] {_vs_err}')
+    _health('Vol surface', _vs_err)
 # v8.2.0 (15 Nov 2026): Risk today (rebuilt on the v8 state) sits open under the card, out of the Market detail fold.
+#    One container for both (the slot is an st.empty: a second .container() call would replace the first).
 with _today_slot.container():
     if _rp_snap is not None:
         try:
-            st.markdown(risk_panel.panel_html(_rp_snap), unsafe_allow_html=True)
+            st.markdown(risk_panel.panel_v9_html(_rp_snap), unsafe_allow_html=True)   # 8.4.0: distribution + odds bars
         except Exception as _rp_err:
             print(f'[risk panel] {_rp_err}')
             _health('Risk today panel', _rp_err)
             st.caption('Risk today panel could not be built this time.')
     else:
         st.caption('Risk today panel: SPY history not available right now.')
+    try:
+        _vs_now, _vs_prev = vol_view.latest(_vol_all)
+        if _vs_now is not None:
+            _vs_vix = float(last.get('vix', np.nan))
+            with st.container(border=True):
+                st.markdown(vol_view.kicker_html(_vs_now, _vs_prev), unsafe_allow_html=True)
+                _vs_c1, _vs_c2 = st.columns([1, 2.6])
+                with _vs_c1:
+                    st.markdown(vol_view.read_html(_vs_now, _vs_prev, _vs_vix if _vs_vix == _vs_vix else None),
+                                unsafe_allow_html=True)
+                with _vs_c2:
+                    st.plotly_chart(vol_view.figure(_vs_now, _vs_prev), use_container_width=True,
+                                    config={'displayModeBar': False})
+        else:
+            st.caption('Vol surface: no snapshot yet (Gamma Live pushes one after the close; Yahoo backup nightly).')
+    except Exception as _vs_err:
+        print(f'[vol surface] {_vs_err}')
+        _health('Vol surface', _vs_err)
 # v8.2.0: the MRS v6 score card is retired and no longer drawn (today_card.card_html kept for reference).
 if False:
     _since = ' · '.join(x for x in [(_changes[0] if _changes and str(_changes[0]).startswith('MRS') else ''),
@@ -2729,6 +2764,8 @@ try:
         ('Scanner', _dmax(pd.to_datetime(_scan_df['data_through'].iloc[0], errors='coerce'))
          if _scan_df is not None and len(_scan_df) and 'data_through' in _scan_df.columns else None,
          'scan_results.csv from the nightly scanner job.', False),
+        ('Vol surface', vol_view.last_date(_vol_all) if _vol_all else None,
+         'SPY smile / term structure: Gamma Live close push (vol_gl.json), Yahoo backup (vol_yahoo.json).', not _vol_all),
     ]
     _check_slot.markdown(data_check.strip_html(_items, _HEALTH, data_check.expected_session()), unsafe_allow_html=True)
 except Exception as _hl_err:

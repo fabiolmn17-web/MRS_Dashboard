@@ -151,6 +151,20 @@ def main():
     except Exception as e:
         print(f'  Put log skipped: {e}')
 
+    # 3e. Vol surface backup (vol_core.py, MRS 8.4.0, 16 Nov 2026): SPY smile / term structure from the Yahoo chain into
+    #     vol_yahoo.json. The dashboard uses it only on days Gamma Live did not send its own (vol_gl.json). Never blocks.
+    try:
+        import vol_core
+        vw, vspot, vday = vol_core.yahoo_frame()
+        vsnap = vol_core.snapshot(vw, vspot, vday, 'yahoo')
+        if vsnap['term']:
+            vol_core.store(vsnap, 'yahoo')
+            print(f"  Vol surface (Yahoo) {vday}: SPY {vspot:.2f}, {len(vsnap['term'])} expiries")
+        else:
+            print(f'  Vol surface (Yahoo) skipped: no usable expiries on {vday}')
+    except Exception as e:
+        print(f'  Vol surface (Yahoo) skipped: {e}')
+
     # 4. Save
     pipeline.save_history(hist, HIST_PATH)
     print(f'\n  Saved {len(hist)} rows to {HIST_PATH.name}')

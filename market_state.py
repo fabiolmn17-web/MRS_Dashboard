@@ -118,6 +118,8 @@ def _nan(v):
 
 
 def ev(kind: str) -> str:
+    import ui                       # 8.4.0: one evidence tag across the MRS
+    return f'<span title="{_e(EVIDENCE.get(kind, ("", "", "", ""))[3])}">{ui.tag(kind)}</span>'
     c, bg, style, tip = EVIDENCE[kind]
     return (f'<span class="ev" title="{_e(tip)}" style="color:{c};border-color:{c};background:{bg};'
             f'border-style:{style};">{kind.upper()}</span>')

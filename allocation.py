@@ -222,7 +222,7 @@ def guide_html(states: dict, compact: bool = False) -> str:
 
 
 # ── card (v6.2.2: plain-language status + level gauge) ────────────────────────────
-RED, BLUE = '#ff4f5e', '#7fa7d9'
+RED, BLUE = '#f4a062', '#e8dccb'   # 8.4.0: ATN tokens only (no red / blue)
 CSS = ('<style>.al{background:#121212;border:1px solid #2a2724;border-left:3px solid #85cac5;border-radius:6px;'
        'padding:8px 12px 6px 12px;margin:2px 0 12px 0;}'
        '.al .k{font-size:0.66rem;letter-spacing:0.12em;text-transform:uppercase;color:#85cac5;font-weight:700;margin-bottom:6px;}'
