@@ -19,8 +19,10 @@ v8.2.0 (15 Nov 2026): the panel is rebuilt on the MRS v8 state and shown open un
 pedal, the insurance tile and the volatility guide are no longer shown (the band is retired; the pedal's names clashed
 with the v8 stance; the hedge is on the card; the vol-target guide is not part of the v8 framework). Tiles now:
   SPY vs its 50-day  ATR gauge and sell-off episode; in the dip zone the tested wide-both-ways numbers (Tested)
-  This state         20-session SPY distribution since 2008 for today's SPY phase x VIX width (v8 cell). Descriptive.
-  Clock              C1 per-trade quality by sessions since the last DIP ZONE day (random stock entries; in sample)
+  This state         20-session distribution for today's SPY phase x VIX width (v8 cell). 8.6.0: S&P 500 since 1990
+                     (risk_long.csv, built offline by build_risk_long.py); falls back to SPY since 2008. Descriptive.
+  Clock              per-trade quality by sessions since the last DIP ZONE day (random stock entries). 8.6.0: 2001-26,
+                     split by the 200-day filter (MRS v8.5). Descriptive.
   Effective bets     unchanged (Tested)
 The forward-log columns (pedal, cell, put3m_cost, vt_invested) are still written by the nightly update.
 
@@ -48,9 +50,23 @@ START = '2008-05-12'
 MIN_CELL_DAYS = 150
 VIX_MEDIAN = 17.56                                  # MRS v8 width: expanding median of the VIX since 1990 (13 Nov 2026)
 PH_TXT = {0: 'DIP ZONE', 1: 'ticket A open', 2: 'ticket B open', 3: 'no ticket'}
-# C1 (15 Nov 2026): random uptrend stock entries, runner exit, 2009-26, survivorship-free; by sessions since SPY's last
-# DIP ZONE day. (bucket, mean R, P(>= 3R)). Tested by episode bootstrap, in sample.
-C1_CLOCK = [('IN DIP', 0.30, 0.097), ('EARLY', 0.18, 0.090), ('MID', 0.09, 0.080), ('LATE', -0.06, 0.070)]
+# 8.6.0 (17 Nov 2026): random uptrend stock entries, runner exit, net of costs, survivorship-free, 2001-26 pooled
+# (2001-08 + 2009-26), by sessions since SPY's last DIP ZONE day and the 200-day filter. (bucket, mean R, P(>= 3R)).
+# Filter ON: same sign in both eras in every bucket. Filter OFF: mixed; 60+ has 2009-26 data only (shown as no data).
+# Source: Studies/.../oos_2000_2008 + clock_filter.py (17 Nov). Replaces the C1 2009-26 in-sample values.
+C1_CLOCK = [('IN DIP', 0.30, 0.095), ('EARLY', 0.17, 0.085), ('MID', 0.10, 0.077), ('LATE', -0.06, 0.064)]
+C1_CLOCK_OFF = [('IN DIP', -0.08, 0.059), ('EARLY', 0.12, 0.072), ('MID', -0.17, 0.053), ('LATE', None, None)]
+import os as _os
+_LONG_PATH = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'risk_long.csv')
+
+
+def long_hist():
+    """8.6.0: S&P 500 since 1990 (date, ph, vb, f20, mae20), or None when the file is missing."""
+    try:
+        x = pd.read_csv(_LONG_PATH)
+        return x if len(x) > 1000 else None
+    except Exception:
+        return None
 C1_LBL = {'IN DIP': 'In the dip', 'EARLY': '1–20 after', 'MID': '21–60', 'LATE': '60+'}
 
 
@@ -224,13 +240,17 @@ def clock_of(ph: pd.Series):
     return ('IN DIP' if k == 0 else 'EARLY' if k <= 20 else 'MID' if k <= 60 else 'LATE'), k
 
 
-def v8_cell(d: pd.DataFrame, ph_hist: pd.Series, vix_hist: pd.Series, code_now: int, vix_now: float) -> dict:
-    """20-session SPY stats since 2008 for today's v8 cell (SPY phase x VIX width); falls back to the phase alone when
-    the cell has fewer than MIN_CELL_DAYS days."""
-    x = d.dropna(subset=['f20']).copy()
-    x['ph'] = ph_hist.reindex(x.index).ffill() if ph_hist is not None else np.nan
-    x['vb'] = vix_hist.reindex(x.index).ffill().map(vol_band) if vix_hist is not None else np.nan
+def v8_cell(d: pd.DataFrame, ph_hist: pd.Series, vix_hist: pd.Series, code_now: int, vix_now: float, use_long: bool = True) -> dict:
+    """20-session stats for today's v8 cell (SPY phase x VIX width); falls back to the phase alone when the cell has fewer
+    than MIN_CELL_DAYS days. 8.6.0: S&P 500 since 1990 (risk_long.csv); without it, SPY since 2008 as before."""
     vb_now = vol_band(vix_now)
+    L = long_hist() if use_long else None
+    if L is not None:
+        x, src = L.copy(), 'S&P 500 since 1990'
+    else:
+        x, src = d.dropna(subset=['f20']).copy(), 'SPY since 2008'
+        x['ph'] = ph_hist.reindex(x.index).ffill() if ph_hist is not None else np.nan
+        x['vb'] = vix_hist.reindex(x.index).ffill().map(vol_band) if vix_hist is not None else np.nan
     cell = x[(x['ph'] == code_now) & (x['vb'] == vb_now)]
     scope = 'cell'
     if len(cell) < MIN_CELL_DAYS:
@@ -238,7 +258,7 @@ def v8_cell(d: pd.DataFrame, ph_hist: pd.Series, vix_hist: pd.Series, code_now: 
     def st(g):
         return dict(n=len(g), p10=g['f20'].quantile(.1), p50=g['f20'].median(), p90=g['f20'].quantile(.9),
                     up5=(g['f20'] > .05).mean(), dn5=(g['f20'] < -.05).mean(), fast=(g['mae20'] <= -.07).mean())
-    return dict(scope=scope, code=code_now, vb=vb_now, vix=vix_now, cell=st(cell), all=st(x),
+    return dict(scope=scope, code=code_now, vb=vb_now, vix=vix_now, cell=st(cell), all=st(x), dz=st(x[x['ph'] == 0]), src=src,
                 f_cell=cell['f20'].round(5).tolist(), f_all=x['f20'].round(5).tolist())   # 8.4.0: for the distribution picture
 
 
@@ -597,6 +617,12 @@ def build_snapshot(hist: pd.DataFrame, spy: pd.DataFrame, v3: pd.Series, closes:
             vix_hist = vix_hist[~vix_hist.index.duplicated(keep='last')]
             v8 = v8_cell(d, ph_hist if ph_hist is not None else ph_now, vix_hist, int(ph_now.iloc[-1]), vix)
             v8['bucket'], v8['n_since'] = clock_of(ph_now)
+            try:   # 8.6.0: the 200-day filter picks the clock table (ON: close > SMA200 and SMA200 up over 20 sessions)
+                _c = spy.rename(columns=str.lower)['close'].astype(float).dropna()
+                _s = _c.rolling(200).mean()
+                v8['f200'] = bool(_c.iloc[-1] > _s.iloc[-1] and _s.iloc[-1] > _s.iloc[-21])
+            except Exception:
+                v8['f200'] = None
             snap['v8'] = v8
     except Exception as _e8:
         print(f'[risk panel v8] {_e8}')
@@ -612,7 +638,7 @@ def _kde(x, grid, bw=0.008):
     return np.exp(-0.5 * ((grid[:, None] - x[None, :]) / bw) ** 2).sum(1) / (len(x) * bw * math.sqrt(2 * math.pi))
 
 
-def density_svg(f_cell, f_all, W=520, H=170) -> str:
+def density_svg(f_cell, f_all, W=520, H=170, src='since 2008') -> str:
     """SPY next-20-session returns: this state (orange) vs all days (grey), with this state's P10 / P90."""
     grid = np.linspace(-0.16, 0.14, 240)
     a, c = _kde(f_all, grid), _kde(f_cell, grid)
@@ -636,7 +662,7 @@ def density_svg(f_cell, f_all, W=520, H=170) -> str:
                      f'<text x="{X(q):.1f}" y="{Tp - 4}" text-anchor="middle" fill="#f4a062" font-size="10.5" font-family="IBM Plex Mono, monospace">{lbl} {q * 100:+.1f}%</text>')
     g.append('</svg>')
     key = ('<div class="atn-sm" style="font-size:11px"><span style="color:#f4a062">━</span> this state · '
-           '<span style="color:#9b958f">━</span> all days since 2008</div>')
+           f'<span style="color:#9b958f">━</span> all days, {src}</div>')
     return ''.join(g) + key
 
 
@@ -686,39 +712,50 @@ def panel_v9_html(snap: dict) -> str:
           + ui.bar([(0, zx, 'rgba(133,202,197,0.35)')], (min(max(ext, lo_), hi_) - lo_) / (hi_ - lo_) * 100 if _fin(ext) else None,
                    [(zx / 2, 'dip zone'), (50, '50-day'), (94, '+3')])
           + (f'<div class="atn-sm">sell-off day <b style="color:#f3ece2">{ep}</b> · started {pd.Timestamp(snap["ep_start"]):%d %b}</div>' if ep else '')
-          + ('<div class="atn-sm" style="margin-top:6px">Dip zone: wide both ways (5%+ up 31% vs 17%; 7%+ drop 27% vs 14%).</div>' if inz
+          + ((f'<div class="atn-sm" style="margin-top:6px">Dip zone, {v8["src"]}: wide both ways. After 20 sessions '
+              f'ended 5%+ up {v8["dz"]["up5"] * 100:.0f}% vs {v8["all"]["up5"] * 100:.0f}%; fast 7% drop '
+              f'{v8["dz"]["fast"] * 100:.0f}% vs {v8["all"]["fast"] * 100:.0f}%.</div>') if inz and v8.get('dz') and v8['dz']['n']
+             else '<div class="atn-sm" style="margin-top:6px">Dip zone: wide both ways.</div>' if inz
              else '<div class="atn-sm" style="margin-top:6px">The dip zone starts at −1 ATR.</div>')
           + ext_spark_svg(snap.get('ext_hist')) + '</div>')
     if v8.get('cell'):
         c, a = v8['cell'], v8['all']
         vb = v8.get('vb'); vcol = TEAL if vb == 'CALM' else ORANGE
         scope = '' if v8['scope'] == 'cell' else ' <span style="color:#f8d6b4">(phase only)</span>'
-        t2 = (f'<div class="atn-tile"><div class="atn-tl">This state · SPY next 20 sessions, since 2008 {ui.tag("Descriptive")}</div>'
+        t2 = (f'<div class="atn-tile"><div class="atn-tl">This state · next 20 sessions, {_e(v8.get("src", "SPY since 2008"))} {ui.tag("Descriptive")}</div>'
               f'<div class="atn-sm" style="margin-bottom:2px"><b style="color:#f3ece2">SPY {PH_TXT.get(v8["code"], "?")}</b> · VIX '
               f'<b style="color:{vcol}">{(v8["vix"] if _fin(v8["vix"]) else float("nan")):.1f} {_e(vb)}</b>{scope} · {c["n"]:,} days</div>'
-              f'{density_svg(v8.get("f_cell", []), v8.get("f_all", []), W=620, H=170)}'
+              f'{density_svg(v8.get("f_cell", []), v8.get("f_all", []), W=620, H=170, src=v8.get("src", "since 2008"))}'
               f'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px 14px;margin-top:6px">'
-              + _odds('≥5% up', c['up5'], a['up5'], TEAL) + _odds('≥5% down', c['dn5'], a['dn5'], ORANGE)
+              + _odds('ended ≥5% up', c['up5'], a['up5'], TEAL) + _odds('ended ≥5% down', c['dn5'], a['dn5'], ORANGE)
               + _odds('7% fast drop', c['fast'], a['fast'], ORANGE)
-              + '</div><div class="atn-sm" style="font-size:11px;margin-top:2px">bars: chance within 20 sessions in this state · white pin = all days</div></div>')
+              + '</div><div class="atn-sm" style="font-size:11px;margin-top:2px">bars: share of days in this state · ended = where it '
+              'closed 20 sessions later; fast drop = at any point in the 20 sessions · white pin = all days</div></div>')
     else:
         t2 = '<div class="atn-tile"><div class="atn-tl">This state</div><div class="atn-sm">SPY phase not available right now.</div></div>'
     b = v8.get('bucket')
     if b:
         rows = ''
-        for bb, r, p3 in C1_CLOCK:
+        f_on = v8.get('f200') is not False
+        for bb, r, p3 in (C1_CLOCK if f_on else C1_CLOCK_OFF):
             on = bb == b
+            if r is None:
+                rows += (f'<div style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:{INK if on else DIM}">'
+                         f'<span style="width:64px;font-weight:{700 if on else 400}">{C1_LBL[bb]}</span><div style="flex:1"></div>'
+                         f'<span style="width:96px;text-align:right;color:{DIM}">no data</span></div>')
+                continue
             col = (TEAL if r >= 0.15 else (INK if r >= 0 else ORANGE)) if on else '#3a3632'
             rows += (f'<div style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:{INK if on else DIM}">'
                      f'<span style="width:64px;font-weight:{700 if on else 400}">{C1_LBL[bb]}</span><div style="flex:1">'
-                     + ui.bar([(0, max(abs(r), 0.02) / 0.30 * 100, col)], margin='7px 0', height=12)
+                     + ui.bar([(0, min(max(abs(r), 0.02) / 0.30, 1) * 100, col)], margin='7px 0', height=12)
                      + f'</div><span style="width:96px;text-align:right;font-family:IBM Plex Mono,monospace;color:{col if on else DIM}">'
                      f'{r:+.2f}R · {p3 * 100:.0f}%</span></div>')
-        t3 = (f'<div class="atn-tile"><div class="atn-tl">Clock · quality of a new trade {ui.tag("Tested · in sample")}</div>'
+        t3 = (f'<div class="atn-tile"><div class="atn-tl">Clock · quality of a new trade {ui.tag("Descriptive · 2001–26")}</div>'
               f'<div class="atn-val" style="color:{TEAL if b in ("IN DIP", "EARLY") else (INK if b == "MID" else COPPER)}">{_e(b)}'
               f'{"" if not v8.get("n_since") else " " + str(v8["n_since"])}</div>'
               f'<div style="display:flex;flex-direction:column;justify-content:space-evenly;flex:1;min-height:150px">{rows}</div>'
-              '<div class="atn-sm" style="font-size:11px;margin-top:4px">mean R · P(≥3R) of a random stock entry (C1). Per trade, not size.</div></div>')
+              + ('<div class="atn-sm" style="font-size:11px;margin-top:4px">mean R · P(≥3R) of a random stock entry, 2001–26, 200-day filter '
+                 + ('ON (same sign in 2001–08 and 2009–26)' if f_on else 'OFF: the dip is not an edge') + '. Per trade, not size.</div></div>'))
     else:
         t3 = '<div class="atn-tile"><div class="atn-tl">Clock</div><div class="atn-sm">not available right now.</div></div>'
     if _fin(snap.get('rho')):

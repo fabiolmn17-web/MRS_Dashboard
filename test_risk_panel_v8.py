@@ -23,10 +23,21 @@ def test_v8_cell_fallback():
     d = _d()
     ph = pd.Series(np.where(np.arange(len(d)) % 7 == 0, 0, 3), index=d.index)
     vx = pd.Series(15.0, index=d.index)
-    c = rp.v8_cell(d, ph, vx, 3, 15.0)
+    c = rp.v8_cell(d, ph, vx, 3, 15.0, use_long=False)
     assert c['scope'] == 'cell' and c['cell']['n'] > 150
-    c2 = rp.v8_cell(d, ph, vx, 3, 30.0)                     # no STRESSED days -> phase only
+    c2 = rp.v8_cell(d, ph, vx, 3, 30.0, use_long=False)     # no STRESSED days -> phase only
     assert c2['scope'] == 'phase'
+
+
+def test_v8_cell_long_history():
+    """8.6.0: with risk_long.csv the cell is the S&P 500 since 1990 (DIP ZONE x WIDE: ~900 days)."""
+    if rp.long_hist() is None:
+        return
+    d = _d()
+    c = rp.v8_cell(d, None, None, 0, 22.9)
+    assert c['src'] == 'S&P 500 since 1990' and c['scope'] == 'cell' and c['cell']['n'] > 800
+    assert 0.15 < c['cell']['up5'] < 0.35 and c['dz']['n'] > c['cell']['n']
+    assert rp.C1_CLOCK[0][0] == 'IN DIP' and rp.C1_CLOCK_OFF[3][1] is None
 
 
 def test_panel_renders():

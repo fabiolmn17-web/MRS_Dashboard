@@ -7,6 +7,13 @@ Versions follow `docs/PROCESS.md`:
 
 The current version is in `VERSION` and in the page footer. Entries before 6.3.1 were reconstructed from the commit history and the project notes on 13 Nov 2026.
 
+## 8.6.0 · 2026-11-17
+- **Risk today, longer history.** "This state" now uses the S&P 500 since 1990 (906 days, 83 dips for the DIP ZONE with the VIX WIDE) instead of SPY since 2008; the numbers held in 1990–2007 and 2008–2026. Data in `risk_long.csv`, built offline by `build_risk_long.py` (re-run once or twice a year); without the file the panel falls back to SPY since 2008.
+- **Wording fixed:** "≥5% up / down" is where the index *ended* after 20 sessions ("ended ≥5% up"); only the fast 7% drop counts any point in the 20 sessions.
+- **Dip-zone line** under "SPY vs its 50-day" is computed from the same history (was a fixed SPY-2008 sentence).
+- **Clock table:** random stock entries 2001–26 (both eras) instead of 2009–26 in sample, split by the 200-day filter. Filter ON: dip +0.30R, 1–20 +0.17R, 21–60 +0.10R, 60+ −0.06R (same sign in both eras). Filter OFF: the dip is not an edge.
+- **Deep dip scan text:** the retired MILD RISK-OFF / RISK-OFF evidence replaced by the 2001–26 result (setups frame the trade; the state carries it).
+
 ## 8.5.4 · 2026-11-17
 
 - **Sidebar:** the Daily Inputs form (B20%, ADL, zero gamma, PC ratio, Submit & Update) is removed. Those inputs fed only the retired composite MRS score; the automated nightly run keeps filling what it can, and the diagnostics tabs show the last values.
