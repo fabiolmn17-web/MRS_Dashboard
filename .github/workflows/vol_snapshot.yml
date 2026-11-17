@@ -1,0 +1,40 @@
+name: Gamma Live vol surface
+
+# Triggered after each close by Gamma Live on the trading PC (gamma_live/mrs_push.py), after the zero-gamma shadow.
+# Stores the SPY smile / term-structure snapshot in vol_gl.json for the dashboard's Vol surface panel (MRS 8.4.0).
+
+on:
+  workflow_dispatch:
+    inputs:
+      date:  {description: 'Session date YYYY-MM-DD', required: true}
+      snap:  {description: 'Snapshot: gzip JSON, base64', required: true}
+
+concurrency:
+  group: mrs-history-commits
+  cancel-in-progress: false
+
+jobs:
+  store:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Install pandas
+        run: pip install pandas numpy
+      - name: Store the snapshot
+        env:
+          VOL_DATE: ${{ inputs.date }}
+          VOL_B64:  ${{ inputs.snap }}
+        run: python vol_snapshot.py
+      - name: Commit vol_gl.json
+        run: |
+          git config user.name  "MRS Bot"
+          git config user.email "mrs-bot@epistruct.com"
+          git add vol_gl.json
+          git diff --staged --quiet && exit 0
+          git commit -m "vol surface ${{ inputs.date }}"
+          for i in 1 2 3; do git pull --rebase && git push && exit 0; sleep 10; done
+          exit 1

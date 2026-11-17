@@ -7,6 +7,12 @@ Versions follow `docs/PROCESS.md`:
 
 The current version is in `VERSION` and in the page footer. Entries before 6.3.1 were reconstructed from the commit history and the project notes on 13 Nov 2026.
 
+## 8.5.4 · 2026-11-17
+
+- **Sidebar:** the Daily Inputs form (B20%, ADL, zero gamma, PC ratio, Submit & Update) is removed. Those inputs fed only the retired composite MRS score; the automated nightly run keeps filling what it can, and the diagnostics tabs show the last values.
+- **Sidebar data note:** freshness is now measured against the last completed NYSE session, the same rule as the data check strip. Before the US open it read "1 session behind" with current data.
+- **Vol surface:** 16 Nov added to `vol_gl.json` from the Gamma Live close (the automatic push needs the `vol_snapshot.yml` workflow on GitHub).
+
 ## 8.5.3 · 2026-11-16
 
 While the US session is open, the stance badge shows the stance at the **last close**, and a dashed label beside it shows the live reading, marked provisional: e.g. "Mon 16 Nov · live: NORMAL if SPY closes below 752.91 (now 744.98) · provisional". After 16:05 New York time the label disappears and the badge shows the day's stance. The rings, filter line, levels and budget bars keep showing the live bar. (Fabio, 16 Nov: the badge switched from EASE to NORMAL intraday while the header still showed Friday's date.)

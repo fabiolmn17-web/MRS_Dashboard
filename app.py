@@ -365,105 +365,20 @@ def _last_val(col, default=np.nan):
     s = hist[col].dropna()
     return float(s.iloc[-1]) if len(s) > 0 else default
 
-# ── Sidebar daily-input form ───────────────────────────────────────────────────
+# ── Sidebar (8.5.4, 17 Nov 2026: the daily-input form is removed; B20% / ADL / zero gamma / PC fed only the retired
+#    composite score. The automated run keeps filling what it can; the diagnostics tabs show the last values.) ──────────
 with st.sidebar:
-    # Last data date banner
-    _csv_last = hist['date'].max()
-    _today    = pd.Timestamp(date.today())
-    _days_old = len(pd.bdate_range(end=_today, start=_csv_last)) - 1
+    # Data freshness against the last completed NYSE session (8.5.4: was calendar days, so a pre-open morning read
+    # "1 session behind" with current data). Same rule as the data check strip.
+    _csv_last = pd.Timestamp(hist['date'].max()).normalize()
+    _exp = data_check.expected_session()
+    _days_old = 0 if _csv_last >= _exp else len(pd.bdate_range(start=_csv_last, end=_exp)) - 1
     if _days_old <= 0:
-        st.sidebar.success(f'Data current: {_csv_last.strftime("%b %d %Y")}')
+        st.sidebar.success(f'Data current: {_csv_last.strftime("%b %d %Y")} (last completed session)')
     elif _days_old == 1:
         st.sidebar.warning(f'Data through {_csv_last.strftime("%b %d %Y")} — 1 session behind')
     else:
         st.sidebar.error(f'Data through {_csv_last.strftime("%b %d %Y")} — {_days_old} sessions behind')
-
-    st.markdown('### Daily Inputs')
-    st.caption('Enter after market close (4 PM ET). ADL: TradingView value — auto x1000. '
-               'Values entered here always take priority; the automated run only fills blanks.')
-
-    # Pre-populate: prefer URL params (survive reload) then CSV last value
-    _qp = st.query_params
-    _def_b20 = float(_qp['b20']) if 'b20' in _qp else _last_val('b20_pct',    50.0)
-    _def_adl = float(_qp['adl']) if 'adl' in _qp else _last_val('adl_level',  1_827_000.0) / 1000.0
-    _def_zg  = float(_qp['zg'])  if 'zg'  in _qp else _last_val('zero_gamma', 7_400.0)
-
-    _b20_auto_last = _last_val('b20_auto')
-    with st.form('daily_inputs_form'):
-        inp_b20_auto = st.checkbox('B20%: automatic (full S&P 500, daily run)', value=True,
-                                   help='The daily run computes B20% from all S&P 500 stocks, the '
-                                        'same definition as S5TW. Untick to enter the TradingView S5TW value instead. '
-                                        + (f'Last automatic value: {_b20_auto_last:.2f}%.' if _b20_auto_last == _b20_auto_last
-                                           else 'No automatic value stored yet (first run after this update).'))
-        inp_b20 = st.number_input('B20% (S5TW) — only if unticked', min_value=0.0,  max_value=100.0,
-                                   value=round(_def_b20, 2), step=0.01)
-        inp_adl = st.number_input('ADL (TradingView x1000)', value=round(_def_adl, 2), step=0.01)
-        inp_zg  = st.number_input('Zero Gamma (SPX level)',  value=round(_def_zg, 2),  step=1.0)
-        inp_pc  = st.number_input('PC Ratio — USI:PC close', value=0.0, step=0.0001,
-                                   min_value=0.0, max_value=3.0, format='%.4f',
-                                   help=('Enter the USI:PC daily close from TradingView — the series '
-                                         'the Five-Zone cutoffs are calibrated on. Leave 0 to try the '
-                                         'CBOE feed; if it is unavailable PC is left blank (scores '
-                                         'neutral). Valid range: 0.3 – 2.0.'))
-        inp_same_ok = st.checkbox('Same B20% and ADL as the last stored session (intended)', value=False,
-                                  help='The form starts from the last stored values. If B20% and ADL are both '
-                                       'unchanged, the update is held back unless this box is ticked, so a second '
-                                       'click with the pre-filled numbers cannot overwrite the values just entered.')
-        submitted = st.form_submit_button('Submit & Update')
-
-    if submitted:
-        # ── Input validation ───────────────────────────────────────────────────
-        _errors = []
-        if not inp_b20_auto and inp_b20 <= 0:
-            _errors.append('B20% must be > 0.')
-        if not inp_b20_auto and inp_b20 > 100:
-            _errors.append('B20% must be <= 100.')
-        if inp_adl < 100 or inp_adl > 10_000:
-            _errors.append(f'ADL {inp_adl:.0f} looks wrong (expected 500–5000 range).')
-        if inp_zg < 2_000 or inp_zg > 15_000:
-            _errors.append(f'Zero Gamma {inp_zg:.0f} is outside a valid SPX range.')
-        if inp_pc > 3.0:
-            _errors.append(f'PC Ratio {inp_pc:.3f} looks like an SPX price, not a ratio. Use 0 for auto-fetch.')
-        # Guard against re-submitting the pre-filled (previous) values: on 23 Oct 2026 a second submit with the
-        # form defaults overwrote the B20% / ADL / zero gamma entered a minute earlier for 22 Oct.
-        _prev_b20, _prev_adl = _last_val('b20_pct'), _last_val('adl_level')
-        if inp_b20_auto:                        # B20% is not typed: guard on ADL alone
-            if not inp_same_ok and _prev_adl == _prev_adl and abs(inp_adl * 1000 - _prev_adl) < 1e-3:
-                _errors.append(f'ADL {inp_adl:.2f} is the same as the last stored session. Enter today\'s value, '
-                               'or tick "Same B20% and ADL ..." if this is intended.')
-        elif (not inp_same_ok and _prev_b20 == _prev_b20 and _prev_adl == _prev_adl
-                and abs(inp_b20 - _prev_b20) < 1e-6 and abs(inp_adl * 1000 - _prev_adl) < 1e-3):
-            _errors.append(f'B20% {inp_b20:.2f} and ADL {inp_adl:.2f} are the same as the last stored session. '
-                           'Enter today\'s values, or tick "Same B20% and ADL ..." if this is intended.')
-
-        if _errors:
-            for e in _errors:
-                st.sidebar.error(e)
-        else:
-            gh_token = st.secrets.get('GITHUB_TOKEN', '')
-            if not gh_token:
-                st.sidebar.error('GITHUB_TOKEN not in Streamlit secrets.')
-            else:
-                # Persist in URL params (survives reload) + session_state (live preview)
-                if not inp_b20_auto:
-                    st.query_params['b20'] = str(inp_b20)
-                st.query_params['adl'] = str(inp_adl)
-                st.query_params['zg']  = str(inp_zg)
-                if inp_pc > 0:
-                    st.query_params['pc'] = str(inp_pc)
-                st.session_state['pending_b20']  = None if inp_b20_auto else inp_b20
-                st.session_state['pending_adl']  = inp_adl * 1000  # ×1000 → CSV scale
-                st.session_state['pending_zg']   = inp_zg
-                st.session_state['pending_pc']   = inp_pc
-                st.session_state['pending_date'] = _today.strftime('%Y-%m-%d')
-                ok = _trigger_backfill(gh_token, None if inp_b20_auto else inp_b20, inp_adl, inp_zg, inp_pc)
-                if ok:
-                    st.sidebar.success(
-                        f'Update triggered for {_today.strftime("%b %d")}.\n'
-                        'Wait ~90 sec, then hit Refresh Data.'
-                    )
-                else:
-                    st.sidebar.error('API call failed — check GITHUB_TOKEN.')
 
     st.sidebar.divider()
     if st.sidebar.button('Refresh Data', use_container_width=True):
