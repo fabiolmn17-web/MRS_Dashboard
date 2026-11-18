@@ -9,6 +9,7 @@ States (all ex ante, at the close)
               IN DIP / EARLY (1-20) / MID (21-60) / LATE (> 60). C1: passed on stocks by episode (in sample).
   SPY phase   allocation.py replay: DIP ZONE / A (rebound) open / B (breakout) open / NONE.
   VIX width   VIX against its expanding median since 1990 (17.56 on 13 Nov 2026): CALM < m <= WIDE < 1.5 m <= STRESSED.
+              8.7.1: m is recomputed at every run (vix_1990.csv + every later close in mrs_history), set_vix_median().
               Width, not direction (V1, V4).
 200-day       8.5.0 (16 Nov 2026, DF1): F-UP = SPY close > SMA200 and SMA200 above its value 20 sessions ago.
               SPX 1963-2026: dips below a falling 200-day fell another 10% within 60 sessions in 45% of episodes,
@@ -29,12 +30,16 @@ Not on the card (decided 15 Nov 2026): composite MRS score, short book, FTD as a
 deep dips as a place to look (16 Nov: no better than a random entry, 2001-26).
 """
 import html as _html
+from pathlib import Path
 import numpy as np
 import pandas as pd
 
 TEAL, TEAL_D, ORANGE, COPPER, RED = '#85cac5', '#649995', '#f4a062', '#e3b48e', '#f4a062'   # 8.4.0: ATN tokens only
 INK, MUTED, DIM, LINE, BG = '#f3ece2', '#a89f95', '#6e675f', '#2a2724', '#121212'
-VIX_MEDIAN = 17.56            # expanding median of the VIX since 1990-01-02, as of 2026-11-13
+VIX_MEDIAN_FIXED = 17.56      # fallback: expanding median of the VIX since 1990, as of 2026-11-13
+VIX_MEDIAN = VIX_MEDIAN_FIXED # 8.7.1: recomputed at every app run by set_vix_median(hist)
+VIX_MEDIAN_ASOF = '2026-11-13'
+VIX_BASE_PATH = Path(__file__).parent / 'vix_1990.csv'   # VIX closes 1990-01-03 .. 2026-11-13 (TradingView)
 CORE_RISK = 0.015             # SPY ticket unit risk (Fabio, 15 Nov 2026)
 BUDGET = {'PRESS': (0.0075, 0.04, 1.00), 'NORMAL': (0.0075, 0.03, 1.00), 'EASE': (0.00375, 0.015, 0.60)}  # risk a trade,
 #          swing open-risk cap, swing gross cap (fractions of NLV). 8.5.0 rule V71F (NORMAL only in the DIP ZONE with
@@ -57,6 +62,35 @@ def _fin(x):
 
 def _e(s):
     return _html.escape(str(s), quote=True)
+
+
+# ── VIX median (8.7.1) ──────────────────────────────────────────────────────────────────────────────────────────
+def vix_median(hist=None, base_path=None):
+    """Expanding median of the VIX close since 1990, up to the last available close: the bundled vix_1990.csv plus
+    every later close in mrs_history (nightly). Returns (median, as-of 'YYYY-MM-DD', n closes) or None."""
+    base = pd.read_csv(base_path or VIX_BASE_PATH, parse_dates=['date']).set_index('date')['vix'].dropna()
+    s = base
+    if hist is not None and 'vix' in hist and 'date' in hist:
+        h = pd.Series(pd.to_numeric(hist['vix'], errors='coerce').values, index=pd.to_datetime(hist['date'])).dropna()
+        h = h[(h.index > base.index[-1]) & (h > 0)]
+        h = h[~h.index.duplicated(keep='last')].sort_index()
+        s = pd.concat([base, h])
+    if len(s) < 1000:
+        return None
+    return float(s.median()), s.index[-1].strftime('%Y-%m-%d'), int(len(s))
+
+
+def set_vix_median(hist=None):
+    """Set VIX_MEDIAN for this run; keeps the fixed value if the data cannot be read."""
+    global VIX_MEDIAN, VIX_MEDIAN_ASOF
+    try:
+        r = vix_median(hist)
+    except Exception as e:
+        print(f'[vix median] {e}')
+        r = None
+    if r:
+        VIX_MEDIAN, VIX_MEDIAN_ASOF = r[0], r[1]
+    return VIX_MEDIAN
 
 
 # ── states ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -421,7 +455,7 @@ The clock tells you about the quality of each trade, not how big to be. **With S
 
 **SPY phase.** Which SPY ticket is open: DIP zone, A (rebound), B (breakout) or none. It sets the stance.
 
-**VIX.** How wide the moves are, not which way they go. The VIX is compared with its long-run median since 1990 ({VIX_MEDIAN:.2f}).
+**VIX.** How wide the moves are, not which way they go. The VIX is compared with its long-run median since 1990 ({VIX_MEDIAN:.2f} on {VIX_MEDIAN_ASOF}), recomputed with every close.
 - CALM: below the median.
 - WIDE: up to 1.5× the median.
 - STRESSED: above that.

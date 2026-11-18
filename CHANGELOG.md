@@ -7,6 +7,9 @@ Versions follow `docs/PROCESS.md`:
 
 The current version is in `VERSION` and in the page footer. Entries before 6.3.1 were reconstructed from the commit history and the project notes on 13 Nov 2026.
 
+## 8.7.1 · 2026-11-18
+- **VIX median updates itself.** The line between CALM, WIDE and STRESSED is the median VIX close since 1990. It was a fixed number (17.56, measured on 13 Nov 2026); it is now recomputed at every run from `vix_1990.csv` (VIX closes 1990-01-03 to 2026-11-13) plus every later close in `mrs_history.csv`, the same expanding median the research uses. If the file cannot be read, the last value (17.56) stays. The card, the explainer fold ("median on <date>") and Risk today all read the same value. It moves by hundredths a year; `build_risk_long.py` (offline, Risk today history) keeps 17.56.
+
 ## 8.7.0 · 2026-11-18
 - **"What dips did next, by the 200-day"** under the 200-day filter on the MRS v8 card (Descriptive · SPX dips 1963–2026, DF1b): the share of S&P 500 dips that fell a further 3 / 5 / 7.5 / 10% within 20 sessions (and 10% within 60), for each 200-day state, today's row highlighted. Above a rising 200-day: 36 / 17 / 8 / 4% (any day 39 / 20 / 9 / 5%); below a falling one: 67 / 44 / 29 / 16%. Outside the DIP ZONE the line reads "if SPY dips into the zone in this state".
 - **Next-close level for the filter:** the SPY close needed next session to keep (or turn) the filter ON, both conditions included (close above tomorrow's 200-day, and that 200-day above its value 20 sessions earlier). One close decides (FB1: no buffer passed).

@@ -320,6 +320,11 @@ def load_data() -> pd.DataFrame:
 hist = load_data()
 if hist.attrs.get('mrs_fallback'):
     _health('MRS history', hist.attrs['mrs_fallback'])
+# 8.7.1: the VIX median (CALM / WIDE / STRESSED line) is the expanding median since 1990, recomputed every run
+try:
+    risk_panel.VIX_MEDIAN = exposure_guide.set_vix_median(hist)
+except Exception as _vm_err:
+    print(f'[vix median] {_vm_err}')
 
 # ── Zero gamma shadow: Gamma Live SPY 40-day flip, sent after each close by the Gamma Live PC ──────────────────
 GAMMA_SHADOW_PATH = Path(__file__).parent / 'gamma_shadow.csv'

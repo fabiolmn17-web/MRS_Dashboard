@@ -48,7 +48,8 @@ CORR_Q = [0.143, 0.288, 0.338, 0.367, 0.394, 0.417, 0.443, 0.458, 0.476, 0.492, 
           0.615, 0.638, 0.667, 0.699, 0.784, 0.841]
 START = '2008-05-12'
 MIN_CELL_DAYS = 150
-VIX_MEDIAN = 17.56                                  # MRS v8 width: expanding median of the VIX since 1990 (13 Nov 2026)
+VIX_MEDIAN = 17.56                                  # MRS v8 width: expanding median of the VIX since 1990 (13 Nov 2026);
+#                                                    8.7.1: app.py overwrites it each run with exposure_guide.set_vix_median()
 PH_TXT = {0: 'DIP ZONE', 1: 'ticket A open', 2: 'ticket B open', 3: 'no ticket'}
 # 8.6.0 (17 Nov 2026): random uptrend stock entries, runner exit, net of costs, survivorship-free, 2001-26 pooled
 # (2001-08 + 2009-26), by sessions since SPY's last DIP ZONE day and the 200-day filter. (bucket, mean R, P(>= 3R)).

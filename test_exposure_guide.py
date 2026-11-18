@@ -117,3 +117,25 @@ def test_drop_odds_and_need_870():
     dn = pd.DataFrame({'close': np.linspace(160, 100, 320)}, index=idx)
     h2 = eg.drop_odds_html(eg.filter200(dn), in_dip=False)
     assert 'Below a falling 200-day ◀ today' in h2 and 'If SPY dips' in h2 and '67%' in h2
+
+
+def test_vix_median_871():
+    import numpy as np
+    r = eg.vix_median()
+    assert r and abs(r[0] - 17.56) < 0.005 and r[1] == '2026-11-13' and r[2] > 9000
+    # later closes are added; earlier, duplicate, zero and NaN rows are ignored
+    later = pd.DataFrame({'date': ['2026-11-12', '2026-11-16', '2026-11-16', '2026-11-17', '2026-11-18', '2026-11-19'],
+                          'vix': [99.0, 50.0, 22.91, 25.46, 0.0, np.nan]})
+    r2 = eg.vix_median(later)
+    assert r2[1] == '2026-11-17' and r2[2] == r[2] + 2 and r2[0] >= r[0]
+    m = eg.set_vix_median(later)
+    assert m == eg.VIX_MEDIAN == r2[0] and eg.VIX_MEDIAN_ASOF == '2026-11-17'
+    assert eg.vol_band(m - 0.01) == 'CALM' and eg.vol_band(1.5 * m) == 'STRESSED'
+    # unreadable base file: the last value stays
+    old = eg.VIX_BASE_PATH
+    eg.VIX_BASE_PATH = old.parent / 'no_such_file.csv'
+    try:
+        assert eg.set_vix_median(later) == m
+    finally:
+        eg.VIX_BASE_PATH = old
+    eg.VIX_MEDIAN, eg.VIX_MEDIAN_ASOF = eg.VIX_MEDIAN_FIXED, '2026-11-13'
