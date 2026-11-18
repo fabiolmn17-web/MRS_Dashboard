@@ -96,7 +96,11 @@ def filter200(ohlc: pd.DataFrame, upto: int = None):
     sma = s.rolling(200).mean()
     c, m, slope = float(s.iloc[-1]), float(sma.iloc[-1]), float(sma.iloc[-1] - sma.iloc[-1 - F200_SLOPE])
     st_ = 'F-UP' if (c > m and slope > 0) else ('F-DN' if (c < m and slope < 0) else 'F-MIX')
-    return dict(state=st_, close=c, sma=m, slope=slope)
+    # 8.7.0: the close needed next session for ON. Tomorrow's 200-day = (sum of the last 199 closes + x) / 200; ON needs x above
+    # it (x > sum199 / 199) and that 200-day above the one 20 sessions before tomorrow (x > 200 * sma[-20] - sum199).
+    s199 = float(s.iloc[-199:].sum())
+    need = max(s199 / 199, 200 * float(sma.iloc[-F200_SLOPE]) - s199)
+    return dict(state=st_, close=c, sma=m, slope=slope, need=need)
 
 
 def _fs(f200):
@@ -551,6 +555,56 @@ def rings_html(ph: pd.Series, vix, f200=None) -> str:
             + '</div>')
 
 
+# 8.7.0 (DF1b, 18 Nov 2026, Descriptive): S&P 500 dip episodes 1963-2026 (first close <= 50-day - 1 ATR), share that fell
+# a further 3 / 5 / 7.5 / 10% below the dip close (lows) within 20 sessions, and 10% within 60, by the 200-day state at the dip.
+# 'ALL' = every 20th (60th) session, any state. Gap F-UP vs F-DN excludes 0 at every size (year-block bootstrap), both halves.
+DF1B = {'F-UP': dict(n=168, d=(0.36, 0.17, 0.08, 0.04), d60=0.12),
+        'F-MIX': dict(n=34, d=(0.44, 0.32, 0.12, 0.06), d60=0.21),
+        'F-DN': dict(n=55, d=(0.67, 0.44, 0.29, 0.16), d60=0.45),
+        'ALL': dict(n=804, d=(0.39, 0.20, 0.09, 0.05), d60=0.14)}
+DF1B_ROWS = (('F-UP', 'Above a rising 200-day'), ('F-MIX', 'Mixed: line lost, or not rising'), ('F-DN', 'Below a falling 200-day'),
+             ('ALL', 'Any day'))
+
+
+def drop_odds_html(f200, in_dip: bool = True) -> str:
+    """8.7.0: what a dip in today's 200-day state has done next (DF1b), the row of today's state highlighted, plus the close
+    needed next session to keep (or turn) the filter ON."""
+    import ui
+    if not isinstance(f200, dict):
+        return ''
+    st_ = f200['state']
+    up = st_ == 'F-UP'
+    hi = TEAL if up else ORANGE
+    cells = 'display:grid;grid-template-columns:minmax(200px,1.9fr) repeat(4,minmax(44px,0.55fr)) minmax(70px,0.8fr);gap:2px 10px;align-items:center;font-size:11.5px;max-width:760px'
+    head = ''.join(f'<span style="text-align:right;color:#6e675f">{h}</span>' for h in ('≥ 3%', '≥ 5%', '≥ 7.5%', '≥ 10%', '≥ 10% · 60d'))
+    rows = f'<div style="{cells};margin-top:4px"><span style="color:#6e675f">further fall from the dip close · 20 sessions</span>{head}</div>'
+    for k, name in DF1B_ROWS:
+        v = DF1B[k]
+        on = k == st_
+        col = hi if on else ('#8a847c' if k != 'ALL' else '#6e675f')
+        w = '700' if on else '400'
+        nums = ''.join(f'<span style="text-align:right;font-family:IBM Plex Mono,monospace;color:{col};font-weight:{w}">{x * 100:.0f}%</span>'
+                       for x in (*v['d'], v['d60']))
+        rows += (f'<div style="{cells}"><span style="color:{col};font-weight:{w}">{_e(name)}'
+                 f'{" ◀ today" if on else ""}<span style="color:#6e675f;font-weight:400"> · {v["n"]}</span></span>{nums}</div>')
+    d3 = DF1B[st_]['d'][0] * 100
+    lead = ('SPY is in the DIP ZONE in this state' if in_dip else 'If SPY dips into the zone in this state')
+    txt = (f'{lead}: the S&P 500 went another 3% lower within 20 sessions in {d3:.0f}% of such dips '
+           f'(any day {DF1B["ALL"]["d"][0] * 100:.0f}%).')
+    nd = f200.get('need')
+    if nd is not None and nd == nd:
+        if up:
+            txt += f' A close above {nd:,.2f} next session keeps the filter ON; below it, the mixed row ({DF1B["F-MIX"]["d"][0] * 100:.0f}%).'
+        elif nd <= f200['close'] * 1.03:
+            txt += f' A close above {nd:,.2f} next session turns it ON.'
+        else:
+            txt += f' ON needs a close above {nd:,.2f}: the 200-day slope rules it out next session.'
+    return (f'<div style="margin-top:8px"><div class="atn-tl" style="margin:0 0 2px 0">What dips did next, by the 200-day '
+            f'{ui.tag("Descriptive · SPX dips 1963–2026")}</div>{rows}'
+            f'<div class="atn-sm" style="font-size:11px;margin-top:4px">{_e(txt)} The upside was about the same in every row: '
+            f'losing the line mainly adds downside.</div></div>')
+
+
 def filter_html(f200) -> str:
     """8.5.0: one line with SPY against its 200-day (DF1) and what it switches."""
     import ui
@@ -761,5 +815,6 @@ def card_v9_html(spy_state, ph: pd.Series, vix, put: dict = None, spy_ohlcv: pd.
             + '<div style="display:grid;grid-template-columns:0.8fr 1.35fr;gap:10px;align-items:stretch">'
             + f'<div class="atn-tile"><div class="atn-tl">SPY · last 120 sessions with its phase {ui.tag("Tested")}</div>{ribbon_svg(spy_ohlcv, ph)}</div>'
             + f'<div class="atn-tile"><div class="atn-tl">Clock · width · budget {ui.tag("Tested · v8 sizing")}</div>{rings_html(ph, vix, f200)}'
-            + filter_html(f200) + levels_svg(spy_state, f200=f200) + budget_html(ph, f200) + '</div></div>'
+            + filter_html(f200) + drop_odds_html(f200, in_dip=int(ph.iloc[-1]) == 0)
+            + levels_svg(spy_state, f200=f200) + budget_html(ph, f200) + '</div></div>'
             + detail_html(spy_state, ph, put, spy_ohlcv, f200) + '</div>').replace('\n', ' ')

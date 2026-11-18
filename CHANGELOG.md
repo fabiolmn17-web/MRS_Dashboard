@@ -7,6 +7,10 @@ Versions follow `docs/PROCESS.md`:
 
 The current version is in `VERSION` and in the page footer. Entries before 6.3.1 were reconstructed from the commit history and the project notes on 13 Nov 2026.
 
+## 8.7.0 · 2026-11-18
+- **"What dips did next, by the 200-day"** under the 200-day filter on the MRS v8 card (Descriptive · SPX dips 1963–2026, DF1b): the share of S&P 500 dips that fell a further 3 / 5 / 7.5 / 10% within 20 sessions (and 10% within 60), for each 200-day state, today's row highlighted. Above a rising 200-day: 36 / 17 / 8 / 4% (any day 39 / 20 / 9 / 5%); below a falling one: 67 / 44 / 29 / 16%. Outside the DIP ZONE the line reads "if SPY dips into the zone in this state".
+- **Next-close level for the filter:** the SPY close needed next session to keep (or turn) the filter ON, both conditions included (close above tomorrow's 200-day, and that 200-day above its value 20 sessions earlier). One close decides (FB1: no buffer passed).
+
 ## 8.6.0 · 2026-11-17
 - **Risk today, longer history.** "This state" now uses the S&P 500 since 1990 (906 days, 83 dips for the DIP ZONE with the VIX WIDE) instead of SPY since 2008; the numbers held in 1990–2007 and 2008–2026. Data in `risk_long.csv`, built offline by `build_risk_long.py` (re-run once or twice a year); without the file the panel falls back to SPY since 2008.
 - **Wording fixed:** "≥5% up / down" is where the index *ended* after 20 sessions ("ended ≥5% up"); only the fast 7% drop counts any point in the 20 sessions.

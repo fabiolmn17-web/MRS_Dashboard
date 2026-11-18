@@ -96,3 +96,24 @@ if __name__ == '__main__':
     for n, f in list(globals().items()):
         if n.startswith('test_'):
             f(); print('ok', n)
+
+
+def test_drop_odds_and_need_870():
+    """8.7.0: close needed next session (both conditions) and the DF1b block with today's row marked."""
+    import numpy as np, pandas as pd
+    idx = pd.bdate_range('2024-01-01', periods=320)
+    up = pd.DataFrame({'close': np.linspace(100, 160, 320)}, index=idx)
+    f = eg.filter200(up)
+    s = up['close']; sma = s.rolling(200).mean(); s199 = s.iloc[-199:].sum()
+    assert abs(f['need'] - max(s199 / 199, 200 * sma.iloc[-20] - s199)) < 1e-9
+    # a close exactly at need keeps the 200-day equal: just above it is ON, just below is not
+    nxt = idx[-1] + pd.offsets.BDay(1)
+    for x, want in ((f['need'] + 0.01, 'F-UP'), (f['need'] - 0.01, 'F-MIX')):
+        g = eg.filter200(pd.concat([up, pd.DataFrame({'close': [x]}, index=[nxt])]))
+        assert g['state'] == want
+    h = eg.drop_odds_html(f, in_dip=True)
+    assert '◀ today' in h and 'Above a rising 200-day ◀ today' in h and '36%' in h and 'keeps the filter ON' in h
+    assert eg.drop_odds_html(None) == ''
+    dn = pd.DataFrame({'close': np.linspace(160, 100, 320)}, index=idx)
+    h2 = eg.drop_odds_html(eg.filter200(dn), in_dip=False)
+    assert 'Below a falling 200-day ◀ today' in h2 and 'If SPY dips' in h2 and '67%' in h2
