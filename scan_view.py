@@ -428,6 +428,8 @@ body{margin:0;background:transparent;font-family:Barlow,system-ui,sans-serif;}
 table{width:100%;border-collapse:collapse;min-width:1410px;}
 th{background:#2a2724;color:#a89f95;font-size:0.70rem;font-weight:600;padding:7px 6px;text-align:right;white-space:nowrap;cursor:pointer;user-select:none;position:sticky;top:0;}
 th.l,td.l{text-align:left;} th.c,td.c{text-align:center;}
+th:first-child,td:first-child{position:sticky;left:0;z-index:2;box-shadow:inset -1px 0 0 #2a2724;}
+th:first-child{z-index:3;}
 th:hover{color:#e3b48e;}
 td{background:#121212;color:#f3ece2;font-size:0.76rem;padding:6px 6px;text-align:right;border-bottom:1px solid #1a1918;white-space:nowrap;}
 td.num{font-family:'IBM Plex Mono',monospace;font-size:0.76rem;}
@@ -549,6 +551,7 @@ def _row(r, today, sec_label, sec_score, leader_hold, yf_to_sector, clickable=Fa
     return h
 
 
+# 8.7.2: the page shows all 21 columns (the ticker column stays fixed while scrolling); this list is kept for callers.
 # v6.4 (14 Nov 2026): 12 default columns in this order (page inventory, Fabio's choice): Ticker, Setup, Base / pivot,
 # Breakout, RS rtg, Ext vs SMA50, RVOL, Earnings, % 52W Hi, then Squeeze, Industry, Heat. "More columns" shows all 21.
 DEFAULT_COLS = [0, 15, 17, 18, 8, 9, 12, 19, 4, 16, 20, 1]

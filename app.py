@@ -1804,8 +1804,6 @@ if _scan_df is not None and len(_scan_df) > 0:
     with _c5:
         st.markdown('<div style="height:1.75rem;"></div>', unsafe_allow_html=True)
         _no_earn = st.checkbox('Hide earnings ≤ 7 days', value=False, key='ms_earn')
-        st.toggle('More columns', value=False, key='ms_morecols',
-                  help='Default: 12 columns. On: all 21 (sector, close, RS label, RS 3M / 1M, momentum, 5-day, Growth, EPS).')
     if _scan in ('L_bases', 'S_bases', 'L_bo', 'S_bd'):   # bases v3 (8 Nov 2026): base quality filters
         _b0, _b1, _b2, _b3 = st.columns([1.2, 1.0, 1.3, 1.5])
         with _b0:
@@ -1918,7 +1916,7 @@ if _scan_df is not None and len(_scan_df) > 0:
         st.info('No stocks match the selected filters.')
     else:
         _shown = _v.head(600).assign(_chase=st.session_state.get('_ctx_chase', False))   # v6.3: breakout 'chasing' tag
-        _cols = None if (st.session_state.get('ms_morecols') or _show_all) else scan_view.DEFAULT_COLS
+        _cols = None   # 8.7.2 (19 Nov 2026, Fabio): all 21 columns by default; the More columns switch is gone
         _scan_table_and_chart(scan_view.build_html(_shown, _sec_label, _sec_score, _leader_hold, YF_TO_SECTOR,
                                                    clickable=True, cols=_cols),
                               list(_shown['ticker'].astype(str)), min(760, 64 + 32 * len(_shown)))

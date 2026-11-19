@@ -7,6 +7,9 @@ Versions follow `docs/PROCESS.md`:
 
 The current version is in `VERSION` and in the page footer. Entries before 6.3.1 were reconstructed from the commit history and the project notes on 13 Nov 2026.
 
+## 8.7.2 · 2026-11-19
+- **Scanner:** all 21 columns are shown by default; the "More columns" switch is removed (Fabio). The ticker column stays fixed on the left while the table scrolls sideways.
+
 ## 8.7.1 · 2026-11-18
 - **VIX median updates itself.** The line between CALM, WIDE and STRESSED is the median VIX close since 1990. It was a fixed number (17.56, measured on 13 Nov 2026); it is now recomputed at every run from `vix_1990.csv` (VIX closes 1990-01-03 to 2026-11-13) plus every later close in `mrs_history.csv`, the same expanding median the research uses. If the file cannot be read, the last value (17.56) stays. The card, the explainer fold ("median on <date>") and Risk today all read the same value. It moves by hundredths a year; `build_risk_long.py` (offline, Risk today history) keeps 17.56.
 

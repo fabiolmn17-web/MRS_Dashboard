@@ -68,3 +68,12 @@ if __name__ == '__main__':
     for n, f in list(globals().items()):
         if n.startswith('test_'):
             f(); print('ok', n)
+
+
+def test_scanner_all_columns_sticky_872():
+    import scan_view as sv
+    css = sv.CSS
+    assert 'th:first-child,td:first-child{position:sticky;left:0;' in css
+    assert 'min-width:1410px' in css          # all 21 columns keep the full-width table
+    src = open('app.py', encoding='utf-8').read()
+    assert "st.toggle('More columns'" not in src and '_cols = None   # 8.7.2' in src
