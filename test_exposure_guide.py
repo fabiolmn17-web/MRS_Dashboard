@@ -139,3 +139,31 @@ def test_vix_median_871():
     finally:
         eg.VIX_BASE_PATH = old
     eg.VIX_MEDIAN, eg.VIX_MEDIAN_ASOF = eg.VIX_MEDIAN_FIXED, '2026-11-13'
+
+
+def test_risk_label_880():
+    want = {(2, 'F-UP'): 'RISK-ON · TREND', (2, 'F-MIX'): 'RISK-ON · TREND', (2, 'F-DN'): 'NEUTRAL · BEAR RALLY',
+            (1, 'F-UP'): 'RISK-ON · RECOVERY', (1, 'F-MIX'): 'RISK-ON · RECOVERY', (1, 'F-DN'): 'NEUTRAL · BEAR RALLY',
+            (0, 'F-UP'): 'RISK-OFF · BUYABLE DIP', (0, 'F-MIX'): 'RISK-OFF · MIXED 200-DAY', (0, 'F-DN'): 'RISK-OFF · DOWNTREND',
+            (3, 'F-UP'): 'NEUTRAL · NO TICKET', (3, 'F-MIX'): 'NEUTRAL · NO TICKET', (3, 'F-DN'): 'RISK-OFF · DOWNTREND'}
+    for (code, fs), lab in want.items():
+        r = eg.risk_label(code, fs)
+        assert r['label'] == lab, (code, fs, r['label'])
+        assert r['stance'] == eg.stance(code, fs)          # same inputs as the badge: never disagree
+        assert r['col'] == eg.RISK_COL[r['side']] and r['line']
+    # F-MIX split by where the close sits (filter200 dict)
+    assert eg.risk_label(0, dict(state='F-MIX', close=730.2, sma=732.55))['word'] == 'LINE LOST'
+    assert eg.risk_label(0, dict(state='F-MIX', close=735.0, sma=732.0))['word'] == 'LINE NOT RISING'
+    assert eg.risk_label(0, None)['label'] == 'RISK-OFF · DIP' and eg.risk_label(None) is None
+    assert 'Small budget' in eg.risk_label(3, 'F-DN')['line']
+    h = eg.risk_label_html(0, dict(state='F-MIX', close=730.2, sma=732.55), 24.56)
+    assert 'RISK-OFF · LINE LOST' in h and 'VIX WIDE' in h and 'DESCRIPTIVE' in h.upper()
+    assert eg.risk_label_html(None) == ''
+    assert '| DIP ZONE | RISK-OFF · BUYABLE DIP' in eg.risk_label_md() and 'Risk label' in eg.explainer_md()
+
+
+def test_scanner_hint_label_880():
+    import context_card as cc
+    s = {'E': -2.8, 'A': {}, 'B': {}, 'sma50': 762.5, 'close': 730.2, 'in_selloff': True, 'ep_taken': False}
+    out = cc.scanner_hint('MILD RISK-OFF', 'DEEP RISK-OFF', s, label='RISK-OFF · LINE LOST', col=eg.ORANGE)
+    assert out and out[0] == eg.ORANGE and out[1].startswith('RISK-OFF · LINE LOST · SPY DIP ZONE') and 'DEEP' not in out[1]

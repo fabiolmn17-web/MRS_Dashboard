@@ -154,6 +154,87 @@ def stance(code, f200=None):
     return 'EASE'
 
 
+# ── 8.8.0 (19 Nov 2026): plain-language risk label, from the same inputs as stance() ─────────────────────────────
+#    The SPY phase gives the short-term side, the 200-day filter the long-term backdrop. A translation of the v8
+#    states into market language (Descriptive); the stance alone sets the size. The VIX band sits beside it as width.
+RISK_COL = {'RISK-ON': TEAL, 'RISK-OFF': ORANGE, 'NEUTRAL': MUTED}
+RISK_LINE = {
+    ('RISK-ON', 'TREND'): 'Breakout ticket open: the trend is running. Stock entries 60+ sessions into a trend did worst.',
+    ('RISK-ON', 'RECOVERY'): 'Rebound ticket open after a dip: it often still feels like risk-off.',
+    ('NEUTRAL', 'BEAR RALLY'): 'A ticket is open below a falling 200-day: the tickets trade it, but the long-term trend is down.',
+    ('RISK-OFF', 'BUYABLE DIP'): 'Dip above a rising 200-day: 36% of such dips fell another 3% within 20 sessions (any day 39%); '
+                                 'stock entries here were the best (+0.30R, both eras). Normal size.',
+    ('RISK-OFF', 'LINE LOST'): 'Dip below a still-rising 200-day: 44% fell another 3% within 20 sessions (any day 39%); '
+                               'the upside was about the same. Not a bear call.',
+    ('RISK-OFF', 'LINE NOT RISING'): 'Dip above a 200-day that is no longer rising: 44% of such mixed dips fell another 3% '
+                                     'within 20 sessions (any day 39%).',
+    ('RISK-OFF', 'MIXED 200-DAY'): 'Dip with the 200-day lost or not rising: 44% fell another 3% within 20 sessions (any day 39%).',
+    ('RISK-OFF', 'DOWNTREND'): 'Below a falling 200-day: in dips there, 67% fell another 3% within 20 sessions and 45% '
+                               'another 10% within 60 (any day 39% / 14%).',
+    ('RISK-OFF', 'DIP'): 'DIP ZONE; the 200-day filter is not available right now.',
+    ('NEUTRAL', 'NO TICKET'): 'No trend ticket and no dip: the small budget.',
+}
+
+
+def risk_label(code, f200=None):
+    """Label for the SPY phase code (0 DIP ZONE, 1 A open, 2 B open, 3 no ticket) and the 200-day filter (a filter200()
+    dict or 'F-UP' / 'F-MIX' / 'F-DN'). Returns dict(side, word, label, col, line, stance) or None without a phase."""
+    if code is None:
+        return None
+    fs = _fs(f200)
+    below = (isinstance(f200, dict) and _fin(f200.get('close')) and _fin(f200.get('sma'))
+             and f200['close'] < f200['sma'])
+    if code in (1, 2):
+        side, word = ('NEUTRAL', 'BEAR RALLY') if fs == 'F-DN' else ('RISK-ON', 'TREND' if code == 2 else 'RECOVERY')
+    elif code == 0:
+        if fs == 'F-UP':
+            side, word = 'RISK-OFF', 'BUYABLE DIP'
+        elif fs == 'F-DN':
+            side, word = 'RISK-OFF', 'DOWNTREND'
+        elif fs == 'F-MIX':
+            side, word = 'RISK-OFF', ('LINE LOST' if below else ('LINE NOT RISING' if isinstance(f200, dict) else 'MIXED 200-DAY'))
+        else:
+            side, word = 'RISK-OFF', 'DIP'
+    else:
+        side, word = ('RISK-OFF', 'DOWNTREND') if fs == 'F-DN' else ('NEUTRAL', 'NO TICKET')
+    line = RISK_LINE[(side, word)]
+    if code != 0 and word == 'DOWNTREND':
+        line = 'No ticket, below a falling 200-day: the long-term trend is down. Small budget.'
+    return dict(side=side, word=word, label=f'{side} · {word}', col=RISK_COL[side], line=line, stance=stance(code, f200))
+
+
+def risk_label_html(code, f200=None, vix=None) -> str:
+    """One line under the stance badge: the label chip, the VIX band as width, the line and the evidence tag."""
+    import ui
+    r = risk_label(code, f200)
+    if r is None:
+        return ''
+    vb = vol_band(vix)
+    width = (f'<span style="font-size:12px;letter-spacing:.08em;color:{MUTED};border:1px solid {DIM};padding:2px 8px;'
+             f'border-radius:4px;white-space:nowrap;">VIX {_e(vb)} · width, not direction</span>') if vb else ''
+    return (f'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 8px 0;">'
+            f'<span style="font-weight:700;font-size:13px;letter-spacing:.1em;padding:3px 10px;border-radius:4px;'
+            f'white-space:nowrap;color:{r["col"]};border:1px solid {r["col"]};background:{r["col"]}18;">{_e(r["label"])}</span>'
+            f'{width}<span style="color:{MUTED};font-size:13px;">{_e(r["line"])}</span>'
+            f'{ui.tag("Descriptive · plain-language label; the stance sets the size")}</div>')
+
+
+def risk_label_md() -> str:
+    """The full translation table for the explainer fold."""
+    rows = [('Ticket B open (breakout)', 'RISK-ON · TREND', 'RISK-ON · TREND', 'NEUTRAL · BEAR RALLY', 'PRESS'),
+            ('Ticket A open (rebound)', 'RISK-ON · RECOVERY', 'RISK-ON · RECOVERY', 'NEUTRAL · BEAR RALLY', 'PRESS'),
+            ('DIP ZONE', 'RISK-OFF · BUYABLE DIP', 'RISK-OFF · LINE LOST (below a rising 200-day) / LINE NOT RISING',
+             'RISK-OFF · DOWNTREND', 'NORMAL above a rising 200-day, else EASE'),
+            ('No ticket', 'NEUTRAL · NO TICKET', 'NEUTRAL · NO TICKET', 'RISK-OFF · DOWNTREND', 'EASE')]
+    t = ('| SPY phase | Above a rising 200-day | Lost, or not rising | Below a falling 200-day | Stance |\n'
+         '|---|---|---|---|---|\n' + '\n'.join('| ' + ' | '.join(r) + ' |' for r in rows))
+    return ('**Risk label.** The same two inputs as the stance (SPY phase and the 200-day filter), in market language: the '
+            'phase gives the short-term side, the 200-day the long-term backdrop. It describes the market; the stance '
+            'alone sets the size. A buyable dip is risk-off in market terms and the best entry state in the data '
+            '(normal size); a bear rally keeps PRESS because the tickets trade it. The VIX band is shown beside the label '
+            'as width and never changes it. Descriptive: only the DIP ZONE cells carry measured odds (DF1 / DF1b).\n\n' + t + '\n')
+
+
 def hedge_window(ph: pd.Series):
     """('trend start' | 'trend end', sessions ago) if a trend started / ended in the last HEDGE_WINDOW sessions."""
     if ph is None or len(ph) < 2:
@@ -462,6 +543,7 @@ The clock tells you about the quality of each trade, not how big to be. **With S
 
 A high VIX widens both tails. Because stops are set in ATR, size shrinks on its own; it is not a reason to be out.
 
+{risk_label_md()}
 **Swing open risk.** The total risk of open swing trades, measured to their current stops. A trade at break-even uses none. The bar shows the three levels: EASE {c['EASE'] * 100:.1f}%, NORMAL {c['NORMAL'] * 100:.1f}%, PRESS {c['PRESS'] * 100:.1f}%. Raise the levels only when the forward log shows your trades beating a random entry.
 
 **SPY tickets.** Each ticket is one unit sized to risk {CORE_RISK * 100:.1f}% of NLV at its own stop. Account gross stays ≤ 100%, core first, no margin.
@@ -521,7 +603,7 @@ def provisional(spy_state, ph: pd.Series, spy_ohlcv: pd.DataFrame, now=None):
     price = float(spy_ohlcv.rename(columns=str.lower)['close'].iloc[-1])
     line = float(s['rb_level']) if _fin(s.get('rb_level')) else None
     return dict(settled=settled, live=live, line=line, price=price, code=int(ph.iloc[-1]), code_prev=int(ph.iloc[-2]),
-                date=pd.Timestamp(spy_ohlcv.index[-1]))
+                date=pd.Timestamp(spy_ohlcv.index[-1]), f_prev=f_prev)
 
 
 def _prov_html(pv) -> str:
@@ -556,7 +638,8 @@ def header_html(spy_state, ph: pd.Series, vix, date_txt: str = '', f200=None, pr
     return (f'<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:2px 0 6px 0;">'
             f'<span style="font-family:Barlow,sans-serif;font-weight:800;font-size:30px;letter-spacing:.08em;padding:2px 18px;'
             f'border-radius:5px;color:#0a0a0a;background:{STANCE_COL[st_]};">{st_}</span>'
-            f'<div class="atn-k" style="margin:0">MRS v8 <b>· {_e(sub)}</b></div>' + _prov_html(prov) + '</div>')
+            f'<div class="atn-k" style="margin:0">MRS v8 <b>· {_e(sub)}</b></div>' + _prov_html(prov) + '</div>'
+            + risk_label_html(code, prov.get('f_prev') if prov else f200, vix))   # 8.8.0: same inputs as the badge
 
 
 PH_BAND = {0: ('rgba(133,202,197,0.40)', 'DIP ZONE'), 1: ('rgba(100,153,149,0.24)', 'ticket A open'),

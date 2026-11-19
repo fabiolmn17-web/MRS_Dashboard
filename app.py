@@ -1859,7 +1859,8 @@ if _scan_df is not None and len(_scan_df) > 0:
     #    Replaces the 10 Nov SPY-rule guide (base / breakout IN vs OUT), superseded by the S2 study.
     _cx = st.session_state.get('_ctx')
     if _cx and _cx[2] and _SCANS[_scan][2] == 'long':
-        _cxh = context_card.scanner_hint(*_cx)
+        _rl = exposure_guide.risk_label(_v8.get('code'), _v8.get('f200')) if _v8 else None   # 8.8.0
+        _cxh = context_card.scanner_hint(*_cx, label=_rl['label'] if _rl else None, col=_rl['col'] if _rl else None)
         if _cxh:
             st.markdown(f'<div style="font-size:0.76rem;color:#f3ece2;border-left:3px solid {_cxh[0]};padding:2px 8px;'
                         f'margin:-2px 0 8px 0;background:#0d0d0d;">{_html_mod.escape(_cxh[1])} '

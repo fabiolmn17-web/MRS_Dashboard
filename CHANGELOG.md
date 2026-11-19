@@ -7,6 +7,11 @@ Versions follow `docs/PROCESS.md`:
 
 The current version is in `VERSION` and in the page footer. Entries before 6.3.1 were reconstructed from the commit history and the project notes on 13 Nov 2026.
 
+## 8.8.0 · 2026-11-19
+- **Risk label (Descriptive).** A plain-language risk-on / risk-off line under the stance badge, computed from the same two inputs as the stance (SPY phase and the 200-day filter), so the two never disagree: ticket B → RISK-ON · TREND; ticket A → RISK-ON · RECOVERY (either below a falling 200-day → NEUTRAL · BEAR RALLY); DIP ZONE → RISK-OFF · BUYABLE DIP (above a rising 200-day), LINE LOST (below a still-rising one), LINE NOT RISING, or DOWNTREND (below a falling one); no ticket → NEUTRAL · NO TICKET (below a falling 200-day → RISK-OFF · DOWNTREND). The VIX band sits beside it as width and never changes it. The stance alone sets the size: a buyable dip is risk-off in market terms and NORMAL size.
+- **Scanner banner** starts with the same label (it showed the retired score's band before).
+- **Explainer fold:** the full state → label table.
+
 ## 8.7.2 · 2026-11-19
 - **Scanner:** all 21 columns are shown by default; the "More columns" switch is removed (Fabio). The ticker column stays fixed on the left while the table scrolls sideways.
 

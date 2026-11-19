@@ -161,13 +161,16 @@ def card_html(band: str, deep: str, spy_state: dict, ext=None) -> str:
             f'13 Nov 2026.</div></div>').replace('\n', ' ')
 
 
-def scanner_hint(band: str, deep: str, spy_state: dict, ext=None):
-    """(colour, text) for the line above the scan pills, or None."""
+def scanner_hint(band: str, deep: str, spy_state: dict, ext=None, label: str = None, col: str = None):
+    """(colour, text) for the line above the scan pills, or None. 8.8.0: label / col = the MRS v8 risk label
+    (exposure_guide.risk_label), used in place of the retired score's band when given."""
     ph, _ = phase(spy_state, ext)
     if ph is None:
         return None
     _, ccol = cell_line(band, deep, ph)
     tag = (deep if deep in ('DEEP RISK-OFF', 'DEEP RISK-ON') else (band or '')).upper()
+    if label:
+        tag, ccol = label, (col or ccol)
     return ccol, (f'{tag} · SPY {ph} — {FOCUS[ph]} Stop 2 ATR(14), max 10%; take 2R, then '
                   f'trail the 21 EMA. Grey setup = stop wider than 10%.')
 
