@@ -882,8 +882,12 @@ with _today_slot.container():
                     st.markdown(vol_view.read_html(_vs_now, _vs_prev, _vs_vix if _vs_vix == _vs_vix else None),
                                 unsafe_allow_html=True)
                 with _vs_c2:
-                    st.plotly_chart(vol_view.figure(_vs_now, _vs_prev), use_container_width=True,
-                                    config={'displayModeBar': False})
+                    st.plotly_chart(vol_view.figure(_vs_now, _vs_prev, _vs_vix if _vs_vix == _vs_vix else None),
+                                    use_container_width=True,     # 8.9.0: annotated; camera button = PNG for the note
+                                    config={'displayModeBar': 'hover', 'displaylogo': False,
+                                            'modeBarButtonsToRemove': ['zoom2d', 'pan2d', 'select2d', 'lasso2d', 'zoomIn2d',
+                                                                       'zoomOut2d', 'autoScale2d', 'resetScale2d'],
+                                            'toImageButtonOptions': {'format': 'png', 'filename': 'vol_surface', 'scale': 2}})
         else:
             st.caption('Vol surface: no snapshot yet (Gamma Live pushes one after the close; Yahoo backup nightly).')
     except Exception as _vs_err:

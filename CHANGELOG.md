@@ -7,6 +7,10 @@ Versions follow `docs/PROCESS.md`:
 
 The current version is in `VERSION` and in the page footer. Entries before 6.3.1 were reconstructed from the commit history and the project notes on 13 Nov 2026.
 
+## 8.9.0 · 2026-11-20
+- **Vol surface charts carry their own reading (Descriptive, stage 1).** Smile: the spot, the next-expiry move band (± the ATM straddle), the 30-day 25-delta put and call marked on the smile, and a box with the 30-day RR25 (call − put IV) and the −5% put skew over ATM. Term structure: the next and 30-day ATM IV labelled, a box with the front − 30d slope and its reading (inverted / flat / upward), the VIX close as a dotted line, and the event hump with its forward vol. The chart's download button gives the annotated image for the note. All from the snapshot the panel already reads; Gamma Live levels (walls, flips) are not on it (stage 2).
+- **Morning read:** the term line now states the slope as front − 30d (positive = inverted), the same sign as the chart and the Gamma Live vol log.
+
 ## 8.8.0 · 2026-11-19
 - **Risk label (Descriptive).** A plain-language risk-on / risk-off line under the stance badge, computed from the same two inputs as the stance (SPY phase and the 200-day filter), so the two never disagree: ticket B → RISK-ON · TREND; ticket A → RISK-ON · RECOVERY (either below a falling 200-day → NEUTRAL · BEAR RALLY); DIP ZONE → RISK-OFF · BUYABLE DIP (above a rising 200-day), LINE LOST (below a still-rising one), LINE NOT RISING, or DOWNTREND (below a falling one); no ticket → NEUTRAL · NO TICKET (below a falling 200-day → RISK-OFF · DOWNTREND). The VIX band sits beside it as width and never changes it. The stance alone sets the size: a buyable dip is risk-off in market terms and NORMAL size.
 - **Scanner banner** starts with the same label (it showed the retired score's band before).
