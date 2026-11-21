@@ -692,7 +692,7 @@ def drop_odds_html(f200, in_dip: bool = True) -> str:
     st_ = f200['state']
     up = st_ == 'F-UP'
     hi = TEAL if up else ORANGE
-    cells = 'display:grid;grid-template-columns:minmax(200px,1.9fr) repeat(4,minmax(44px,0.55fr)) minmax(70px,0.8fr);gap:2px 10px;align-items:center;font-size:11.5px;max-width:760px'
+    cells = 'display:grid;grid-template-columns:minmax(200px,1.9fr) repeat(4,minmax(44px,0.55fr)) minmax(70px,0.8fr);gap:3px 14px;align-items:center;font-size:13.5px;max-width:1000px'
     head = ''.join(f'<span style="text-align:right;color:#6e675f">{h}</span>' for h in ('≥ 3%', '≥ 5%', '≥ 7.5%', '≥ 10%', '≥ 10% · 60d'))
     rows = f'<div style="{cells};margin-top:4px"><span style="color:#6e675f">further fall from the dip close · 20 sessions</span>{head}</div>'
     for k, name in DF1B_ROWS:
@@ -735,7 +735,7 @@ def filter_html(f200) -> str:
     eff = ('a DIP ZONE keeps the normal budget (3%) and the early-dip window is the best place to enter' if up else
            'a DIP ZONE gets the small budget (1.5%): dips here have kept falling')
     return (f'<div class="atn-tl" style="margin:12px 0 2px 0">200-day filter {ui.tag("Tested · SPX 1963–2026")}</div>'
-            f'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px">'
+            f'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:14px">'
             f'<span class="atn-chip" style="background:{col};color:#0a0a0a;font-weight:700">{"ON" if up else "OFF"} · SPY {_e(word)}</span>'
             f'<span style="font-family:IBM Plex Mono,monospace;color:#a89f95">{f200["close"]:,.2f} vs {f200["sma"]:,.2f} '
             f'({(f200["close"] / f200["sma"] - 1) * 100:+.1f}%) · slope {f200["slope"]:+.1f} / {F200_SLOPE}d</span></div>'
@@ -752,17 +752,17 @@ def budget_html(ph: pd.Series, f200=None) -> str:
         rt, cap, g = BUDGET[st_]
         on = st_ == now
         col = STANCE_COL[st_] if on else '#3a3632'
-        rows += (f'<div style="display:grid;grid-template-columns:200px 1fr 196px;align-items:center;gap:10px;'
-                 f'font-size:12px;color:{INK if on else DIM}"><span><b style="font-weight:{700 if on else 500}">{st_}</b> '
-                 f'<span style="color:{MUTED if on else DIM};font-size:11px">{when}</span></span><div>'
-                 + ui.bar([(0, cap / 0.04 * 100, col)], margin='5px 0', height=8)
+        rows += (f'<div style="display:grid;grid-template-columns:260px 1fr 250px;align-items:center;gap:12px;'
+                 f'font-size:14px;color:{INK if on else DIM}"><span><b style="font-weight:{700 if on else 500}">{st_}</b> '
+                 f'<span style="color:{MUTED if on else DIM};font-size:12.5px">{when}</span></span><div>'
+                 + ui.bar([(0, cap / 0.04 * 100, col)], margin='6px 0', height=11)
                  + f'</div><span style="font-family:IBM Plex Mono,monospace;text-align:right">{rt * 100:.3g}% · ≤ {cap * 100:.1f}%'
                  + (f' · gross {g * 100:.0f}%' if g < 1 else '') + '</span></div>')
     return (f'<div class="atn-tl" style="margin:10px 0 2px 0">Swing budget by stance <span style="font-size:10px;'
             f'letter-spacing:.06em;color:#6e675f;text-transform:none">a trade · open-risk cap</span></div>' + rows)
 
 
-def levels_svg(s: dict, W: int = 880, H: int = 104, f200=None) -> str:
+def levels_svg(s: dict, W: int = 1000, H: int = 108, f200=None) -> str:
     """8.4.1: where SPY is against the levels that change the stance (allocation state: dip line, 50-day, B trigger,
     open-ticket stops), as one price axis."""
     if not s or not _fin(s.get('close')):
@@ -795,7 +795,7 @@ def levels_svg(s: dict, W: int = 880, H: int = 104, f200=None) -> str:
     L, R = 8, 8
     X = lambda v: L + (v - lo) / (hi - lo) * (W - L - R)
     ya = 58
-    g = [f'<svg viewBox="0 0 {W} {H}" width="100%" style="display:block;max-width:980px;margin:0 auto">',   # 8.5.2: text ~12px at 2560
+    g = [f'<svg viewBox="0 0 {W} {H}" width="100%" style="display:block;max-width:1480px;margin:0 auto">',   # 8.10.2: wider tile, text ~14px at 2560
          f'<rect x="{L}" y="{ya - 5}" width="{W - L - R}" height="10" rx="3" fill="#1f1d1b"/>']
     dip = next((v for v, n, *_ in lv if n == 'DIP ZONE'), None)
     if dip is not None:
@@ -866,7 +866,7 @@ def detail_html(spy_state: dict, ph: pd.Series, put: dict = None, spy_ohlcv: pd.
             + f'<div class="atn-sm" style="font-size:11px;color:#6e675f;margin-top:6px">{_e(" · ".join(foot))}</div>').replace('\n', ' ')
 
 
-def ribbon_svg(spy_ohlcv: pd.DataFrame, ph: pd.Series, n: int = 120, W: int = 600, H: int = 300) -> str:
+def ribbon_svg(spy_ohlcv: pd.DataFrame, ph: pd.Series, n: int = 120, W: int = 600, H: int = 560) -> str:
     """Static SVG: SPY daily candles for the last n sessions with the SPY phase as background bands (one HTML block, so
     the card keeps one shell; no Streamlit layout inside the card)."""
     if spy_ohlcv is None or ph is None or len(spy_ohlcv) < 20:
@@ -927,9 +927,15 @@ def card_v9_html(spy_state, ph: pd.Series, vix, put: dict = None, spy_ohlcv: pd.
         return ui.CSS() + '<div class="atn-k">MRS v8 <b>· SPY history not available right now: no stance</b></div>'
     f200 = filter200(spy_ohlcv) if spy_ohlcv is not None else None
     prov = provisional(spy_state, ph, spy_ohlcv, now)
-    return ('<div style="background:#121212;border:1px solid #2a2724;border-radius:6px;padding:14px 16px 10px 16px;margin:2px 0 6px 0">'
+    css = ('<style>.v9c .atn-tl{font-size:11.5px}.v9c .atn-sm{font-size:13px !important;line-height:1.5}'      # 8.10.2: use the width
+           '.v9c .atn-ring.sm{width:118px;height:118px}.v9c .atn-ring.sm > div{width:92px;height:92px;font-size:24px}'
+           '.v9c .atn-chip{font-size:14px;padding:4px 11px}.v9c .atn-row .pill{font-size:14px;padding:4px 11px;min-width:52px}'
+           '.v9c .atn-row .sm{font-size:14.5px;line-height:1.7}.v9c .atn-row .ft{font-size:12.5px}.v9c .atn-row .atn-tile{padding:13px 16px}'
+           '@media (max-width:1900px){.v9c .v9g{grid-template-columns:0.8fr 1.35fr !important}}'
+           '@media (max-width:1100px){.v9c .v9g{grid-template-columns:1fr !important}}</style>')
+    return (css + '<div class="v9c" style="background:#121212;border:1px solid #2a2724;border-radius:6px;padding:14px 16px 10px 16px;margin:2px 0 6px 0">'
             + header_html(spy_state, ph, vix, date_txt, f200, prov)
-            + '<div style="display:grid;grid-template-columns:0.8fr 1.35fr;gap:10px;align-items:stretch">'
+            + '<div class="v9g" style="display:grid;grid-template-columns:0.56fr 1.44fr;gap:10px;align-items:stretch">'
             + f'<div class="atn-tile"><div class="atn-tl">SPY · last 120 sessions with its phase {ui.tag("Tested")}</div>{ribbon_svg(spy_ohlcv, ph)}</div>'
             + f'<div class="atn-tile"><div class="atn-tl">Clock · width · budget {ui.tag("Tested · v8 sizing")}</div>{rings_html(ph, vix, f200)}'
             + filter_html(f200) + drop_odds_html(f200, in_dip=int(ph.iloc[-1]) == 0)

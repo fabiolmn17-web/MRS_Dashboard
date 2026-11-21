@@ -7,6 +7,9 @@ Versions follow `docs/PROCESS.md`:
 
 The current version is in `VERSION` and in the page footer. Entries before 6.3.1 were reconstructed from the commit history and the project notes on 13 Nov 2026.
 
+## 8.10.2 · 2026-11-21
+- **Stance card layout (wide screens):** the SPY chart takes less width (0.56 : 1.44 instead of 0.8 : 1.35) and is taller, so it fills its tile. The Clock · width · budget tile gets the width: larger rings, larger text in the 200-day filter line, the dip-odds table, the distance-to-the-next-stance axis and the swing budget bars. The bottom row (SPY phase · tickets, Exit, Hedge) has larger chips, pills and text. Below 1,900 px the card keeps the previous split, so laptops are unchanged in layout. No numbers or wording changed.
+
 ## 8.10.1 · 2026-11-21
 - **Joint view, filter tab:** one line in the reading says how it differs from Risk today: the chart is the worst point reached within 60 sessions (downside only), not where SPY ends; Risk today shows where it ended after 20 sessions, both ways.
 
