@@ -7,6 +7,9 @@ Versions follow `docs/PROCESS.md`:
 
 The current version is in `VERSION` and in the page footer. Entries before 6.3.1 were reconstructed from the commit history and the project notes on 13 Nov 2026.
 
+## 8.10.3 · 2026-11-21
+- **Stance card evidence tag:** Clock · width · budget now reads TESTED · selection-adjusted (was TESTED · v8 sizing). DS1 (21 Nov) checked that the budget's edge over a flat 3% cap survives having been chosen from 15 tested budgets (Hansen SPA / Romano–Wolf, 2009–26; same direction 2001–08). No numbers or rules changed.
+
 ## 8.10.2 · 2026-11-21
 - **Stance card layout (wide screens):** the SPY chart takes less width (0.56 : 1.44 instead of 0.8 : 1.35) and is taller, so it fills its tile. The Clock · width · budget tile gets the width: larger rings, larger text in the 200-day filter line, the dip-odds table, the distance-to-the-next-stance axis and the swing budget bars. The bottom row (SPY phase · tickets, Exit, Hedge) has larger chips, pills and text. Below 1,900 px the card keeps the previous split, so laptops are unchanged in layout. No numbers or wording changed.
 

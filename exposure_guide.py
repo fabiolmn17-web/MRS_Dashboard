@@ -14,7 +14,7 @@ States (all ex ante, at the close)
 200-day       8.5.0 (16 Nov 2026, DF1): F-UP = SPY close > SMA200 and SMA200 above its value 20 sessions ago.
               SPX 1963-2026: dips below a falling 200-day fell another 10% within 60 sessions in 45% of episodes,
               vs 12% above a rising one (both eras, same vol mix).
-Stance        set by the SPY phase and, in the DIP ZONE, the 200-day filter (v8 sizing 15 Nov; OOS 2001-08 + DF1 16 Nov):
+Stance        set by the SPY phase and, in the DIP ZONE, the 200-day filter (v8 sizing 15 Nov; OOS 2001-08 + DF1 16 Nov; DS1 21 Nov: selection-adjusted):
               PRESS = ticket A or B open: 0.75% a trade, swing open risk <= 4%;
               NORMAL = DIP ZONE with SPY above a rising 200-day: 0.75% a trade, <= 3%;
               EASE = no ticket, or DIP ZONE without F-UP: 0.375% a trade, <= 1.5%, swing gross <= 60%.
@@ -386,7 +386,7 @@ def _budget_tile(st_):
            ((SWING_CAP['PRESS'] - SWING_CAP['NORMAL']) / top * 100, f'{SWING_CAP["PRESS"] * 100:.1f}%')]
     rt, _, g = BUDGET[st_]
     n = int(round(cap / rt))
-    return (f'<div class="tile">{_tag("Tested · v8 sizing")}<div class="k">Swing open risk</div>'
+    return (f'<div class="tile">{_tag("Tested · selection-adjusted")}<div class="k">Swing open risk</div>'
             f'<div class="val">{cap * 100:.1f}% <span class="sm">· {rt * 100:.3g}% a trade · ≈ {n} at full risk'
             + (f' · swing gross ≤ {g * 100:.0f}%' if g < 1 else '') + '</span></div>'
             f'{_bar(segs, None, lab, "right")}</div>')
@@ -937,7 +937,7 @@ def card_v9_html(spy_state, ph: pd.Series, vix, put: dict = None, spy_ohlcv: pd.
             + header_html(spy_state, ph, vix, date_txt, f200, prov)
             + '<div class="v9g" style="display:grid;grid-template-columns:0.56fr 1.44fr;gap:10px;align-items:stretch">'
             + f'<div class="atn-tile"><div class="atn-tl">SPY · last 120 sessions with its phase {ui.tag("Tested")}</div>{ribbon_svg(spy_ohlcv, ph)}</div>'
-            + f'<div class="atn-tile"><div class="atn-tl">Clock · width · budget {ui.tag("Tested · v8 sizing")}</div>{rings_html(ph, vix, f200)}'
+            + f'<div class="atn-tile"><div class="atn-tl">Clock · width · budget {ui.tag("Tested · selection-adjusted")}</div>{rings_html(ph, vix, f200)}'
             + filter_html(f200) + drop_odds_html(f200, in_dip=int(ph.iloc[-1]) == 0)
             + levels_svg(spy_state, f200=f200) + budget_html(ph, f200) + '</div></div>'
             + detail_html(spy_state, ph, put, spy_ohlcv, f200) + '</div>').replace('\n', ' ')
