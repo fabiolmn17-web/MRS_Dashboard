@@ -7,6 +7,13 @@ Versions follow `docs/PROCESS.md`:
 
 The current version is in `VERSION` and in the page footer. Entries before 6.3.1 were reconstructed from the commit history and the project notes on 13 Nov 2026.
 
+## 8.10.0 · 2026-11-21
+- **Joint view card (Descriptive; the filter split itself Tested).** Two joint plots under the Vol surface, each with today's point and a plain-language reading beside it:
+  - **200-day filter:** S&P 500 DIP ZONE days since 1963, dip depth (ATR below the 50-day) against the worst further fall within 60 sessions, filter ON vs OFF. Today's depth is marked on today's panel with the median and worst-10% further fall of the 120 nearest days.
+  - **Fear vs price:** S&P 500 daily return against the change in VIX since 1990, VIX CALM vs today's width. Today's point, the typical slope, and where today's VIX change sits among days with a similar SPY move (less fear / normal / more fear than usual).
+- Brand colours: teal = filter ON / CALM, orange = filter OFF / STRESSED, copper = WIDE. A fold explains how to read a joint plot.
+- History in `joint_long.csv`, built offline by `build_joint_long.py` (re-run once or twice a year, like `risk_long.csv`).
+
 ## 8.9.0 · 2026-11-20
 - **Vol surface charts carry their own reading (Descriptive, stage 1).** Smile: the spot, the next-expiry move band (± the ATM straddle), the 30-day 25-delta put and call marked on the smile, and a box with the 30-day RR25 (call − put IV) and the −5% put skew over ATM. Term structure: the next and 30-day ATM IV labelled, a box with the front − 30d slope and its reading (inverted / flat / upward), the VIX close as a dotted line, and the event hump with its forward vol. The chart's download button gives the annotated image for the note. All from the snapshot the panel already reads; Gamma Live levels (walls, flips) are not on it (stage 2).
 - **Morning read:** the term line now states the slope as front − 30d (positive = inverted), the same sign as the chart and the Gamma Live vol log.

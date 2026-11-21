@@ -40,6 +40,7 @@ import state_view              # v8.1.0: scanner / leaders / laggards read throu
 import data_check              # v8.3.0: morning data check strip (every automatic source vs the expected session)
 import ui                      # 8.4.0 (16 Nov 2026): one ATN component set (tags, bars, tiles, kickers) for every card
 import vol_view                # 8.4.0: Vol surface panel (Gamma Live close snapshot, Yahoo backup)
+import joint_view              # 8.10.0: Joint view card (200-day filter, fear vs price; today on top)
 import scan_view
 import heat_score
 import chart_view
@@ -53,7 +54,7 @@ try:
 except Exception:
     _PROC_START = None
 for _m in (pipeline, rs_labels, risk_dial, sector_view, rotation_view, market_state, risk_panel, allocation, scan_view,
-           chart_view, watchlist, heat_score, exposure_guide, put_log, state_view, data_check):
+           chart_view, watchlist, heat_score, exposure_guide, put_log, state_view, data_check, joint_view):
     try:
         _mt = os.path.getmtime(_m.__file__)
         _seen = getattr(_m, '_mrs_mtime', None)
@@ -853,6 +854,16 @@ def _vol_snaps(_key):
     return vol_view.merged()
 
 
+# 8.10.0 (21 Nov 2026): Joint view history (joint_long.csv, offline build_joint_long.py).
+@st.cache_data(ttl=3600, show_spinner=False)
+def _jv_load(_key):
+    return joint_view.load()
+
+
+_JV_CFG = {'displayModeBar': 'hover', 'displaylogo': False,
+           'modeBarButtonsToRemove': ['zoom2d', 'pan2d', 'select2d', 'lasso2d', 'zoomIn2d', 'zoomOut2d', 'autoScale2d',
+                                      'resetScale2d'],
+           'toImageButtonOptions': {'format': 'png', 'filename': 'joint_view', 'scale': 2}}
 _vol_all = {}
 try:
     _vol_all = _vol_snaps(tuple(p.stat().st_mtime if p.exists() else 0 for p in vol_view.vol_core.FILES.values()))
@@ -893,6 +904,40 @@ with _today_slot.container():
     except Exception as _vs_err:
         print(f'[vol surface] {_vs_err}')
         _health('Vol surface', _vs_err)
+    # 8.10.0 (21 Nov 2026): Joint view: two variables at once, in two states, today's point on top (joint_view.py).
+    #    The 200-day filter (dip depth vs further fall) and fear vs price (SPY return vs VIX change). Descriptive.
+    try:
+        _jv_L = _jv_load(joint_view.PATH.stat().st_mtime if joint_view.PATH.exists() else 0)
+        if _jv_L is not None and len(_jv_L):
+            _jv_t = joint_view.today_inputs(_eg_h, hist, (_v8 or {}).get('f200'), exposure_guide.vol_band)
+            with st.container(border=True):
+                st.markdown(joint_view.kicker_html(_jv_t), unsafe_allow_html=True)
+                _jv_tab1, _jv_tab2 = st.tabs(['200-day filter · dip depth vs further fall', 'Fear vs price · SPY vs VIX'])
+                with _jv_tab1:
+                    _jv_fs = joint_view.filter_stats(_jv_L, _jv_t.get('E'), _jv_t.get('f'))
+                    _jv_c1, _jv_c2 = st.columns([1, 2.6])
+                    with _jv_c1:
+                        st.markdown(joint_view.lines_html('What the chart says', joint_view.filter_lines(_jv_t, _jv_fs),
+                                                          ui.tag('Tested · ON / OFF split: DF1, RB1, RB2') + ' '
+                                                          + ui.tag('Descriptive · days like today')), unsafe_allow_html=True)
+                    with _jv_c2:
+                        st.plotly_chart(joint_view.figure_filter(_jv_L, _jv_t, _jv_fs), use_container_width=True,
+                                        config=_JV_CFG)
+                with _jv_tab2:
+                    _jv_vs = joint_view.vix_stats(_jv_L, _jv_t.get('ret'), _jv_t.get('dvix'), _jv_t.get('vb'))
+                    _jv_c1, _jv_c2 = st.columns([1, 2.6])
+                    with _jv_c1:
+                        st.markdown(joint_view.lines_html('What the chart says', joint_view.vix_lines(_jv_t, _jv_vs),
+                                                          ui.tag('Descriptive · S&P 500 and VIX 1990–2026')),
+                                    unsafe_allow_html=True)
+                    with _jv_c2:
+                        st.plotly_chart(joint_view.figure_vix(_jv_L, _jv_t, _jv_vs), use_container_width=True,
+                                        config=_JV_CFG)
+                with st.expander('How to read a joint plot', expanded=False):
+                    st.markdown(joint_view.HOW_TO_MD)
+    except Exception as _jv_err:
+        print(f'[joint view] {_jv_err}')
+        _health('Joint view', _jv_err)
 # v8.2.0: the MRS v6 score card is retired and no longer drawn (today_card.card_html kept for reference).
 if False:
     _since = ' · '.join(x for x in [(_changes[0] if _changes and str(_changes[0]).startswith('MRS') else ''),
