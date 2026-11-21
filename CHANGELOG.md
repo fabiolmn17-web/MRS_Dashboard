@@ -7,6 +7,9 @@ Versions follow `docs/PROCESS.md`:
 
 The current version is in `VERSION` and in the page footer. Entries before 6.3.1 were reconstructed from the commit history and the project notes on 13 Nov 2026.
 
+## 8.10.1 · 2026-11-21
+- **Joint view, filter tab:** one line in the reading says how it differs from Risk today: the chart is the worst point reached within 60 sessions (downside only), not where SPY ends; Risk today shows where it ended after 20 sessions, both ways.
+
 ## 8.10.0 · 2026-11-21
 - **Joint view card (Descriptive; the filter split itself Tested).** Two joint plots under the Vol surface, each with today's point and a plain-language reading beside it:
   - **200-day filter:** S&P 500 DIP ZONE days since 1963, dip depth (ATR below the 50-day) against the worst further fall within 60 sessions, filter ON vs OFF. Today's depth is marked on today's panel with the median and worst-10% further fall of the 120 nearest days.

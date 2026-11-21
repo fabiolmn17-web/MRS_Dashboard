@@ -283,6 +283,8 @@ def filter_lines(today: dict, stats: dict) -> list:
                   f'median further fall {_p(nr["med"])}, worst 10% {_p(nr["p10"])}, 10%+ on {nr["p10pct"] * 100:.0f}%.')
     elif not stats.get('in_dip'):
         L_.append('Today is outside the DIP ZONE, so no point is drawn.')
+    L_.append(f'<span style="color:{T["muted"]}">Read with Risk today: this chart is the worst point reached within 60 sessions '
+              '(downside only), not where SPY ends; Risk today shows where it ended after 20 sessions, both ways.</span>')
     return [_m(x) for x in L_]
 
 
