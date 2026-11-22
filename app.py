@@ -2718,7 +2718,7 @@ try:
         ('VIX', _dmax(_hd.dropna(subset=['vix'])['date'].max()) if 'vix' in _hd else None,
          'VIX close in the daily update: the card\'s width line.', False),
         ('Put log', None if _pl_pending else _dmax(_hd.dropna(subset=['pl_p5_60_mid'])['date'].max()),
-         'SPY put quotes logged by the daily update (put_log.py): the hedge tile.', _pl_pending),
+         'SPY put quotes logged by the daily update (put_log.py): data for later studies (no hedge tile since 8.11.0).', _pl_pending),
         ('SPY prices', _dmax(_eg_h.index.max()) if _eg_h is not None and len(_eg_h) else None,
          'SPY daily bars from Yahoo, live: phase, clock, follow-through day.', False),
         ('SPY tickets', _dmax(_al_states['SPY'].get('date')) if _al_states.get('SPY') else None,

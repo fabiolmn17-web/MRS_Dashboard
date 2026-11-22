@@ -24,9 +24,12 @@ Where to look In the DIP ZONE, beaten-down names (bottom 40% by 6-month return) 
               2001-08, same direction 2009-26). After the zone, no RS edge. No chart pattern beat a random entry (S2).
 Budget        SPY tickets one unit each at 1.5% NLV risk (Fabio, 15 Nov 2026); account gross <= 100%, core first; no margin.
 Exit          +2R -> break-even, then trail the 21 EMA or structure; no profit cap.
-Hedge         only the ~60-session ~5% OTM SPY put, bought in the 5 sessions after a trend start (ticket B opens) or a
-              trend end (B -> no ticket); never roll short-dated puts. Price: the daily put log (put_log.py).
-Not on the card (decided 15 Nov 2026): composite MRS score, short book, FTD as a rule, RS tilt, margin, rolling puts,
+Entry timing  8.11.0 (WD1, frozen and run 20 Nov 2026): act at the signal close or the next open, except after a weak
+              Friday (the week's last session moves in the bottom 10% of all daily moves in ATR): long entries signalled
+              at that close wait for Monday's open. SPY 1995-2026: Monday gap <= -0.5 ATR 18% vs 8% after other Fridays.
+Hedge         8.11.0: no standing hedge rule. The ~60-session ~5% OTM put was dropped after CA1 (22 Nov 2026: on the core
+              account it cost return in 2009-26 and deepened the drawdown in both eras). put_log.py keeps logging quotes.
+Not on the card (decided 15 Nov 2026): composite MRS score, short book, FTD as a rule, RS tilt, margin, rolling puts, a standing put hedge (22 Nov),
 deep dips as a place to look (16 Nov: no better than a random entry, 2001-26).
 """
 import html as _html
@@ -50,7 +53,9 @@ SWING_CAP = {k: v[1] for k, v in BUDGET.items()}
 SWING_RISK = BUDGET['NORMAL'][0]
 STANCE_COL = {'PRESS': TEAL, 'NORMAL': INK, 'EASE': COPPER}
 PH_NAME = {0: 'DIP', 1: 'A', 2: 'B', 3: 'NONE'}
-HEDGE_WINDOW = 5              # sessions after a trend start / end in which the 60-session put is the rule
+HEDGE_WINDOW = 5              # sessions after a trend start / end (the 60-session put rule; off the card since 8.11.0, CA1)
+WEAK_FRI_PCT = 0.10           # 8.11.0 WD1: a move in the bottom 10% of all daily moves (in ATR) = weak
+WEAK_FRI_FALLBACK = -0.89     # SPY 1993-2026: 10th percentile of (close - prior close) / prior ATR14 (Wilder), for short histories
 
 
 def _fin(x):
@@ -424,6 +429,91 @@ def _tickets_tile(s):
 
 
 
+# ── 8.11.0 (22 Nov 2026): entry timing after a weak Friday (WD1) ─────────────────────────────
+def _nyse_holidays(years):
+    """NYSE full-day holidays (the federal ones the exchange keeps, plus Good Friday)."""
+    from pandas.tseries.holiday import USFederalHolidayCalendar
+    from dateutil.easter import easter
+    y0, y1 = min(years), max(years)
+    fed = USFederalHolidayCalendar().holidays(f'{y0}-01-01', f'{y1}-12-31')
+    fed = [d for d in fed if not (d.month == 10 or (d.month == 11 and d.day < 20))]     # no Columbus / Veterans Day
+    gf = [pd.Timestamp(easter(y)) - pd.Timedelta(days=2) for y in range(y0, y1 + 1)]
+    return set(pd.DatetimeIndex(fed).normalize()) | set(gf)
+
+
+def _next_session(d):
+    d = pd.Timestamp(d).normalize(); hol = _nyse_holidays([d.year, d.year + 1])
+    n = d + pd.Timedelta(days=1)
+    while n.dayofweek >= 5 or n in hol:
+        n += pd.Timedelta(days=1)
+    return n
+
+
+def weak_friday(spy_ohlcv: pd.DataFrame, now=None):
+    """8.11.0 (WD1, frozen and run 20 Nov 2026). For the last settled SPY session, if it is the last session of its week:
+    dict(date, mv, pct, thr, weak), where mv = (close - prior close) / prior ATR14 (Wilder) and pct = its percentile among
+    all daily moves in the history (incl. this one); weak = pct <= 10%. Returns None mid-week, or once the next week's
+    session is trading (the rule is about Monday's open)."""
+    if spy_ohlcv is None or len(spy_ohlcv) < 30:
+        return None
+    s = spy_ohlcv.rename(columns=str.title)
+    nxt_live = live_bar(spy_ohlcv, now)
+    if nxt_live:
+        s = s.iloc[:-1]
+    h, l, c = (s[k].astype(float) for k in ('High', 'Low', 'Close'))
+    tr = pd.concat([h - l, (h - c.shift()).abs(), (l - c.shift()).abs()], axis=1).max(axis=1)
+    atr = tr.ewm(alpha=1 / 14, adjust=False).mean()
+    mv = ((c - c.shift()) / atr.shift()).dropna()
+    if not len(mv):
+        return None
+    d = pd.Timestamp(mv.index[-1]); d = (d.tz_localize(None) if d.tzinfo else d).normalize()
+    nxt = _next_session(d)
+    if nxt - pd.Timedelta(days=nxt.dayofweek) <= d - pd.Timedelta(days=d.dayofweek):
+        return None                                   # not the week's last session
+    if nxt_live:
+        return None                                   # the new week's session is already trading
+    x = float(mv.iloc[-1])
+    if len(mv) >= 250:
+        pct, thr = float((mv <= x).mean()), float(mv.quantile(WEAK_FRI_PCT))
+        weak = pct <= WEAK_FRI_PCT
+    else:
+        pct, thr = float('nan'), WEAK_FRI_FALLBACK
+        weak = x <= thr
+    return dict(date=d, mv=x, pct=pct, thr=thr, weak=bool(weak))
+
+
+WF_STATS = 'Monday gap ≥ 0.5 ATR down: 18% vs 8% after other Fridays · median gap still slightly up · the session recovers part'
+
+
+def _timing_tile(wf):
+    """Legacy card (card_html): entry timing tile."""
+    if wf and wf['weak']:
+        body = (f'<div class="lad"><span class="st" style="background:{ORANGE};color:#0a0a0a;">WEAK FRIDAY · {wf["mv"]:+.2f} ATR</span>'
+                f'<span class="st">long entries → Monday’s open</span></div><div class="sm">{_e(WF_STATS)}</div>')
+    else:
+        body = ('<div class="lad"><span class="st">signal close or next open</span></div>'
+                '<div class="sm">after a weak Friday: long entries wait for Monday’s open</div>')
+    return f'<div class="tile">{_tag("Tested · 1962–2026")}<div class="k">Entry timing</div>{body}</div>'
+
+
+def timing_html(wf) -> str:
+    """8.11.0 detail-row tile: entry timing (WD1) + the no-standing-hedge line (CA1)."""
+    import ui
+    thr = wf['thr'] if wf else WEAK_FRI_FALLBACK
+    if wf and wf['weak']:
+        body = (f'<span class="atn-chip" style="background:{ORANGE};color:#0a0a0a;">WEAK FRIDAY · {wf["mv"]:+.2f} ATR · {wf["date"]:%d %b}</span>'
+                f'<span class="atn-chip" style="background:{TEAL};color:#0a0a0a;">long entries → Monday’s open</span>'
+                f'<div class="atn-sm">{_e(WF_STATS)}</div>')
+    else:
+        fri = (f'<div class="atn-sm" style="font-size:11px;color:#6e675f">{wf["date"]:%a %d %b}: {wf["mv"]:+.2f} ATR, not a weak Friday</div>'
+               if wf else '')
+        body = ('<span class="atn-chip">signal close or next open</span>'
+                f'<div class="atn-sm">after a weak Friday (move ≤ {thr:+.2f} ATR, bottom 10%): long entries wait for Monday’s open</div>{fri}')
+    hedge = ('<div class="atn-sm" style="font-size:11px;color:#6e675f;margin-top:8px">hedge: no standing rule '
+             '(the 60-session put was dropped after the account test, 22 Nov)</div>')
+    return f'<div class="atn-tile"><div class="atn-tl">Entry timing {ui.tag("Tested · 1962–2026")}</div>{body}{hedge}</div>'
+
+
 def _exit_tile():
     lad = (f'<span class="st">stop</span><span class="ar">→</span><span class="st">+2R: break-even</span>'
            f'<span class="ar">→</span><span class="st" style="background:{TEAL_D};">trail 21 EMA</span>'
@@ -483,7 +573,7 @@ def card_html(spy_state: dict, ph: pd.Series, vix, put: dict = None, spy_ohlcv: 
           f'<span class="k">MRS v8{(" · " + _e(date_txt)) if date_txt else ""}</span></div>')
     h += '<div class="grid">' + _clock_tile(bucket, n) + _phase_tile(code) + _vix_tile(vix, vb) + '</div>'
     h += '<div class="grid g2">' + _budget_tile(st_) + _tickets_tile(spy_state) + '</div>'
-    h += '<div class="grid">' + _exit_tile() + _look_tile(st_, bucket) + _hedge_tile(hedge_window(ph), put) + '</div>'
+    h += '<div class="grid">' + _exit_tile() + _look_tile(st_, bucket) + _timing_tile(weak_friday(spy_ohlcv)) + '</div>'
     f = last_ftd(spy_ohlcv) if spy_ohlcv is not None else None
     foot = [f'sessions since the dip: {n}' if n is not None else 'no DIP ZONE in the history']
     if f is not None:
@@ -555,22 +645,16 @@ The best 1% of trades made more than the whole book (111% of net P&L).
 **Where to look.** In the DIP ZONE itself, beaten-down names (the bottom 40% by 6-month return) beat the prior 6-month leaders: tested on 2001–08 (−0.31R for leaders), same direction in 2009–26. Once SPY has left the zone, there is no RS edge either way.
 Use the setups (deep dip, 21 EMA or 50-day pullback, breakout, base) to find clean structures and to frame entry, stop and target. Their return came from the market state: in 2001–2026 none beat a random uptrend entry in the same state. So the state decides whether to trade and how big; the setup decides where the entry, stop and target go. Your own selection is what the forward log measures.
 
-**Hedge.** The only hedge rule kept is a ~60-session put about 5% below SPY, bought in the {HEDGE_WINDOW} sessions after:
+**Entry timing.** Act on a signal at its close or at the next open. One exception: when the week ends with a weak Friday (SPY's move that day in the bottom 10% of all daily moves, measured in ATR), long entries signalled at that close wait for Monday's open.
+- In SPY since 1995, Monday then opened 0.5 ATR or more lower on 18% of those weekends, against 8% after other Fridays; on average −0.11 ATR worse. It held in both eras and at the same VIX mix. Weekday nights after a weak day bounce instead.
+- The median Monday gap is still slightly positive and Monday's session recovers part of it: the rule avoids a tail, not a typical loss.
+- Strong Fridays say nothing about Monday. Tested on the index; for single stocks it applies by extension.
 
-- a trend start (ticket B opens); or
-- a trend end (ticket B closes and no ticket is open).
-
-The supporting evidence:
-
-- Real quotes (13 Nov 2026) matched the model for this put: model ÷ market 1.02.
-- Short-dated and 10% out-of-the-money puts cost far more than the model assumed, so they are out.
-- Never roll puts month after month: −0.60 to −0.82 return on premium at real prices.
-
-The price on the tile comes from the daily put log.
+**Hedge.** No standing hedge rule. The ~60-session put about 5% below SPY was dropped after the account test (22 Nov 2026): on the core account it cost return in 2009–26 and deepened the drawdown in both eras. Never roll puts month after month (−0.60 to −0.82 return on premium at real prices). The daily put log keeps collecting real quotes for any later study.
 
 **Footer.** The last follow-through day is commentary only: in C2, waiting for one did not help.
 
-*Not on this card on purpose: the composite MRS score, the short book, RS ranking, margin, deep dips as a place to look.*
+*Not on this card on purpose: the composite MRS score, the short book, RS ranking, margin, deep dips as a place to look, a standing put hedge.*
 """
 
 
@@ -820,8 +904,9 @@ def levels_svg(s: dict, W: int = 1000, H: int = 108, f200=None) -> str:
             f'letter-spacing:.06em;color:#6e675f;text-transform:none">SPY {c:,.2f} · closes decide</span></div>' + ''.join(g))
 
 
-def detail_html(spy_state: dict, ph: pd.Series, put: dict = None, spy_ohlcv: pd.DataFrame = None, f200=None) -> str:
-    """A's detail row: phase + tickets · exit + where to look · hedge (one tile each), then the footer."""
+def detail_html(spy_state: dict, ph: pd.Series, put: dict = None, spy_ohlcv: pd.DataFrame = None, f200=None, now=None) -> str:
+    """A's detail row: phase + tickets · exit + where to look · entry timing (8.11.0; was hedge), then the footer.
+    `put` is kept for compatibility and no longer shown."""
     import ui
     code = int(ph.iloc[-1]) if ph is not None and len(ph) else None
     bucket, n = clock(ph)
@@ -845,19 +930,7 @@ def detail_html(spy_state: dict, ph: pd.Series, put: dict = None, spy_ohlcv: pd.
           f'<span class="atn-chip">stop</span> → <span class="atn-chip">+2R break-even</span> → '
           f'<span class="atn-chip" style="background:{TEAL_D};">trail 21 EMA</span> → <span class="atn-chip" style="background:{TEAL};color:#0a0a0a;">no cap</span>'
           f'<div class="atn-tl" style="margin-top:10px">Where to look {ui.tag(ltag)}</div>{look}</div>')
-    win = hedge_window(ph)
-    px = ''
-    if put:
-        px = (f'<div class="atn-sm" style="margin-top:6px">60-session {put["strike"]:.0f} put ≈ <b style="font-family:IBM Plex Mono,monospace;color:#f3ece2">'
-              f'{put["cost_pct"] * 100:.1f}%</b> of SPY' + (f' · IV {put["iv"] * 100:.1f}%' if put.get('iv') == put.get('iv') and put.get('iv') else '')
-              + f' · {put["date"]:%d %b}{" (seed)" if "seed" in put.get("src", "") else ""}</div>')
-    if win:
-        what, k = win
-        hb = (f'<span class="atn-chip" style="background:{TEAL};color:#0a0a0a;">HEDGE WINDOW · {_e(what)}{"" if k == 0 else f" · {k}d ago"}</span>'
-              f'<div class="atn-sm">~60-session put, ~5% below SPY</div>')
-    else:
-        hb = f'<span class="atn-chip" style="color:{MUTED};">no hedge now</span><span class="atn-chip" style="color:{MUTED};">never roll puts</span>'
-    t3 = f'<div class="atn-tile"><div class="atn-tl">Hedge {ui.tag("Modelled + real quotes")}</div>{hb}{px}</div>'
+    t3 = timing_html(weak_friday(spy_ohlcv, now))                     # 8.11.0: replaces the hedge tile (CA1, WD1)
     f = last_ftd(spy_ohlcv) if spy_ohlcv is not None else None
     foot = [f'sessions since the dip: {n}' if n is not None else 'no DIP ZONE in the history']
     if f is not None:
@@ -940,4 +1013,4 @@ def card_v9_html(spy_state, ph: pd.Series, vix, put: dict = None, spy_ohlcv: pd.
             + f'<div class="atn-tile"><div class="atn-tl">Clock · width · budget {ui.tag("Tested · selection-adjusted")}</div>{rings_html(ph, vix, f200)}'
             + filter_html(f200) + drop_odds_html(f200, in_dip=int(ph.iloc[-1]) == 0)
             + levels_svg(spy_state, f200=f200) + budget_html(ph, f200) + '</div></div>'
-            + detail_html(spy_state, ph, put, spy_ohlcv, f200) + '</div>').replace('\n', ' ')
+            + detail_html(spy_state, ph, put, spy_ohlcv, f200, now) + '</div>').replace('\n', ' ')

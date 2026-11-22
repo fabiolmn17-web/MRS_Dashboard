@@ -7,6 +7,11 @@ Versions follow `docs/PROCESS.md`:
 
 The current version is in `VERSION` and in the page footer. Entries before 6.3.1 were reconstructed from the commit history and the project notes on 13 Nov 2026.
 
+## 8.11.0 · 2026-11-22
+- **Entry timing tile replaces the Hedge tile** (bottom row of the stance card). It reads "signal close or next open" on ordinary days. When the week's last session is a **weak Friday** (SPY's move in the bottom 10% of all daily moves, in ATR), it shows WEAK FRIDAY with the move and "long entries → Monday's open" until Monday's session starts. Evidence (WD1, tested): after a weak Friday, Monday opened 0.5 ATR or more lower 18% of the time vs 8% after other Fridays (SPY 1995–2026; S&P 500 checks since 1962), −0.11 ATR on average, both eras, same VIX mix; the median gap is still slightly up and Monday's session recovers part of it.
+- **No standing hedge rule:** the ~60-session ~5% OTM put is off the card. The account test (CA1, 22 Nov) found it cost return in 2009–26 and deepened the drawdown in both eras. A grey line on the tile says so; the fold explains it. The daily put log keeps running as data.
+- Weeks that end on a Thursday (Good Friday and other exchange holidays) are handled: the rule looks at the week's last session.
+
 ## 8.10.3 · 2026-11-21
 - **Stance card evidence tag:** Clock · width · budget now reads TESTED · selection-adjusted (was TESTED · v8 sizing). DS1 (21 Nov) checked that the budget's edge over a flat 3% cap survives having been chosen from 15 tested budgets (Hansen SPA / Romano–Wolf, 2009–26; same direction 2001–08). No numbers or rules changed.
 

@@ -1,4 +1,5 @@
 """Unit checks for exposure_guide.py (MRS v8) and put_log.py (run: python test_exposure_guide.py)."""
+import numpy as np
 import pandas as pd
 import exposure_guide as eg
 import put_log as pl
@@ -76,7 +77,7 @@ def test_card_renders():
     for ph in ([0, 0], [0] + [1] * 30, [0] + [2] * 80, [2] * 70 + [3]):
         for vix in (14.0, 20.0, 30.0, None):
             h = eg.card_html(s, pd.Series(ph), vix, pl.latest(None), None, 'Fri 13 Nov 2026')
-            assert 'MRS v8' in h and 'Swing open risk' in h and 'Hedge' in h, (ph, vix)
+            assert 'MRS v8' in h and 'Swing open risk' in h and 'Entry timing' in h, (ph, vix)
     assert 'not available' in eg.card_html({}, None, 15.0)
     assert 'Stance' in eg.explainer_md()
 
@@ -167,3 +168,41 @@ def test_scanner_hint_label_880():
     s = {'E': -2.8, 'A': {}, 'B': {}, 'sma50': 762.5, 'close': 730.2, 'in_selloff': True, 'ep_taken': False}
     out = cc.scanner_hint('MILD RISK-OFF', 'DEEP RISK-OFF', s, label='RISK-OFF · LINE LOST', col=eg.ORANGE)
     assert out and out[0] == eg.ORANGE and out[1].startswith('RISK-OFF · LINE LOST · SPY DIP ZONE') and 'DEEP' not in out[1]
+
+
+# ── 8.11.0: weak Friday (WD1) ──
+def _ohlc(days, moves, atr_pts=5.0):
+    """SPY-like bars with a constant 5-point range and the given close-to-close moves."""
+    c = 700 + np.cumsum(moves)
+    return pd.DataFrame({'Open': c, 'High': c + atr_pts / 2, 'Low': c - atr_pts / 2, 'Close': c, 'Volume': 1}, index=days)
+
+
+def test_weak_friday():
+    import numpy as np
+    days = pd.bdate_range('2025-01-02', '2026-11-20')
+    days = days[~days.isin(list(eg._nyse_holidays([2025, 2026])))]
+    rng = np.random.default_rng(1)
+    mv = rng.normal(0, 3, len(days))
+    after_close = pd.Timestamp('2026-11-21 10:00', tz='America/New_York')
+    mv[-1] = -12.0                                                  # 20 Nov 2026 (a Friday): a large drop
+    w = eg.weak_friday(_ohlc(days, mv), now=after_close)
+    assert w is not None and w['weak'] and w['date'] == pd.Timestamp('2026-11-20') and w['pct'] <= 0.10
+    mv[-1] = 1.0
+    w = eg.weak_friday(_ohlc(days, mv), now=after_close)
+    assert w is not None and not w['weak']
+    assert eg.weak_friday(_ohlc(days[:-1], mv[:-1]), now=after_close) is None          # a Thursday: mid-week
+    # Good Friday 2026 = 3 Apr: Thursday 2 Apr is the week's last session
+    gd = days[days <= '2026-04-02']
+    assert pd.Timestamp('2026-04-03') not in set(days)
+    w = eg.weak_friday(_ohlc(gd, mv[:len(gd)]), now=pd.Timestamp('2026-04-04 10:00', tz='America/New_York'))
+    assert w is not None and w['date'] == pd.Timestamp('2026-04-02')
+    # Monday's session is live: the rule is past
+    mon = days.append(pd.DatetimeIndex([pd.Timestamp('2026-11-23')]))
+    mv2 = np.r_[mv, 0.5]; mv2[-2] = -12.0
+    assert eg.weak_friday(_ohlc(mon, mv2), now=pd.Timestamp('2026-11-23 11:00', tz='America/New_York')) is None
+    # short history: fixed threshold
+    w = eg.weak_friday(_ohlc(days[-60:], np.r_[np.zeros(59), -6.0]), now=after_close)
+    assert w is not None and w['weak'] and w['thr'] == eg.WEAK_FRI_FALLBACK
+    assert 'WEAK FRIDAY' in eg.timing_html(dict(date=pd.Timestamp('2026-11-20'), mv=-1.71, pct=0.02, thr=-0.89, weak=True))
+    h = eg.timing_html(None)
+    assert 'signal close or next open' in h and 'no standing rule' in h
