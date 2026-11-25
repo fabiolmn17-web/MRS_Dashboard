@@ -7,6 +7,10 @@ Versions follow `docs/PROCESS.md`:
 
 The current version is in `VERSION` and in the page footer. Entries before 6.3.1 were reconstructed from the commit history and the project notes on 13 Nov 2026.
 
+## 8.12.1 · 2026-11-25
+- **Stance card, "What dips did next":** the middle row now shows today's case on its own when SPY is below a still-rising 200-day: **Line lost** (30 S&P 500 dips since 1963): another 3% within 20 sessions 47% (was 44% pooled), 5% 37%, 7.5% 13%, 10% 7%; another 10% within 60 sessions 23%. The old pooled row (34 dips) included 4 dips above a 200-day that was not rising; it is shown only when that is today's case, labelled as pooled. The label line under the badge and the next-close sentence use the same numbers. Descriptive (DF1b split).
+- **Leading industries and laggards wording:** the stock-level result (beaten-down names beat prior leaders) is now stated for the DIP ZONE itself, where it was tested and confirmed out of sample (RS1-b, 2001–08); over the 20 sessions after the zone the gap was noise. In CAUTION the "where to look" line now points to beaten-down names in the DIP ZONE instead of the structural leaders; the leaders' replay result stays as context. No list, filter or condition changed.
+
 ## 8.12.0 · 2026-11-25
 - **Theme filter on the scanner, every scan.** A row under the scan pills narrows the list to a market theme:
   - **Sector:** one or more sectors.

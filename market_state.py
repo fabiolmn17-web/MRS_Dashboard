@@ -150,9 +150,12 @@ def light_detail(light: dict) -> str:
         return (f'{r12_txt}{light["why"]}: normal momentum backdrop. Leaders have matched SPY (−0.1 pp a month) and '
                 'beaten laggards by about +0.4 pp (not significant). Size by the MRS v8 card\'s swing budget.')
     # v8.3.1 (15 Nov 2026): the CAUTION text follows RS1 / R1 (the +0.6 pp industry rebound was not confirmed by R1).
-    return (f'{r12_txt}{light["why"]}: momentum-crash state. Prior-leader stocks did worst here and laggard stocks best '
-            '(RS1); at the industry-ETF level leaders and laggards did about the same after beta (R1). Read this list as '
-            'context, not a buy list. Don\'t short laggards; size by the MRS v8 card\'s swing budget.')
+    # 8.12.1 (25 Nov 2026): the stock-level result holds in the DIP ZONE only (RS1-b OOS); over the 20 sessions after it
+    #    the gap was noise (RS1-b'' failed), so the text no longer applies it to the whole dip window.
+    return (f'{r12_txt}{light["why"]}: momentum-crash state. In the DIP ZONE itself, prior-leader stocks did worst and '
+            'beaten-down stocks best (RS1, confirmed 2001–08); in the 20 sessions after it, the gap was noise. At the '
+            'industry-ETF level leaders and laggards did about the same after beta (R1). Read this list as context, not a '
+            'buy list. Don\'t short laggards; size by the MRS v8 card\'s swing budget.')
 
 
 def light_ev(light: dict) -> str:
@@ -253,10 +256,15 @@ def leaders_html(short: pd.DataFrame, light: dict, hold_df: pd.DataFrame = None,
            'Leading industries — context in the dip window, not a buy list')     # v8.3.1
     h = CSS + f'<div class="ld"><div class="hdr"><span class="ttl">{ttl}</span>'
     h += light_html(light) + ev(light_ev(light)) + '</div>'
+    # 8.12.1 (25 Nov 2026): in CAUTION the 'where to look' line follows the framework (beaten-down names in the DIP ZONE,
+    #    RS1-b) instead of pointing to the leaders; in ON it keeps the replay result only (light_detail has the rest).
+    _look = ('Where to look first for longs, not an edge: holding structural leaders as a group did not beat SPY in the '
+             '2008–2026 replay.' if light.get('on') else
+             'Where to look in the DIP ZONE: beaten-down names (bottom 40% by 6-month return), not prior leaders (tested, '
+             'RS1-b). Outside it, structural leaders have matched SPY (−0.1 pp a month) and beaten laggards by +0.4 pp a '
+             'month (not significant); holding them as a group did not beat SPY in the 2008–2026 replay.')
     h += (f'<div class="note" style="font-size:0.80rem;color:#e8dccb;margin:-2px 0 4px 0;">{_e(light_detail(light))}</div>'
-          '<div class="note" style="font-size:0.80rem;color:#e8dccb;margin:0 0 8px 0;">Where to look first for longs, '
-          'not an edge: structural leaders have matched SPY (−0.1 pp a month) and beaten laggards by +0.4 pp a month '
-          '(not significant). Holding them as a group did not beat SPY in the 2008–2026 replay.</div>')
+          f'<div class="note" style="font-size:0.80rem;color:#e8dccb;margin:0 0 8px 0;">{_e(_look)}</div>')
     if short is None or len(short) == 0:
         h += ('<div class="note" style="font-size:0.78rem;">No industry ETF passes the filter today '
               '(structural leader, or outperforming with 3M stronger than 6M).</div></div>')
@@ -494,7 +502,8 @@ def avoid_html(lag: pd.DataFrame, hold_df: pd.DataFrame = None, crash: bool = Fa
         h = CSS + ('<div class="ld" style="margin-top:14px;"><div class="hdr"><span class="ttl" style="color:#85cac5;">'
                    'Laggards: rebound window, not an avoid list today</span>' + ev('Tested') + '</div>'
                    '<div class="note" style="font-size:0.80rem;color:#e8dccb;margin:-2px 0 6px 0;">SPY is in the dip '
-                   'window. Laggard <b>stocks</b> were the better longs here (RS1: +0.62R vs +0.19R for leaders); laggard '
+                   'window. In the DIP ZONE itself, laggard <b>stocks</b> were the better longs (RS1: +0.62R vs +0.19R for '
+                   'leaders, 2009–26; confirmed 2001–08); in the 20 sessions after it, the gap was noise. Laggard '
                    '<b>industries</b> as a group did not beat leading ones after beta (R1, 15 Nov 2026), so look for '
                    'beaten-down names, not beaten-down sectors. Shorts from this list lost.</div>'
                    '<div style="opacity:0.55;">')

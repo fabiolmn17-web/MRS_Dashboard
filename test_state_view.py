@@ -77,3 +77,18 @@ def test_scanner_all_columns_sticky_872():
     assert 'min-width:1410px' in css          # all 21 columns keep the full-width table
     src = open('app.py', encoding='utf-8').read()
     assert "st.toggle('More columns'" not in src and '_cols = None   # 8.7.2' in src
+
+
+def test_leaders_wording_8121():
+    """8.12.1: the leader / laggard texts apply the RS1 result to the DIP ZONE, not the whole dip window."""
+    import market_state as ms
+    off = dict(on=False, spy_12m=0.10, risk_off=True, why='SPY in the dip window (DIP ZONE or ≤ 20 sessions after)')
+    on = dict(on=True, spy_12m=0.10, risk_off=False, why='SPY above its level 252 sessions ago and outside the dip window')
+    assert 'In the DIP ZONE itself' in ms.light_detail(off) and 'gap was noise' in ms.light_detail(off)
+    h_off, h_on = ms.leaders_html(pd.DataFrame(), off), ms.leaders_html(pd.DataFrame(), on)
+    assert 'beaten-down names (bottom 40% by 6-month return), not prior leaders' in h_off
+    assert 'not prior leaders' not in h_on and '2008–2026 replay' in h_on
+    lag = pd.DataFrame([dict(Industry='X', ETF='XX', Sector='S', Label='Structural Laggard', Score=-1.5, **{'RS 1M': -0.01},
+                             **{'RS 3M': -0.1}, Why='w')])
+    a = ms.avoid_html(lag, None, crash=True)
+    assert 'In the DIP ZONE itself' in a and 'confirmed 2001–08' in a and a.count('<div') == a.count('</div>')

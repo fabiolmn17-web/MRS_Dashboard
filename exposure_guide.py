@@ -169,10 +169,10 @@ RISK_LINE = {
     ('NEUTRAL', 'BEAR RALLY'): 'A ticket is open below a falling 200-day: the tickets trade it, but the long-term trend is down.',
     ('RISK-OFF', 'BUYABLE DIP'): 'Dip above a rising 200-day: 36% of such dips fell another 3% within 20 sessions (any day 39%); '
                                  'stock entries here were the best (+0.30R, both eras). Normal size.',
-    ('RISK-OFF', 'LINE LOST'): 'Dip below a still-rising 200-day: 44% fell another 3% within 20 sessions (any day 39%); '
+    ('RISK-OFF', 'LINE LOST'): 'Dip below a still-rising 200-day: 47% fell another 3% within 20 sessions (any day 39%); '
                                'the upside was about the same. Not a bear call.',
-    ('RISK-OFF', 'LINE NOT RISING'): 'Dip above a 200-day that is no longer rising: 44% of such mixed dips fell another 3% '
-                                     'within 20 sessions (any day 39%).',
+    ('RISK-OFF', 'LINE NOT RISING'): 'Dip above a 200-day that is no longer rising: only 4 such dips since 1963; pooled with '
+                                     'the line-lost dips, 44% fell another 3% within 20 sessions (any day 39%).',
     ('RISK-OFF', 'MIXED 200-DAY'): 'Dip with the 200-day lost or not rising: 44% fell another 3% within 20 sessions (any day 39%).',
     ('RISK-OFF', 'DOWNTREND'): 'Below a falling 200-day: in dips there, 67% fell another 3% within 20 sessions and 45% '
                                'another 10% within 60 (any day 39% / 14%).',
@@ -761,10 +761,25 @@ def rings_html(ph: pd.Series, vix, f200=None) -> str:
 # 'ALL' = every 20th (60th) session, any state. Gap F-UP vs F-DN excludes 0 at every size (year-block bootstrap), both halves.
 DF1B = {'F-UP': dict(n=168, d=(0.36, 0.17, 0.08, 0.04), d60=0.12),
         'F-MIX': dict(n=34, d=(0.44, 0.32, 0.12, 0.06), d60=0.21),
+        # 8.12.1 (25 Nov 2026): the line-lost part of F-MIX on its own (SPX below a still-rising 200-day; 30 of the 34).
+        # The other 4 (above a 200-day not rising: 1963, 1988 x2, 1994) are too few to show alone.
+        'F-LOST': dict(n=30, d=(0.47, 0.37, 0.13, 0.07), d60=0.23),
         'F-DN': dict(n=55, d=(0.67, 0.44, 0.29, 0.16), d60=0.45),
         'ALL': dict(n=804, d=(0.39, 0.20, 0.09, 0.05), d60=0.14)}
 DF1B_ROWS = (('F-UP', 'Above a rising 200-day'), ('F-MIX', 'Mixed: line lost, or not rising'), ('F-DN', 'Below a falling 200-day'),
              ('ALL', 'Any day'))
+DF1B_NAMES = dict(DF1B_ROWS, **{'F-LOST': 'Line lost: below a still-rising 200-day',
+                                'F-MIX': 'Mixed: 200-day not rising (pooled with line lost; 4 such dips)'})
+
+
+def df1b_key(f200) -> str:
+    """8.12.1: the DF1b row for today's filter state. F-MIX splits by where the close sits: below the 200-day = the
+    line-lost row (30 dips); above a 200-day that is not rising = the pooled mixed row (only 4 such dips on their own)."""
+    st_ = f200['state'] if isinstance(f200, dict) else f200
+    if st_ != 'F-MIX':
+        return st_
+    above = isinstance(f200, dict) and _fin(f200.get('close')) and _fin(f200.get('sma')) and f200['close'] > f200['sma']
+    return 'F-MIX' if above else 'F-LOST'
 
 
 def drop_odds_html(f200, in_dip: bool = True) -> str:
@@ -773,14 +788,15 @@ def drop_odds_html(f200, in_dip: bool = True) -> str:
     import ui
     if not isinstance(f200, dict):
         return ''
-    st_ = f200['state']
+    st_ = df1b_key(f200)
     up = st_ == 'F-UP'
+    mid = 'F-MIX' if st_ == 'F-MIX' else 'F-LOST'
     hi = TEAL if up else ORANGE
     cells = 'display:grid;grid-template-columns:minmax(200px,1.9fr) repeat(4,minmax(44px,0.55fr)) minmax(70px,0.8fr);gap:3px 14px;align-items:center;font-size:13.5px;max-width:1000px'
     head = ''.join(f'<span style="text-align:right;color:#6e675f">{h}</span>' for h in ('≥ 3%', '≥ 5%', '≥ 7.5%', '≥ 10%', '≥ 10% · 60d'))
     rows = f'<div style="{cells};margin-top:4px"><span style="color:#6e675f">further fall from the dip close · 20 sessions</span>{head}</div>'
-    for k, name in DF1B_ROWS:
-        v = DF1B[k]
+    for k in ('F-UP', mid, 'F-DN', 'ALL'):
+        v, name = DF1B[k], DF1B_NAMES[k]
         on = k == st_
         col = hi if on else ('#8a847c' if k != 'ALL' else '#6e675f')
         w = '700' if on else '400'
@@ -795,7 +811,7 @@ def drop_odds_html(f200, in_dip: bool = True) -> str:
     nd = f200.get('need')
     if nd is not None and nd == nd:
         if up:
-            txt += f' A close above {nd:,.2f} next session keeps the filter ON; below it, the mixed row ({DF1B["F-MIX"]["d"][0] * 100:.0f}%).'
+            txt += f' A close above {nd:,.2f} next session keeps the filter ON; below it, the line-lost row ({DF1B["F-LOST"]["d"][0] * 100:.0f}%).'
         elif nd <= f200['close'] * 1.03:
             txt += f' A close above {nd:,.2f} next session turns it ON.'
         else:

@@ -206,3 +206,17 @@ def test_weak_friday():
     assert 'WEAK FRIDAY' in eg.timing_html(dict(date=pd.Timestamp('2026-11-20'), mv=-1.71, pct=0.02, thr=-0.89, weak=True))
     h = eg.timing_html(None)
     assert 'signal close or next open' in h and 'no standing rule' in h
+
+
+def test_df1b_line_lost_row_8121():
+    """8.12.1: F-MIX below the 200-day shows the line-lost row (30 dips); above a line not rising, the pooled row."""
+    lost = dict(state='F-MIX', close=718.78, sma=733.04, slope=5.3, need=733.24)
+    flat = dict(state='F-MIX', close=735.0, sma=732.0, slope=-0.5, need=740.0)
+    assert eg.df1b_key(lost) == 'F-LOST' and eg.df1b_key(flat) == 'F-MIX' and eg.df1b_key('F-UP') == 'F-UP'
+    h = eg.drop_odds_html(lost, in_dip=True)
+    assert 'Line lost: below a still-rising 200-day ◀ today' in h and '47%' in h and 'Mixed:' not in h
+    h2 = eg.drop_odds_html(flat, in_dip=True)
+    assert 'Mixed: 200-day not rising' in h2 and '◀ today' in h2 and '44%' in h2 and 'Line lost' not in h2
+    assert '47%' in eg.risk_label(0, lost)['line'] and 'only 4 such dips' in eg.risk_label(0, flat)['line']
+    up = dict(state='F-UP', close=750.0, sma=730.0, slope=5.0, need=731.0)
+    assert 'line-lost row (47%)' in eg.drop_odds_html(up, in_dip=True)
