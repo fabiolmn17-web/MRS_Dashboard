@@ -7,6 +7,15 @@ Versions follow `docs/PROCESS.md`:
 
 The current version is in `VERSION` and in the page footer. Entries before 6.3.1 were reconstructed from the commit history and the project notes on 13 Nov 2026.
 
+## 8.12.0 · 2026-11-25
+- **Theme filter on the scanner, every scan.** A row under the scan pills narrows the list to a market theme:
+  - **Sector:** one or more sectors.
+  - **Industry group:** one or more NASDAQ industry groups (type to search). With sectors chosen, only their groups are listed.
+  - **Leading sectors:** sector RS score +1 or higher.
+  - **Industry role:** industry leader, leader in a leading industry, or any stock in a leading industry.
+- Each option shows how many stocks of the current scan sit in it. When a theme is on, a THEME line above the table says what is applied and how many stocks remain (e.g. 4 of 37). Parts combine with AND; several sectors or groups combine with OR.
+- Brings back the sector and industry filters removed on 7 Nov 2026, now with several sectors and groups at once. Descriptive: a theme narrows where to look; it is not a tested edge. Logic in `theme_filter.py`, tests in `test_theme_filter.py`.
+
 ## 8.11.0 · 2026-11-22
 - **Entry timing tile replaces the Hedge tile** (bottom row of the stance card). It reads "signal close or next open" on ordinary days. When the week's last session is a **weak Friday** (SPY's move in the bottom 10% of all daily moves, in ATR), it shows WEAK FRIDAY with the move and "long entries → Monday's open" until Monday's session starts. Evidence (WD1, tested): after a weak Friday, Monday opened 0.5 ATR or more lower 18% of the time vs 8% after other Fridays (SPY 1995–2026; S&P 500 checks since 1962), −0.11 ATR on average, both eras, same VIX mix; the median gap is still slightly up and Monday's session recovers part of it.
 - **No standing hedge rule:** the ~60-session ~5% OTM put is off the card. The account test (CA1, 22 Nov) found it cost return in 2009–26 and deepened the drawdown in both eras. A grey line on the tile says so; the fold explains it. The daily put log keeps running as data.

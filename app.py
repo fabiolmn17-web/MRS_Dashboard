@@ -45,6 +45,7 @@ import scan_view
 import heat_score
 import chart_view
 import watchlist
+import theme_filter            # 8.12.0 (25 Nov 2026): scanner theme filter (sectors, industry groups)
 
 # ── Reload local modules that changed on disk (a push updates the files, but the server keeps the old
 #    modules in memory until a reboot; app.py itself is re-read on every run) ───────────────────────
@@ -54,7 +55,7 @@ try:
 except Exception:
     _PROC_START = None
 for _m in (pipeline, rs_labels, risk_dial, sector_view, rotation_view, market_state, risk_panel, allocation, scan_view,
-           chart_view, watchlist, heat_score, exposure_guide, put_log, state_view, data_check, joint_view):
+           chart_view, watchlist, heat_score, exposure_guide, put_log, state_view, data_check, joint_view, theme_filter):
     try:
         _mt = os.path.getmtime(_m.__file__)
         _seen = getattr(_m, '_mrs_mtime', None)
@@ -1853,6 +1854,40 @@ if _scan_df is not None and len(_scan_df) > 0:
     with _c5:
         st.markdown('<div style="height:1.75rem;"></div>', unsafe_allow_html=True)
         _no_earn = st.checkbox('Hide earnings ≤ 7 days', value=False, key='ms_earn')
+    # 8.12.0 (25 Nov 2026, Fabio): theme filter, any scan. Sectors and industry groups (several at once), leading
+    #    sectors, industry role. Brings back the filters removed on 7 Nov (1bbada3). The counts are this scan's stocks.
+    _mask = {'L_all': _m_long, 'S_all': _m_short, 'L_bases': _q_lb, 'L_pb': _q_lp, 'S_bases': _q_sb, 'S_rally': _q_sr,
+             'L_bo': _q_lbo, 'S_bd': _q_sbd,
+             'L_dip': _q_ld, 'S_dip': _q_sd}
+    _v_pre = _sd[_mask[_scan]] if _scan in _mask else _sd
+    _th_sec_n = theme_filter.sector_col(_v_pre, YF_TO_SECTOR).value_counts().to_dict()
+    _th_ind_n = theme_filter.group_col(_v_pre).value_counts().to_dict()
+    _t0, _t1, _t2, _t3 = st.columns([1.6, 2.4, 0.9, 1.5])
+    with _t0:
+        _th_sec = st.multiselect('Sector', theme_filter.sector_options(_sd, YF_TO_SECTOR), key='ms_th_sec',
+                                 format_func=lambda s: f'{s}  ·  {_th_sec_n.get(s, 0)}', placeholder='All sectors',
+                                 help='One or more sectors. The number is how many stocks of this scan sit in each.')
+    with _t1:
+        _th_ind = st.multiselect('Industry group',
+                                 theme_filter.industry_options(_sd, YF_TO_SECTOR, _th_sec,
+                                                               st.session_state.get('ms_th_ind') or []),
+                                 key='ms_th_ind', format_func=lambda g: f'{g}  ·  {_th_ind_n.get(g, 0)}',
+                                 placeholder='All industry groups (type to search)',
+                                 help='NASDAQ industry group of the scanned stocks (groups under 5 names merged). '
+                                      'With sectors chosen, only their groups are listed. Several groups = one theme '
+                                      '(e.g. Semiconductors + Computer Software). The number is how many stocks of '
+                                      'this scan sit in each.')
+    with _t2:
+        st.markdown('<div style="height:1.75rem;"></div>', unsafe_allow_html=True)
+        _th_lead = st.checkbox('Leading sectors', value=False, key='ms_th_lead',
+                               help='Sector RS score +1 or higher (held label).')
+    with _t3:
+        _th_role = st.selectbox('Industry role', theme_filter.ROLE_OPTS, index=0, key='ms_th_role',
+                                help='Leader: top 20% of its group by RS rating (at least the top 3), held RS score '
+                                     '≥ +1.0, above the 200-day and within 25% of the 52-week high. Leading industry: '
+                                     'the group without the stock is held +1.5 with RS 1M not negative, or +0.5 with 3M '
+                                     'stronger than 6M (same rule as the Leaders-to-buy list). Descriptive, untested. '
+                                     'Older scans without industry groups: top-10 holding of a leader industry ETF.')
     if _scan in ('L_bases', 'S_bases', 'L_bo', 'S_bd'):   # bases v3 (8 Nov 2026): base quality filters
         _b0, _b1, _b2, _b3 = st.columns([1.2, 1.0, 1.3, 1.5])
         with _b0:
@@ -1917,9 +1952,6 @@ if _scan_df is not None and len(_scan_df) > 0:
                         f'<span style="color:#6e675f;">Survivorship-free S1 / S2 / S3; see the Today card.'
                         f'</span></div>', unsafe_allow_html=True)
 
-    _mask = {'L_all': _m_long, 'S_all': _m_short, 'L_bases': _q_lb, 'L_pb': _q_lp, 'S_bases': _q_sb, 'S_rally': _q_sr,
-             'L_bo': _q_lbo, 'S_bd': _q_sbd,
-             'L_dip': _q_ld, 'S_dip': _q_sd}
     if _scan in _mask:
         _v = _sd[_mask[_scan]]
     elif _scan == 'L_hot':
@@ -1927,6 +1959,15 @@ if _scan_df is not None and len(_scan_df) > 0:
     else:
         _v = _sd.loc[_cold_idx]
     _v = _v.assign(_side=_SCANS[_scan][2])            # squeeze / earnings / 200-day slope: already in the masks
+    if theme_filter.is_active(_th_sec, _th_ind, _th_lead, _th_role):      # 8.12.0: theme filter
+        _n_pre = len(_v)
+        _v = theme_filter.apply(_v, _th_sec, _th_ind, _th_lead, _th_role, _sec_score, YF_TO_SECTOR, _leader_hold)
+        st.markdown(f'<div style="font-size:0.72rem;color:#a89f95;margin:-4px 0 8px 0;">'
+                    f'<b style="color:#e3b48e;">THEME</b> · '
+                    f'{_html_mod.escape(theme_filter.summary(_th_sec, _th_ind, _th_lead, _th_role))}: '
+                    f'<b style="color:#f3ece2;">{len(_v)}</b> of {_n_pre} stocks in this scan. '
+                    f'<span style="color:#6e675f;">A theme narrows where to look; it is not a tested edge. '
+                    f'Descriptive.</span></div>', unsafe_allow_html=True)
     _hv = pd.to_numeric(_v['heat_score'], errors='coerce') if 'heat_score' in _v.columns else pd.Series(0, index=_v.index)
     if _scan in ('L_dip', 'S_dip'):
         _lg = _scan == 'L_dip'
