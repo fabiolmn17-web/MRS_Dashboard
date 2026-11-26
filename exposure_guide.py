@@ -990,11 +990,16 @@ def ribbon_svg(spy_ohlcv: pd.DataFrame, ph: pd.Series, n: int = 120, W: int = 60
             last_m = d.month
             if k > 2:
                 g.append(f'<text x="{X(k):.1f}" y="{H - 5}" fill="#6e675f" font-size="10" font-family="IBM Plex Mono, monospace">{d:%b}</text>')
+    # 8.13.0 (26 Nov 2026, Fabio): TradingView hollow candles: colour by the prior close, hollow body when close >= open
+    pcl = spy_ohlcv.rename(columns=str.title)['Close'].astype(float).shift().iloc[-n:].values
     for k in range(len(s)):
-        up = c[k] >= o[k]; col = TEAL if up else ORANGE
-        g.append(f'<line x1="{X(k):.1f}" x2="{X(k):.1f}" y1="{Y(h[k]):.1f}" y2="{Y(l[k]):.1f}" stroke="{col}" stroke-width="1"/>')
+        prv = pcl[k] if np.isfinite(pcl[k]) else o[k]
+        col = TEAL if c[k] >= prv else ORANGE
         y0, y1 = sorted((Y(o[k]), Y(c[k])))
-        g.append(f'<rect x="{X(k) - bw / 2:.1f}" y="{y0:.1f}" width="{bw:.1f}" height="{max(y1 - y0, 0.8):.1f}" fill="{col}"/>')
+        g.append(f'<line x1="{X(k):.1f}" x2="{X(k):.1f}" y1="{Y(h[k]):.1f}" y2="{y0:.1f}" stroke="{col}" stroke-width="1"/>'
+                 f'<line x1="{X(k):.1f}" x2="{X(k):.1f}" y1="{y1:.1f}" y2="{Y(l[k]):.1f}" stroke="{col}" stroke-width="1"/>')
+        body = (f'fill="none" stroke="{col}" stroke-width="0.9"' if c[k] >= o[k] else f'fill="{col}"')
+        g.append(f'<rect x="{X(k) - bw / 2:.1f}" y="{y0:.1f}" width="{bw:.1f}" height="{max(y1 - y0, 0.8):.1f}" {body}/>')
     bucket, nn = clock(ph)
     lab = f'today · {bucket}{"" if not nn else " " + str(nn)}'
     xl = X(len(s) - 1)

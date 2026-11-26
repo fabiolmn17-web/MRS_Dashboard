@@ -24,6 +24,17 @@ import pandas as pd
 import plotly.graph_objects as go
 
 UP, DOWN = '#85cac5', '#f4a062'
+HOLLOW = 'rgba(0,0,0,0)'
+
+
+def hollow_classes(o, c, prev) -> dict:
+    """8.13.0 (26 Nov 2026): TradingView hollow candles. Colour = close vs the prior close (teal up, orange down);
+    body = hollow when the close is at or above the open, filled when below. Returns four boolean masks."""
+    o, c, prev = (np.asarray(a, dtype=float) for a in (o, c, prev))
+    prev = np.where(np.isfinite(prev), prev, o)
+    up = c >= prev
+    hol = c >= o
+    return {'hollow_up': hol & up, 'filled_up': ~hol & up, 'hollow_down': hol & ~up, 'filled_down': ~hol & ~up}
 SMA50_COL, SMA200_COL = '#e8dccb', '#b9805a'
 HI52_COL, HI20_COL = '#e3b48e', '#9b958f'
 BASE_COL, PIVOT_COL = '#85cac5', '#f3ece2'
@@ -285,10 +296,16 @@ def figure(h: pd.DataFrame, ticker: str, height: int = 520, base: dict = None, s
         ph = ph_all.reindex(v.index).fillna(3).astype(int).to_numpy()
     else:
         ph = np.full(len(v), 3)
-    fig.add_trace(go.Candlestick(
-        x=x, open=v['Open'], high=v['High'], low=v['Low'], close=v['Close'], name=ticker, showlegend=False,
-        increasing=dict(line=dict(color=UP, width=1), fillcolor=UP),
-        decreasing=dict(line=dict(color=DOWN, width=1), fillcolor=DOWN)))
+    # 8.13.0 (26 Nov 2026, Fabio): TradingView hollow candles, one trace per class (colour by the prior close,
+    #    hollow body when close >= open); show() already combines several candle traces bar by bar
+    for k_, m_ in hollow_classes(v['Open'], v['Close'], pc.iloc[-BARS:]).items():
+        if not m_.any():
+            continue
+        col_ = UP if k_.endswith('up') else DOWN
+        sty_ = dict(line=dict(color=col_, width=1), fillcolor=HOLLOW if k_.startswith('hollow') else col_)
+        fig.add_trace(go.Candlestick(
+            x=x, open=v['Open'].where(m_), high=v['High'].where(m_), low=v['Low'].where(m_),
+            close=v['Close'].where(m_), name=ticker, showlegend=False, increasing=sty_, decreasing=sty_))
     fig.add_trace(go.Scatter(x=xf, y=[float(c.iloc[-1])] * FUTURE, mode='markers', marker=dict(opacity=0),
                              hoverinfo='skip', showlegend=False))
 

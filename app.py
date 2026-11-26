@@ -46,6 +46,7 @@ import heat_score
 import chart_view
 import watchlist
 import theme_filter            # 8.12.0 (25 Nov 2026): scanner theme filter (sectors, industry groups)
+import tv_export               # 8.13.0 (26 Nov 2026): TradingView watchlist export (scanner list, watchlist)
 
 # ── Reload local modules that changed on disk (a push updates the files, but the server keeps the old
 #    modules in memory until a reboot; app.py itself is re-read on every run) ───────────────────────
@@ -55,7 +56,7 @@ try:
 except Exception:
     _PROC_START = None
 for _m in (pipeline, rs_labels, risk_dial, sector_view, rotation_view, market_state, risk_panel, allocation, scan_view,
-           chart_view, watchlist, heat_score, exposure_guide, put_log, state_view, data_check, joint_view, theme_filter):
+           chart_view, watchlist, heat_score, exposure_guide, put_log, state_view, data_check, joint_view, theme_filter, tv_export):
     try:
         _mt = os.path.getmtime(_m.__file__)
         _seen = getattr(_m, '_mrs_mtime', None)
@@ -1202,7 +1203,7 @@ def _wl_inner():
             st.session_state['wl_pick'] = pick
     new = d[~d['remove'].fillna(False).astype(bool)].drop(columns=['remove'])
     changed = not watchlist._clean(new).equals(watchlist._clean(saved))
-    b1, b2, b3 = st.columns([1, 1, 4])
+    b1, b2, b4, b3 = st.columns([1, 1, 1.3, 3.7])      # 8.13.0: b4 = TradingView export
     with b1:
         if st.button('Save changes', type='primary', disabled=not changed, key='wl_save', use_container_width=True):
             if _wl_commit(new, 'watchlist: edit'):
@@ -1214,6 +1215,12 @@ def _wl_inner():
             st.session_state.pop('wl_draft', None)
             st.session_state['wl_ver'] = st.session_state.get('wl_ver', 0) + 1
             st.rerun()
+    with b4:
+        _wl_txt = tv_export.tv_text(new['ticker'], f'MRS watchlist {date.today():%d %b}')
+        st.download_button('Export to TradingView', _wl_txt or ' ', disabled=not _wl_txt, use_container_width=True,
+                           file_name=tv_export.file_name('watchlist', date.today().isoformat()), mime='text/plain',
+                           key='wl_tv', help='TradingView: watchlist menu → Import list. The names as shown (ticked '
+                                             'Remove left out), in this order.')
     with b3:
         st.markdown('<div style="font-size:0.70rem;color:#9b958f;padding-top:8px;">Click a row, or use the ↑ / ↓ keys, to chart a name. Click into Trigger, Stop or Note to edit (the '
                     'other columns update as you type; Enter or Tab to confirm), tick Remove to drop a name, then Save. ATR = 14-day average '
@@ -2011,6 +2018,16 @@ if _scan_df is not None and len(_scan_df) > 0:
         _scan_table_and_chart(scan_view.build_html(_shown, _sec_label, _sec_score, _leader_hold, YF_TO_SECTOR,
                                                    clickable=True, cols=_cols),
                               list(_shown['ticker'].astype(str)), min(760, 64 + 32 * len(_shown)))
+        # 8.13.0 (26 Nov 2026, Fabio): the list as shown (scan + theme filter, table order) as a TradingView watchlist
+        _tv_lbl = _SCANS[_scan][0] + (' · ' + theme_filter.summary(_th_sec, _th_ind, _th_lead, _th_role)
+                                      if theme_filter.is_active(_th_sec, _th_ind, _th_lead, _th_role) else '')
+        _tv_txt = tv_export.tv_text(_shown['ticker'], f'{_tv_lbl} {date.today():%d %b}')
+        if _tv_txt:
+            st.download_button(f'Export to TradingView · {_SCANS[_scan][0]} ({len(_shown)} names, .txt)', _tv_txt,
+                               file_name=tv_export.file_name(_tv_lbl, date.today().isoformat()), mime='text/plain',
+                               key='scan_tv', help='TradingView: watchlist menu → Import list. The list as shown above, in '
+                                                   'the table\'s order, with the theme filter applied; one section named '
+                                                   'after the scan and the date.')
         with st.expander('How to read the columns'):   # v6.4: folded
             st.markdown(
                 '<div style="font-size:0.70rem;color:#9b958f;line-height:1.55;">'
