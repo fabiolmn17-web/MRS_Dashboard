@@ -7,6 +7,12 @@ Versions follow `docs/PROCESS.md`:
 
 The current version is in `VERSION` and in the page footer. Entries before 6.3.1 were reconstructed from the commit history and the project notes on 13 Nov 2026.
 
+## 8.13.1 · 2026-11-26
+- **Stock chart, TradingView look:**
+  - **Crosshair:** thin solid lines, and the price at the cursor shown on the price axis as you move (the date stays on the time axis).
+  - **Price line:** a dotted line at the last close across the chart, with the price in a box on the price axis, teal or orange by the last candle.
+  - **ATR zones:** drawn as a short strip in the empty space right of the last candle (+2 to +5 ATR above, −1 to −5 ATR below the SMA 50, darker further out), with the labels beside it, instead of shading across the whole chart. Same levels as before.
+
 ## 8.13.0 · 2026-11-26
 - **Hollow candles** (TradingView style) on every chart: the stock chart panel (scanner, lookup, watchlist) and the SPY chart on the stance card. Colour = close against the prior close (teal up, orange down); the body is hollow when the close is at or above the open and filled when below. No levels, lines or markers changed.
 - **Export to TradingView.** Under the scanner table, a button downloads the list as shown (the selected scan with the theme filter applied, in the table's order) as a TradingView watchlist file: one section named after the scan and the date. The watchlist has the same button next to Save / Discard (names ticked Remove are left out). In TradingView: watchlist menu → Import list. Class shares are written the TradingView way (BRK-B → BRK.B). Logic in `tv_export.py`, tests in `test_tv_export_8130.py`.

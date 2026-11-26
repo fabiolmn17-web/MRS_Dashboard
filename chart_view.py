@@ -178,6 +178,7 @@ ATR_UP_COL, ATR_DN_COL = '#b9805a', '#649995'
 ATR_UP, ATR_DN, ATR_N = (2, 3, 4, 5), (2, 3, 4, 5), 20  # SMA 50 + / - k ATR(14), drawn over the last 20 sessions
 MK_COL = dict(dd='#76ff03', dw='#9e9e9e', ch='#ff5252', os='#ffeb3b')
 FUTURE = 9                                              # empty sessions at the right edge, for the ATR labels
+ZONE_W = 3                                              # 8.13.1: width of the ATR strip, in empty sessions
 ZN_DN, ZN_UP = '100,153,149', '185,128,90'                # v8.3.0 zone fill colours (rgb of #649995 / #b9805a)
 H21_N = 60                                              # v8.3.0: 21D high line over the last 60 sessions
 
@@ -274,21 +275,22 @@ def figure(h: pd.DataFrame, ticker: str, height: int = 520, base: dict = None, s
     lv = levels(h)
     fig = go.Figure()
 
-    # v8.3.0 (15 Nov 2026): ATR(14) zones from the SMA 50 as faint shading under the candles, as in the TradingView
-    # Ext·RS v8.0 indicator: below -1/-2, -2/-3, -3/-5 (teal, darker further down), above +2/+3, +3/+5 (copper). One legend
-    # entry toggles them. Drawn first so the candles sit on top.
-    first_z = True
-    for lo_k, hi_k, col, a in ((-2, -1, ZN_DN, 0.08), (-3, -2, ZN_DN, 0.11), (-5, -3, ZN_DN, 0.14),
-                               (2, 3, ZN_UP, 0.08), (3, 5, ZN_UP, 0.11)):
-        ylo = (s50 + lo_k * a14).iloc[-BARS:]; yhi = (s50 + hi_k * a14).iloc[-BARS:]
-        if not np.isfinite(ylo.iloc[-1]) or not np.isfinite(yhi.iloc[-1]):
-            continue
-        fig.add_trace(go.Scatter(x=x, y=ylo, mode='lines', line=dict(width=0), hoverinfo='skip', showlegend=False,
-                                 legendgroup='atrz'))
-        fig.add_trace(go.Scatter(x=x, y=yhi, mode='lines', line=dict(width=0), fill='tonexty',
-                                 fillcolor=f'rgba({col},{a})', hoverinfo='skip', name='ATR zones (SMA 50)', legendgroup='atrz',
-                                 showlegend=first_z))
-        first_z = False
+    # 8.13.1 (26 Nov 2026, Fabio): ATR(14) zones from the SMA 50 as a short strip in the empty sessions right of the last
+    #    candle (as in the TradingView Ext·RS indicator): +2..+5 above, -1..-5 below, darker further out; levels of the
+    #    last session. Labels sit right of the strip (below). Shapes, drawn under everything.
+    _zs = []
+    for lo_k, hi_k, a in ((2, 3, 0.14), (3, 5, 0.24), (-2, -1, 0.14), (-3, -2, 0.19), (-5, -3, 0.26)):
+        ylo = float((s50 + lo_k * a14).iloc[-1]); yhi = float((s50 + hi_k * a14).iloc[-1])
+        if np.isfinite(ylo) and np.isfinite(yhi):
+            _zs.append(dict(type='rect', xref='x', yref='y', x0=xf[0], x1=xf[ZONE_W], y0=ylo, y1=yhi, layer='below',
+                            line=dict(width=0), fillcolor=f'rgba(168,159,149,{a})'))
+    for k_out in ((2, 5), (-1, -5)):                   # thin outline around the upper and lower block
+        ya_ = float((s50 + k_out[0] * a14).iloc[-1]); yb_ = float((s50 + k_out[1] * a14).iloc[-1])
+        if np.isfinite(ya_) and np.isfinite(yb_):
+            _zs.append(dict(type='rect', xref='x', yref='y', x0=xf[0], x1=xf[ZONE_W], y0=ya_, y1=yb_, layer='below',
+                            line=dict(width=0.6, color='rgba(168,159,149,0.35)'), fillcolor='rgba(0,0,0,0)'))
+    for z_ in _zs:
+        fig.add_shape(**z_)
 
     # candles: teal up / orange down (v8, 15 Nov 2026: the SPY phase colours are gone; the phase lives on the MRS card)
     ph_all = spy_phase(spy)                     # still used for the breakout-in-dip-zone marker
@@ -332,10 +334,10 @@ def figure(h: pd.DataFrame, ticker: str, height: int = 520, base: dict = None, s
     for k in (-1, -2, -3, -5, 2, 3, 5):
         yk = float((s50 + k * a14).iloc[-1])
         if np.isfinite(yk):
-            lab_x.append(xf[1]); lab_y.append(yk); lab_t.append(f'{"+" if k > 0 else "−"}{abs(k)} ATR')
+            lab_x.append(xf[ZONE_W]); lab_y.append(yk); lab_t.append(f'{"+" if k > 0 else "−"}{abs(k)} ATR')
             lab_c.append(ATR_UP_COL if k > 0 else ATR_DN_COL)
     if np.isfinite(lv['hi21']):
-        lab_x.append(xf[1]); lab_y.append(float(lv['hi21'])); lab_t.append(f'21D {lv["hi21"]:,.2f}'); lab_c.append(HI20_COL)
+        lab_x.append(xf[ZONE_W]); lab_y.append(float(lv['hi21'])); lab_t.append(f'21D {lv["hi21"]:,.2f}'); lab_c.append(HI20_COL)
     if lab_x:
         fig.add_trace(go.Scatter(x=lab_x, y=lab_y, mode='text', text=lab_t, textposition='middle right',
                                  textfont=dict(size=9, color=lab_c), legendgroup='atrz', showlegend=False,
@@ -385,6 +387,15 @@ def figure(h: pd.DataFrame, ticker: str, height: int = 520, base: dict = None, s
         fig.add_trace(go.Scatter(x=x, y=va50, yaxis='y2', name='Vol 50d avg', mode='lines', showlegend=False,
                                  line=dict(color='#e8dccb', width=1, dash='dot'),
                                  hovertemplate='50-day avg %{y:,.0f}<extra></extra>'))
+    # 8.13.1 (26 Nov 2026, Fabio): price line at the last close across the chart and the price on the axis, coloured by
+    #    the last candle (vs the prior close), as in TradingView
+    _lc, _pc = float(c.iloc[-1]), float(pc.iloc[-1]) if np.isfinite(pc.iloc[-1]) else float(h['Open'].iloc[-1])
+    _col = UP if _lc >= _pc else DOWN
+    fig.add_shape(type='line', xref='paper', yref='y', x0=0, x1=1, y0=_lc, y1=_lc, layer='below',
+                  line=dict(color=_col, width=0.8, dash='dot'))
+    fig.add_annotation(xref='paper', yref='y', x=1, y=_lc, text=f'{_lc:,.2f}', showarrow=False, xanchor='left',
+                       yanchor='middle', xshift=2, bgcolor=_col, borderpad=2, font=dict(size=10, color='#0a0a0a'))
+
     # month ticks on the category axis: first session of each month
     first = ~v.index.to_period('M').duplicated()
     xs = pd.Index(x)
@@ -400,8 +411,9 @@ def figure(h: pd.DataFrame, ticker: str, height: int = 520, base: dict = None, s
         legend=dict(orientation='h', x=0, y=1.0, yanchor='bottom', font=dict(size=10), bgcolor='rgba(0,0,0,0)'),
         hovermode='x', spikedistance=-1, dragmode='zoom')
     # crosshair (4 Nov 2026): dotted vertical and horizontal lines that follow the cursor, date label on the x axis
-    _spk = dict(showspikes=True, spikemode='across', spikesnap='cursor', spikethickness=0.5, spikedash='dot',
-                spikecolor='rgba(168,159,149,0.55)')
+    # 8.13.1: Plotly draws its spike lines with a 2 px contrasting outline, so they can't be made thin. The crosshair
+    #    (hairlines + the price on the price axis) is drawn by CHART_JS; Plotly keeps only the date label (hovermode x).
+    _spk = dict(showspikes=False)
     fig.update_xaxes(**_spk)
     fig.update_yaxes(**_spk)
     if has_vol:
@@ -455,7 +467,41 @@ CHART_JS = """<script>
     g.__applying = true;
     P.Plotly.react(g, cur.fig.data, lay).then(function () { g.__applying = false; }, function () { g.__applying = false; });
   }
+  function cross(g) {                    // 8.13.1: TradingView crosshair: hairlines + the price on the price axis
+    if (g.__mrsCross) return;
+    g.__mrsCross = true;
+    const mk = function (css) { const d = D.createElement('div'); d.style.cssText = 'position:absolute;display:none;' +
+      'pointer-events:none;z-index:30;' + css; return d; };
+    const V = mk('width:0;border-left:1px solid rgba(200,192,183,0.45);');
+    const H = mk('height:0;border-top:1px solid rgba(200,192,183,0.45);');
+    const L = mk('font:11px IBM Plex Mono,monospace;background:#3a3631;color:#f3ece2;padding:1px 5px;border-radius:2px;' +
+                 'white-space:nowrap;');
+    const hide = function () { V.style.display = H.style.display = L.style.display = 'none'; };
+    g.addEventListener('mousemove', function (e) {
+      const fl = g._fullLayout;
+      if (!fl || !fl.yaxis || !fl.xaxis || !fl._size) return;
+      if (L.parentNode !== g) {
+        if (P.getComputedStyle(g).position === 'static') g.style.position = 'relative';
+        g.appendChild(V); g.appendChild(H); g.appendChild(L);
+      }
+      const ya = fl.yaxis, xa = fl.xaxis, sz = fl._size, r = g.getBoundingClientRect();
+      const px = e.clientX - r.left, py = e.clientY - r.top;
+      if (px < xa._offset || px > xa._offset + xa._length || py < sz.t || py > sz.t + sz.h) { hide(); return; }
+      V.style.left = Math.round(px) + 'px'; V.style.top = sz.t + 'px'; V.style.height = sz.h + 'px'; V.style.display = 'block';
+      if (py < ya._offset || py > ya._offset + ya._length) { H.style.display = L.style.display = 'none'; return; }
+      H.style.left = xa._offset + 'px'; H.style.width = xa._length + 'px'; H.style.top = Math.round(py) + 'px';
+      H.style.display = 'block';
+      const v = ya.p2l(py - ya._offset);
+      if (!isFinite(v)) { L.style.display = 'none'; return; }
+      L.textContent = v.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+      L.style.left = (xa._offset + xa._length + 2) + 'px';
+      L.style.top = (py - 8) + 'px';
+      L.style.display = 'block';
+    });
+    g.addEventListener('mouseleave', hide);
+  }
   function hook(g) {
+    cross(g);
     if (!g.__mrsHook) {
       g.__mrsHook = true;
       g.on('plotly_afterplot', function () { setTimeout(function () { apply(g); }, 0); });
