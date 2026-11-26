@@ -78,3 +78,17 @@ def test_candle_classes_no_nan_and_show_arrays_8132():
     cats = list(fig.layout.xaxis.categoryarray)
     assert len(cats) == cv.BARS + cv.FUTURE and cats[cv.BARS - 1] == idx[-1].strftime('%Y-%m-%d')
     assert 'mrs_hlines' in cv.CHART_JS and 'altKey' in cv.CHART_JS and 'mrs_tlines' in cv.CHART_JS and 'shiftKey' in cv.CHART_JS
+
+
+def test_legend_single_row_8141():
+    import pandas as pd, numpy as np, plotly.io as pio, plotly.graph_objects as go
+    import chart_view as cv
+    if 'atn' not in pio.templates:
+        pio.templates['atn'] = go.layout.Template()
+    idx = pd.bdate_range('2025-01-01', periods=320)
+    c = pd.Series(np.linspace(100, 130, 320), index=idx)
+    h = pd.DataFrame({'Open': c, 'High': c + 1, 'Low': c - 1, 'Close': c + 0.5, 'Volume': 1e6})
+    fig = cv.figure(h, 'TEST', height=520)
+    assert not any(getattr(t, 'legendgroup', None) for t in fig.data)
+    assert fig.layout.legend.traceorder == 'normal' and fig.layout.legend.orientation == 'h'
+

@@ -7,6 +7,9 @@ Versions follow `docs/PROCESS.md`:
 
 The current version is in `VERSION` and in the page footer. Entries before 6.3.1 were reconstructed from the commit history and the project notes on 13 Nov 2026.
 
+## 8.14.1 · 2026-11-26
+- **Chart legend on one row again:** since 8.13.1 the moving-average legend above each chart stacked one entry per line and took a large block of the chart panel (the ATR-strip labels carried a legend group, which makes a horizontal legend put every entry on its own row). The group is removed and the legend order fixed, and the legend names are shorter (52W hi, 21D hi, Deep dip, Dip-zone breakout, 50d reclaim, RSI < 35; the full explanation stays in the hover), so the legend takes two rows in the scanner panel instead of eight.
+
 ## 8.14.0 · 2026-11-26
 - **Trend lines:** Shift + click on the chart sets the start of a trend line, a second Shift + click sets the end; the line runs only between the two points (no extension). A dashed preview follows the mouse after the first click; Esc cancels. The end point can sit in the empty space to the right of the last candle. Click the × at the end of a line to remove it. Trend lines are kept per ticker in this browser and follow zoom and pan, like the horizontal lines. The hint under each chart now lists both drawing tools.
 

@@ -323,11 +323,11 @@ def figure(h: pd.DataFrame, ticker: str, height: int = 520, base: dict = None, s
     fig.add_trace(go.Scatter(x=x, y=s250.iloc[-BARS:], name='SMA 250', mode='lines',
                              line=dict(color=S200_COL, width=1.2, dash='dash'), hoverinfo='skip'))
     if np.isfinite(lv['hi52']):
-        fig.add_trace(go.Scatter(x=[x[0], x[-1]], y=[lv['hi52']] * 2, name=f'52W high {lv["hi52"]:,.2f}', mode='lines',
+        fig.add_trace(go.Scatter(x=[x[0], x[-1]], y=[lv['hi52']] * 2, name=f'52W hi {lv["hi52"]:,.2f}', mode='lines',
                                  visible='legendonly', line=dict(color=HI52_COL, width=1, dash='dash'), hoverinfo='skip'))
     if np.isfinite(lv['hi21']):     # v8.3.0: visible, dotted, last H21_N sessions (the breakout level), as in TradingView
         xh = x[-H21_N:]
-        fig.add_trace(go.Scatter(x=xh, y=[lv['hi21']] * len(xh), name=f'21D high {lv["hi21"]:,.2f}', mode='lines',
+        fig.add_trace(go.Scatter(x=xh, y=[lv['hi21']] * len(xh), name=f'21D hi {lv["hi21"]:,.2f}', mode='lines',
                                  line=dict(color=HI20_COL, width=1, dash='dot'), hoverinfo='skip'))
 
     # v8.3.0: zone labels at the right edge (the dotted ATR lines are gone) and the 21D high label
@@ -341,7 +341,7 @@ def figure(h: pd.DataFrame, ticker: str, height: int = 520, base: dict = None, s
         lab_x.append(xf[ZONE_W]); lab_y.append(float(lv['hi21'])); lab_t.append(f'21D {lv["hi21"]:,.2f}'); lab_c.append(HI20_COL)
     if lab_x:
         fig.add_trace(go.Scatter(x=lab_x, y=lab_y, mode='text', text=lab_t, textposition='middle right',
-                                 textfont=dict(size=9, color=lab_c), legendgroup='atrz', showlegend=False,
+                                 textfont=dict(size=9, color=lab_c), showlegend=False,     # 8.14.1: no legend group (it stacked the legend)
                                  hoverinfo='skip', cliponaxis=False))
 
     # markers (same rules as the scanner and the TradingView indicator)
@@ -355,14 +355,15 @@ def figure(h: pd.DataFrame, ticker: str, height: int = 520, base: dict = None, s
     chase = bo_new & np.isin(ph_full, (0, 1)) & (str(ticker).upper() not in _etfs())
     av = a14.to_numpy(float)
     vis = np.arange(len(h)) >= off
+    # 8.14.1: short legend names (full text in the hover) so the legend stays on one or two rows
     for key, mask, sym, ypos, name, tip in (
-            ('dd', dd & ~wide & vis, 'triangle-up', ll - 0.6 * av, 'Deep dip trigger',
+            ('dd', dd & ~wide & vis, 'triangle-up', ll - 0.6 * av, 'Deep dip',
              'Deep dip trigger (undercut / reclaim of the 200 / 250 SMA after 20 closes above)'),
-            ('dw', dd & wide & vis, 'triangle-up', ll - 0.6 * av, 'Deep dip, stop wider than 10%',
+            ('dw', dd & wide & vis, 'triangle-up', ll - 0.6 * av, 'Deep dip, stop > 10%',
              'Deep dip, but the 2 ATR(14) stop is more than 10% away: about 0R in S1'),
-            ('ch', chase & vis, 'circle', hh + 0.6 * av, 'Breakout in dip zone / recovery',
+            ('ch', chase & vis, 'circle', hh + 0.6 * av, 'Dip-zone breakout',
              'First close above the 21-day high while SPY is in DIP ZONE / RECOVERY: lagged a random entry (S2)'),
-            ('os', os50 & vis, 'x', ll - 1.3 * av, '50-day reclaim after RSI < 35',
+            ('os', os50 & vis, 'x', ll - 1.3 * av, '50d reclaim, RSI < 35',
              '50-day reclaim after RSI(14) < 35 in the 10 sessions before: −0.26R (R1, Provisional avoid)')):
         idx = np.flatnonzero(mask)
         if not len(idx):
@@ -410,7 +411,8 @@ def figure(h: pd.DataFrame, ticker: str, height: int = 520, base: dict = None, s
                    tickmode='array', tickvals=tv, ticktext=tt, tickfont=dict(size=10)),
         yaxis=dict(side='right', tickfont=dict(size=10), gridcolor='#1f1d1b', domain=[0.22, 1.0] if has_vol else [0, 1]),
         bargap=0.15,
-        legend=dict(orientation='h', x=0, y=1.0, yanchor='bottom', font=dict(size=10), bgcolor='rgba(0,0,0,0)'),
+        legend=dict(orientation='h', x=0, y=1.0, yanchor='bottom', font=dict(size=10), bgcolor='rgba(0,0,0,0)',
+                    traceorder='normal'),   # 8.14.1: one row; a legend group puts every entry on its own row
         hovermode='x', spikedistance=-1, dragmode='zoom')
     # crosshair (4 Nov 2026): dotted vertical and horizontal lines that follow the cursor, date label on the x axis
     # 8.13.1: Plotly draws its spike lines with a 2 px contrasting outline, so they can't be made thin. The crosshair
