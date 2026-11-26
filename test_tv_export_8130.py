@@ -60,3 +60,21 @@ def test_chart_price_line_and_strip_8131():
     assert len(strip) >= 5
     assert not any(getattr(t, 'fill', None) == 'tonexty' for t in fig.data)        # no full-width shading any more
     assert fig.layout.xaxis.showspikes is False and 'p2l' in cv.CHART_JS and 'border-left:1px' in cv.CHART_JS
+
+
+def test_candle_classes_no_nan_and_show_arrays_8132():
+    import plotly.io as pio, plotly.graph_objects as go
+    if 'atn' not in pio.templates:
+        pio.templates['atn'] = go.layout.Template()
+    idx = pd.bdate_range('2025-01-01', periods=300)
+    rng = np.random.default_rng(3)
+    cl = 100 + np.cumsum(rng.normal(0, 1, 300)); op = cl + rng.normal(0, 0.8, 300)
+    h = pd.DataFrame({'Open': op, 'High': np.maximum(op, cl) + 0.5, 'Low': np.minimum(op, cl) - 0.5, 'Close': cl,
+                      'Volume': 1e6}, index=idx)
+    fig = cv.figure(h, 'TEST', height=400, spy=None)
+    cs = [t for t in fig.data if t.type == 'candlestick']
+    assert sum(len(t.x) for t in cs) == cv.BARS                        # every bar once, no NaN padding
+    assert all(np.isfinite(np.array(t.open, float)).all() for t in cs)
+    cats = list(fig.layout.xaxis.categoryarray)
+    assert len(cats) == cv.BARS + cv.FUTURE and cats[cv.BARS - 1] == idx[-1].strftime('%Y-%m-%d')
+    assert 'mrs_hlines' in cv.CHART_JS and 'altKey' in cv.CHART_JS

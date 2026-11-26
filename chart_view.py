@@ -305,9 +305,10 @@ def figure(h: pd.DataFrame, ticker: str, height: int = 520, base: dict = None, s
             continue
         col_ = UP if k_.endswith('up') else DOWN
         sty_ = dict(line=dict(color=col_, width=1), fillcolor=HOLLOW if k_.startswith('hollow') else col_)
+        xs_ = [x[i] for i in np.flatnonzero(m_)]      # 8.13.2: only this class's bars (NaN bars drew broken paths)
         fig.add_trace(go.Candlestick(
-            x=x, open=v['Open'].where(m_), high=v['High'].where(m_), low=v['Low'].where(m_),
-            close=v['Close'].where(m_), name=ticker, showlegend=False, increasing=sty_, decreasing=sty_))
+            x=xs_, open=v['Open'][m_], high=v['High'][m_], low=v['Low'][m_],
+            close=v['Close'][m_], name=ticker, showlegend=False, increasing=sty_, decreasing=sty_))
     fig.add_trace(go.Scatter(x=xf, y=[float(c.iloc[-1])] * FUTURE, mode='markers', marker=dict(opacity=0),
                              hoverinfo='skip', showlegend=False))
 
@@ -404,7 +405,8 @@ def figure(h: pd.DataFrame, ticker: str, height: int = 520, base: dict = None, s
     fig.update_layout(
         template='plotly_dark+atn', height=height, margin=dict(l=8, r=56, t=8, b=8),
         paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-        xaxis=dict(type='category', rangeslider=dict(visible=False), showgrid=False, tickangle=0,
+        xaxis=dict(type='category', categoryorder='array', categoryarray=x + xf,   # 8.13.2: order fixed (class traces)
+                   rangeslider=dict(visible=False), showgrid=False, tickangle=0,
                    tickmode='array', tickvals=tv, ticktext=tt, tickfont=dict(size=10)),
         yaxis=dict(side='right', tickfont=dict(size=10), gridcolor='#1f1d1b', domain=[0.22, 1.0] if has_vol else [0, 1]),
         bargap=0.15,
@@ -432,6 +434,7 @@ def figure(h: pd.DataFrame, ticker: str, height: int = 520, base: dict = None, s
 CHART_JS = """<script>
 (function () {
   const P = window.parent, D = P.document, KEY = %s, VER = %s, FIG = %s, HI = %s, LO = %s;
+  const ME = {};                         // 8.13.2: this script run; each Streamlit rerun replaces the iframe
   const SK = 'mrs_zoom_' + KEY;
   P.__mrsFigs = P.__mrsFigs || {};
   P.__mrsFigs[KEY] = {ver: VER, fig: FIG, hi: HI, lo: LO};
@@ -467,17 +470,19 @@ CHART_JS = """<script>
     g.__applying = true;
     P.Plotly.react(g, cur.fig.data, lay).then(function () { g.__applying = false; }, function () { g.__applying = false; });
   }
-  function cross(g) {                    // 8.13.1: TradingView crosshair: hairlines + the price on the price axis
-    if (g.__mrsCross) return;
-    g.__mrsCross = true;
-    const mk = function (css) { const d = D.createElement('div'); d.style.cssText = 'position:absolute;display:none;' +
-      'pointer-events:none;z-index:30;' + css; return d; };
-    const V = mk('width:0;border-left:1px solid rgba(200,192,183,0.45);');
-    const H = mk('height:0;border-top:1px solid rgba(200,192,183,0.45);');
+  function cross(g) {                    // 8.13.1 / 8.13.2: TradingView crosshair: hairlines + the price on the price axis
+    if (g.__mrsCrossOwner === ME) return;  // 8.13.2: re-attach after every rerun (the old iframe's handlers die with it)
+    if (g.__mrsCrossOff) { try { g.__mrsCrossOff(); } catch (e) {} }
+    for (const old of Array.from(g.querySelectorAll('.mrs-x'))) { try { old.remove(); } catch (e) {} }
+    g.__mrsCrossOwner = ME;
+    const mk = function (css) { const d = D.createElement('div'); d.className = 'mrs-x';
+      d.style.cssText = 'position:absolute;display:none;pointer-events:none;z-index:1000;' + css; return d; };
+    const V = mk('width:0;border-left:1px solid rgba(200,192,183,0.55);');
+    const H = mk('height:0;border-top:1px solid rgba(200,192,183,0.55);');
     const L = mk('font:11px IBM Plex Mono,monospace;background:#3a3631;color:#f3ece2;padding:1px 5px;border-radius:2px;' +
                  'white-space:nowrap;');
     const hide = function () { V.style.display = H.style.display = L.style.display = 'none'; };
-    g.addEventListener('mousemove', function (e) {
+    const move = function (e) {
       const fl = g._fullLayout;
       if (!fl || !fl.yaxis || !fl.xaxis || !fl._size) return;
       if (L.parentNode !== g) {
@@ -497,8 +502,73 @@ CHART_JS = """<script>
       L.style.left = (xa._offset + xa._length + 2) + 'px';
       L.style.top = (py - 8) + 'px';
       L.style.display = 'block';
-    });
+    };
+    g.addEventListener('mousemove', move, true);
     g.addEventListener('mouseleave', hide);
+    g.__mrsCrossOff = function () { g.removeEventListener('mousemove', move, true); g.removeEventListener('mouseleave', hide); };
+  }
+  function lines(g) {                    // 8.13.2: horizontal lines: Alt (Option) + click to add, click the price tag to remove
+    if (g.__mrsLinesOwner === ME) return;
+    if (g.__mrsLinesOff) { try { g.__mrsLinesOff(); } catch (e) {} }
+    for (const old of Array.from(g.querySelectorAll('.mrs-hl'))) { try { old.remove(); } catch (e) {} }
+    g.__mrsLinesOwner = ME;
+    const LK = 'mrs_hlines';
+    const store = function () { try { return JSON.parse(P.localStorage.getItem(LK) || '{}') || {}; } catch (e) { return {}; } };
+    const save = function (o) { try { P.localStorage.setItem(LK, JSON.stringify(o)); } catch (e) {} };
+    const tick = function () { const d = (g.data || []).find(function (t) { return t.type === 'candlestick'; });
+                               return d ? String(d.name) : null; };
+    const box = D.createElement('div');
+    box.className = 'mrs-hl';
+    box.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0;pointer-events:none;z-index:900;';
+    const draw = function () {
+      const fl = g._fullLayout;
+      if (!fl || !fl.yaxis || !fl.xaxis) return;
+      if (box.parentNode !== g) {
+        if (P.getComputedStyle(g).position === 'static') g.style.position = 'relative';
+        g.appendChild(box);
+      }
+      const ya = fl.yaxis, xa = fl.xaxis, t = tick(), arr = (store()[t] || []);
+      const sig = t + '|' + arr.join(',') + '|' + (ya.range || []).join(',') + '|' + xa._offset + '|' + xa._length + '|' +
+                  ya._offset + '|' + ya._length;
+      if (box.__sig === sig) return;
+      box.__sig = sig;
+      box.innerHTML = '';
+      arr.forEach(function (p) {
+        const y = ya._offset + ya.l2p(p);
+        if (!isFinite(y) || y < ya._offset || y > ya._offset + ya._length) return;
+        const ln = D.createElement('div');
+        ln.style.cssText = 'position:absolute;left:' + xa._offset + 'px;width:' + xa._length + 'px;top:' + Math.round(y) +
+                           'px;height:0;border-top:1px dashed #e3b48e;pointer-events:none;';
+        const lb = D.createElement('div');
+        lb.textContent = p.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + '  ×';
+        lb.title = 'Click to remove this line';
+        lb.style.cssText = 'position:absolute;left:' + (xa._offset + xa._length + 2) + 'px;top:' + (Math.round(y) - 8) +
+                           'px;font:11px IBM Plex Mono,monospace;background:#e3b48e;color:#0a0a0a;padding:1px 4px;' +
+                           'border-radius:2px;cursor:pointer;pointer-events:auto;white-space:nowrap;';
+        lb.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          const o = store(); o[t] = (o[t] || []).filter(function (q) { return q !== p; });
+          if (!o[t].length) delete o[t];
+          save(o); box.__sig = null; draw();
+        });
+        box.appendChild(ln); box.appendChild(lb);
+      });
+    };
+    const click = function (e) {
+      if (!e.altKey) return;
+      const fl = g._fullLayout;
+      if (!fl || !fl.yaxis || !fl.xaxis) return;
+      const ya = fl.yaxis, xa = fl.xaxis, r = g.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
+      if (px < xa._offset || px > xa._offset + xa._length || py < ya._offset || py > ya._offset + ya._length) return;
+      const v = Math.round(ya.p2l(py - ya._offset) * 100) / 100, t = tick();
+      if (!t || !isFinite(v)) return;
+      const o = store(); o[t] = (o[t] || []).concat([v]); save(o);
+      box.__sig = null; draw();
+      e.preventDefault(); e.stopPropagation();
+    };
+    g.addEventListener('click', click, true);
+    const iv = setInterval(draw, 250);       // follows zoom, pan, resize and ticker changes
+    g.__mrsLinesOff = function () { g.removeEventListener('click', click, true); clearInterval(iv); };
   }
   function hook(g) {
     cross(g);
@@ -522,7 +592,7 @@ CHART_JS = """<script>
     }
   }
   // keep checking: Streamlit can redraw the chart element (first load, resize), and the new element needs the hooks too
-  setInterval(function () { const g = find(); if (g && g._fullLayout) apply(g); }, 300);
+  setInterval(function () { const g = find(); if (!g) return; cross(g); lines(g); if (g._fullLayout) apply(g); }, 300);   // 8.13.2: crosshair and lines even without window.Plotly
 })();
 </script>"""
 
@@ -537,14 +607,23 @@ def show(st, components, fig, key: str, config: dict):
     first = st.session_state.setdefault('_mrs_first_fig', {})
     if k not in first:
         first[k] = fig
-    hi_a = lo_a = None
-    for tr_ in fig.data:                       # v6.5: one candle trace per SPY phase; combine them bar by bar
+    # 8.13.2: the candle classes are separate traces with their own bars; put each bar's high / low back in its slot on the
+    #    category axis (the zoom fit in CHART_JS indexes by category position)
+    cats = list(fig.layout.xaxis.categoryarray or [])
+    pos = {c_: i for i, c_ in enumerate(cats)}
+    hi_a = np.full(len(cats), np.nan); lo_a = np.full(len(cats), np.nan)
+    for tr_ in fig.data:
         if tr_.type == 'candlestick':
-            a_ = np.array(tr_.high, dtype=float)
-            b_ = np.array(tr_.low, dtype=float)
-            hi_a = a_ if hi_a is None else np.fmax(hi_a, a_)
-            lo_a = b_ if lo_a is None else np.fmin(lo_a, b_)
+            for xv, a_, b_ in zip(tr_.x, tr_.high, tr_.low):
+                i = pos.get(xv)
+                if i is not None:
+                    hi_a[i] = np.fmax(hi_a[i], float(a_)); lo_a[i] = np.fmin(lo_a[i], float(b_))
+    n_c = int(np.flatnonzero(np.isfinite(hi_a)).max()) + 1 if np.isfinite(hi_a).any() else 0
+    hi_a, lo_a = hi_a[:n_c], lo_a[:n_c]                 # the empty sessions at the right edge are not candles
     hi = [float(v) for v in pd.Series(hi_a).ffill().bfill()]
     lo = [float(v) for v in pd.Series(lo_a).ffill().bfill()]
     st.plotly_chart(first[k], use_container_width=True, key=k, config=config, theme=None)
     components.html(CHART_JS % (json.dumps(k), json.dumps(ver), fig.to_json(), json.dumps(hi), json.dumps(lo)), height=0)
+    st.markdown('<div style="font-size:0.68rem;color:#6e675f;margin:-6px 0 4px 0;">Alt (Option) + click on the chart: '
+                'horizontal line at that price · click its price tag to remove · lines are kept per ticker in this browser'
+                '</div>', unsafe_allow_html=True)        # 8.13.2
