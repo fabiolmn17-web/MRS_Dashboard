@@ -7,6 +7,9 @@ Versions follow `docs/PROCESS.md`:
 
 The current version is in `VERSION` and in the page footer. Entries before 6.3.1 were reconstructed from the commit history and the project notes on 13 Nov 2026.
 
+## 8.14.0 · 2026-11-26
+- **Trend lines:** Shift + click on the chart sets the start of a trend line, a second Shift + click sets the end; the line runs only between the two points (no extension). A dashed preview follows the mouse after the first click; Esc cancels. The end point can sit in the empty space to the right of the last candle. Click the × at the end of a line to remove it. Trend lines are kept per ticker in this browser and follow zoom and pan, like the horizontal lines. The hint under each chart now lists both drawing tools.
+
 ## 8.13.2 · 2026-11-26
 - **Crosshair fix:** the 8.13.1 crosshair did not appear on the live page: it was attached only when the page exposed the charting library globally, which Streamlit does not. It is now attached on its own, and re-attached after every refresh.
 - **Horizontal lines:** Alt (Option on a Mac) + click on the chart draws a horizontal line at that price, with its price in a tag on the price axis; click the tag to remove it. Lines are kept per ticker in this browser and follow zoom and pan. A one-line hint sits under each chart.

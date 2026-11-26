@@ -507,68 +507,141 @@ CHART_JS = """<script>
     g.addEventListener('mouseleave', hide);
     g.__mrsCrossOff = function () { g.removeEventListener('mousemove', move, true); g.removeEventListener('mouseleave', hide); };
   }
-  function lines(g) {                    // 8.13.2: horizontal lines: Alt (Option) + click to add, click the price tag to remove
+  function lines(g) {                    // 8.13.2 horizontal lines (Alt + click); 8.14.0 trend lines (Shift + click twice)
     if (g.__mrsLinesOwner === ME) return;
     if (g.__mrsLinesOff) { try { g.__mrsLinesOff(); } catch (e) {} }
     for (const old of Array.from(g.querySelectorAll('.mrs-hl'))) { try { old.remove(); } catch (e) {} }
     g.__mrsLinesOwner = ME;
-    const LK = 'mrs_hlines';
-    const store = function () { try { return JSON.parse(P.localStorage.getItem(LK) || '{}') || {}; } catch (e) { return {}; } };
-    const save = function (o) { try { P.localStorage.setItem(LK, JSON.stringify(o)); } catch (e) {} };
+    const COL = '#e3b48e', NS = 'http://www.w3.org/2000/svg';
+    const ld = function (k) { try { return JSON.parse(P.localStorage.getItem(k) || '{}') || {}; } catch (e) { return {}; } };
+    const sv = function (k, o) { try { P.localStorage.setItem(k, JSON.stringify(o)); } catch (e) {} };
     const tick = function () { const d = (g.data || []).find(function (t) { return t.type === 'candlestick'; });
                                return d ? String(d.name) : null; };
+    const fmt = function (v) { return v.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}); };
     const box = D.createElement('div');
     box.className = 'mrs-hl';
     box.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0;pointer-events:none;z-index:900;';
-    const draw = function () {
-      const fl = g._fullLayout;
-      if (!fl || !fl.yaxis || !fl.xaxis) return;
+    const svg = D.createElementNS(NS, 'svg');
+    svg.setAttribute('class', 'mrs-hl');
+    svg.style.cssText = 'position:absolute;overflow:hidden;pointer-events:none;z-index:899;';
+    const rub = D.createElementNS(NS, 'line');
+    rub.setAttribute('stroke', COL); rub.setAttribute('stroke-width', '1'); rub.setAttribute('stroke-dasharray', '4,3');
+    rub.style.display = 'none';
+    let pend = null;
+    const ax = function () { const fl = g._fullLayout; return fl && fl.xaxis && fl.yaxis ? [fl.xaxis, fl.yaxis] : null; };
+    const cats = function (xa) { return xa._categories || []; };
+    const lastReal = function (cs) { for (let i = cs.length - 1; i >= 0; i--) { if (String(cs[i]).trim() !== '') return i; } return -1; };
+    // a point = {d: date of the session (or of the last candle), n: sessions after it (empty space at the right), p: price}
+    const toPt = function (xa, ya, px, py) {
+      const cs = cats(xa), lr = lastReal(cs);
+      let i = Math.round(xa.p2l(px - xa._offset));
+      i = Math.max(0, Math.min(cs.length - 1, i));
+      const p = Math.round(ya.p2l(py - ya._offset) * 100) / 100;
+      return i <= lr ? {d: String(cs[i]), n: 0, p: p} : {d: String(cs[lr]), n: i - lr, p: p};
+    };
+    const toPx = function (xa, ya, pt) {
+      const i = cats(xa).indexOf(pt.d);
+      if (i < 0) return null;
+      return [xa.l2p(i + (pt.n || 0)), ya.l2p(pt.p)];
+    };
+    const inPane = function (xa, ya, px, py) {
+      return px >= xa._offset && px <= xa._offset + xa._length && py >= ya._offset && py <= ya._offset + ya._length;
+    };
+    const attach = function () {
       if (box.parentNode !== g) {
         if (P.getComputedStyle(g).position === 'static') g.style.position = 'relative';
-        g.appendChild(box);
+        g.appendChild(svg); g.appendChild(box); svg.appendChild(rub);
       }
-      const ya = fl.yaxis, xa = fl.xaxis, t = tick(), arr = (store()[t] || []);
-      const sig = t + '|' + arr.join(',') + '|' + (ya.range || []).join(',') + '|' + xa._offset + '|' + xa._length + '|' +
-                  ya._offset + '|' + ya._length;
+    };
+    const tag = function (left, top, text, title, onclick) {
+      const lb = D.createElement('div');
+      lb.textContent = text; lb.title = title;
+      lb.style.cssText = 'position:absolute;left:' + left + 'px;top:' + top + 'px;font:11px IBM Plex Mono,monospace;' +
+                         'background:' + COL + ';color:#0a0a0a;padding:1px 4px;border-radius:2px;cursor:pointer;' +
+                         'pointer-events:auto;white-space:nowrap;';
+      lb.addEventListener('click', function (ev) { ev.stopPropagation(); onclick(); });
+      box.appendChild(lb);
+    };
+    const draw = function () {
+      const a = ax(); if (!a) return;
+      const xa = a[0], ya = a[1], t = tick();
+      attach();
+      const hl = ld('mrs_hlines')[t] || [], tl = ld('mrs_tlines')[t] || [];
+      const sig = t + '|' + JSON.stringify(hl) + '|' + JSON.stringify(tl) + '|' + (ya.range || []).join(',') + '|' +
+                  (xa.range || []).join(',') + '|' + xa._offset + '|' + xa._length + '|' + ya._offset + '|' + ya._length;
       if (box.__sig === sig) return;
       box.__sig = sig;
       box.innerHTML = '';
-      arr.forEach(function (p) {
-        const y = ya._offset + ya.l2p(p);
-        if (!isFinite(y) || y < ya._offset || y > ya._offset + ya._length) return;
+      for (const el of Array.from(svg.querySelectorAll('.mrs-tl'))) el.remove();
+      svg.style.left = xa._offset + 'px'; svg.style.top = ya._offset + 'px';
+      svg.setAttribute('width', xa._length); svg.setAttribute('height', ya._length);
+      hl.forEach(function (p) {                     // horizontal lines: dashed, price tag on the axis
+        const y = ya.l2p(p);
+        if (!isFinite(y) || y < 0 || y > ya._length) return;
         const ln = D.createElement('div');
-        ln.style.cssText = 'position:absolute;left:' + xa._offset + 'px;width:' + xa._length + 'px;top:' + Math.round(y) +
-                           'px;height:0;border-top:1px dashed #e3b48e;pointer-events:none;';
-        const lb = D.createElement('div');
-        lb.textContent = p.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + '  ×';
-        lb.title = 'Click to remove this line';
-        lb.style.cssText = 'position:absolute;left:' + (xa._offset + xa._length + 2) + 'px;top:' + (Math.round(y) - 8) +
-                           'px;font:11px IBM Plex Mono,monospace;background:#e3b48e;color:#0a0a0a;padding:1px 4px;' +
-                           'border-radius:2px;cursor:pointer;pointer-events:auto;white-space:nowrap;';
-        lb.addEventListener('click', function (ev) {
-          ev.stopPropagation();
-          const o = store(); o[t] = (o[t] || []).filter(function (q) { return q !== p; });
+        ln.style.cssText = 'position:absolute;left:' + xa._offset + 'px;width:' + xa._length + 'px;top:' +
+                           Math.round(ya._offset + y) + 'px;height:0;border-top:1px dashed ' + COL + ';pointer-events:none;';
+        box.appendChild(ln);
+        tag(xa._offset + xa._length + 2, Math.round(ya._offset + y) - 8, fmt(p) + '  ×', 'Click to remove this line', function () {
+          const o = ld('mrs_hlines'); o[t] = (o[t] || []).filter(function (q) { return q !== p; });
           if (!o[t].length) delete o[t];
-          save(o); box.__sig = null; draw();
+          sv('mrs_hlines', o); box.__sig = null; draw();
         });
-        box.appendChild(ln); box.appendChild(lb);
+      });
+      tl.forEach(function (ln_, j) {                // trend lines: solid segment between the two points, × at the end
+        const A = toPx(xa, ya, ln_.a), B = toPx(xa, ya, ln_.b);
+        if (!A || !B) return;
+        const e = D.createElementNS(NS, 'line');
+        e.setAttribute('class', 'mrs-tl');
+        e.setAttribute('x1', A[0]); e.setAttribute('y1', A[1]); e.setAttribute('x2', B[0]); e.setAttribute('y2', B[1]);
+        e.setAttribute('stroke', COL); e.setAttribute('stroke-width', '1.3');
+        svg.insertBefore(e, rub);
+        const end = [B, A].find(function (q) { return q[0] >= 0 && q[0] <= xa._length && q[1] >= 0 && q[1] <= ya._length; });
+        if (end) {
+          tag(xa._offset + end[0] + 4, ya._offset + end[1] - 8, '×', 'Click to remove this trend line', function () {
+            const o = ld('mrs_tlines'); o[t] = (o[t] || []).filter(function (_, k) { return k !== j; });
+            if (!o[t].length) delete o[t];
+            sv('mrs_tlines', o); box.__sig = null; draw();
+          });
+        }
       });
     };
     const click = function (e) {
-      if (!e.altKey) return;
-      const fl = g._fullLayout;
-      if (!fl || !fl.yaxis || !fl.xaxis) return;
-      const ya = fl.yaxis, xa = fl.xaxis, r = g.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
-      if (px < xa._offset || px > xa._offset + xa._length || py < ya._offset || py > ya._offset + ya._length) return;
-      const v = Math.round(ya.p2l(py - ya._offset) * 100) / 100, t = tick();
-      if (!t || !isFinite(v)) return;
-      const o = store(); o[t] = (o[t] || []).concat([v]); save(o);
-      box.__sig = null; draw();
+      if (!e.altKey && !e.shiftKey) return;
+      const a = ax(); if (!a) return;
+      const xa = a[0], ya = a[1], t = tick(), r = g.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
+      if (!t || !inPane(xa, ya, px, py)) return;
       e.preventDefault(); e.stopPropagation();
+      if (e.altKey) {                               // horizontal line
+        const v = Math.round(ya.p2l(py - ya._offset) * 100) / 100;
+        if (!isFinite(v)) return;
+        const o = ld('mrs_hlines'); o[t] = (o[t] || []).concat([v]); sv('mrs_hlines', o);
+      } else {                                      // trend line: first click = start, second click = end
+        const pt = toPt(xa, ya, px, py);
+        if (!isFinite(pt.p)) return;
+        if (!pend || pend.t !== t) { pend = {t: t, a: pt}; return; }
+        const o = ld('mrs_tlines'); o[t] = (o[t] || []).concat([{a: pend.a, b: pt}]); sv('mrs_tlines', o);
+        pend = null; rub.style.display = 'none';
+      }
+      box.__sig = null; draw();
     };
+    const move = function (e) {                     // rubber band while a trend line is being drawn
+      if (!pend) return;
+      const a = ax(); if (!a) return;
+      const xa = a[0], ya = a[1], A = toPx(xa, ya, pend.a);
+      if (!A || tick() !== pend.t) { rub.style.display = 'none'; return; }
+      const r = g.getBoundingClientRect();
+      rub.setAttribute('x1', A[0]); rub.setAttribute('y1', A[1]);
+      rub.setAttribute('x2', e.clientX - r.left - xa._offset); rub.setAttribute('y2', e.clientY - r.top - ya._offset);
+      rub.style.display = 'inline';
+    };
+    const esc = function (e) { if (e.key === 'Escape' && pend) { pend = null; rub.style.display = 'none'; } };
     g.addEventListener('click', click, true);
+    g.addEventListener('mousemove', move, true);
+    D.addEventListener('keydown', esc);
     const iv = setInterval(draw, 250);       // follows zoom, pan, resize and ticker changes
-    g.__mrsLinesOff = function () { g.removeEventListener('click', click, true); clearInterval(iv); };
+    g.__mrsLinesOff = function () { g.removeEventListener('click', click, true); g.removeEventListener('mousemove', move, true);
+                                    D.removeEventListener('keydown', esc); clearInterval(iv); };
   }
   function hook(g) {
     cross(g);
@@ -624,6 +697,6 @@ def show(st, components, fig, key: str, config: dict):
     lo = [float(v) for v in pd.Series(lo_a).ffill().bfill()]
     st.plotly_chart(first[k], use_container_width=True, key=k, config=config, theme=None)
     components.html(CHART_JS % (json.dumps(k), json.dumps(ver), fig.to_json(), json.dumps(hi), json.dumps(lo)), height=0)
-    st.markdown('<div style="font-size:0.68rem;color:#6e675f;margin:-6px 0 4px 0;">Alt (Option) + click on the chart: '
-                'horizontal line at that price · click its price tag to remove · lines are kept per ticker in this browser'
-                '</div>', unsafe_allow_html=True)        # 8.13.2
+    st.markdown('<div style="font-size:0.68rem;color:#6e675f;margin:-6px 0 4px 0;">Drawing: Alt (Option) + click = '
+                'horizontal line · Shift + click twice = trend line (Esc cancels) · click a tag or × to remove · '
+                'kept per ticker in this browser</div>', unsafe_allow_html=True)        # 8.13.2 / 8.14.0

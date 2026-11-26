@@ -77,4 +77,4 @@ def test_candle_classes_no_nan_and_show_arrays_8132():
     assert all(np.isfinite(np.array(t.open, float)).all() for t in cs)
     cats = list(fig.layout.xaxis.categoryarray)
     assert len(cats) == cv.BARS + cv.FUTURE and cats[cv.BARS - 1] == idx[-1].strftime('%Y-%m-%d')
-    assert 'mrs_hlines' in cv.CHART_JS and 'altKey' in cv.CHART_JS
+    assert 'mrs_hlines' in cv.CHART_JS and 'altKey' in cv.CHART_JS and 'mrs_tlines' in cv.CHART_JS and 'shiftKey' in cv.CHART_JS
