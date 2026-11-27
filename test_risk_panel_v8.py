@@ -35,9 +35,10 @@ def test_v8_cell_long_history():
         return
     d = _d()
     c = rp.v8_cell(d, None, None, 0, 22.9)
-    assert c['src'] == 'S&P 500 since 1990' and c['scope'] == 'cell' and c['cell']['n'] > 800
-    assert 0.15 < c['cell']['up5'] < 0.35 and c['dz']['n'] > c['cell']['n']
-    assert c['fan'] is None or (c['fan']['n'] == c['cell']['n'] and len(c['fan']['c50']) == 20)   # 8.15.0
+    # 8.16.0: smooth VIX weights over every DIP ZONE day since 1990 (no box)
+    assert c['src'] == 'S&P 500 since 1990' and c['scope'] == 'kernel' and c['cell']['n'] == c['dz']['n'] > 1500
+    assert 0.15 < c['cell']['up5'] < 0.35 and c['kernel']['h'] == 0.10 and c['kernel']['ess_days'] > 300
+    assert c['fan'] is None or (c['fan']['n'] == c['cell']['n'] and len(c['fan']['c50']) == 20)
     assert rp.C1_CLOCK[0][0] == 'IN DIP' and rp.C1_CLOCK_OFF[3][1] is None
 
 
@@ -96,6 +97,25 @@ def test_fan_svg_and_panel_8150():
     assert p.count('<div') == p.count('</div>')
     v8['fan'] = None
     assert "from today's close" not in rp.panel_v9_html(snap)            # falls back to the distribution picture
+
+
+
+def test_vix_kernel_8160():
+    """8.16.0 (VK1): weights, width ladder, weighted quantiles, no jump across a VIX bucket line."""
+    w, h, ed, es = rp.vix_weights([20.0, 22.0, 24.4, 26.0], [1, 2, 3, 4], 22.0)
+    assert h == 1.0 or es >= rp.KERNEL_MIN_ESS                         # 4 spells only: ladder runs to the end
+    w, h, ed, es = rp.vix_weights(np.r_[np.full(50, 22.0), np.full(50, 24.2)], np.arange(100), 22.0)
+    assert h == 0.10 and abs(w[50] - np.exp(-0.5 * (np.log(1.1) / 0.1) ** 2)) < 1e-12 and w[0] == 1.0
+    assert abs(rp._wq(np.arange(1, 1002), np.ones(1001), [0.5])[0] - 501) < 1e-9
+    if rp.long_hist() is None:
+        return
+    d = _d(); m = rp.VIX_MEDIAN
+    lo, hi = rp.v8_cell(d, None, None, 0, 1.499 * m), rp.v8_cell(d, None, None, 0, 1.501 * m)
+    for k in ('up5', 'dn5', 'fast'):
+        assert abs(lo['cell'][k] - hi['cell'][k]) < 0.01, k              # boxes: 23% -> 35% on 25 Nov
+    assert 'near' not in lo and lo['vb'] != hi['vb']
+    ext = rp.v8_cell(d, None, None, 0, 4.5 * m)
+    assert ext['kernel']['h'] > 0.10 and ext['kernel']['ess_spells'] >= rp.KERNEL_MIN_ESS
 
 
 if __name__ == '__main__':

@@ -7,6 +7,11 @@ Versions follow `docs/PROCESS.md`:
 
 The current version is in `VERSION` and in the page footer. Entries before 6.3.1 were reconstructed from the commit history and the project notes on 13 Nov 2026.
 
+## 8.16.0 · 2026-11-27
+- **Risk today, smooth VIX weights (study VK1):** the odds, the 20-session P10 / P90 and the fan chart no longer come from one of three VIX buckets (CALM / WIDE / STRESSED). Every past day of the same SPY phase counts, weighted by how close its VIX was to today's (full weight at today's level, about two thirds at 10% away, a fifth at 20%, almost nothing at 30%). The odds now move smoothly with the VIX instead of jumping when it crosses a bucket line (25 Nov: 23% → 35% on a 0.4-point VIX move). At extreme VIX levels the weighting widens until it rests on at least 10 separate past spells.
+- Out of sample (every dip since 2001) the smooth weights were as accurate as the buckets; the pre-set "no worse" margin was not shown for the fast 7% drop, and the change was adopted as a display choice. The fast 7% drop keeps TESTED (it beats the average day under both methods).
+- The 8.15.0 line that showed the neighbouring bucket's odds near a VIX line is gone (no lines left). The tile shows how many days the weights rest on in effect. Without the VIX column in the history file, the buckets are used as before.
+
 ## 8.15.0 · 2026-11-27
 Card changes from the out-of-sample check of the card's odds (study SV1, 26–27 Nov). No rule, budget or stop changed.
 - **Fan chart in "This state":** the distribution picture, which only changed when the state changed, is replaced by the next 20 sessions drawn from today's close: this state's P10–P90 and P25–P75 paths (S&P 500 since 1990), the median, all days' P10 / P90 dashed, SPY's last 20 sessions on the left, SPY prices on the right axis, and the 200-day and the dip line (50-day − 1 ATR) as levels. The cone re-anchors at every close and changes shape when the state changes. Descriptive; the 20-session band was checked out of sample (P10–P90 held 77% of outcomes, misses leaning down). Without the new history columns the old picture is shown.

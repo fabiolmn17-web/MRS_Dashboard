@@ -241,6 +241,48 @@ def clock_of(ph: pd.Series):
     return ('IN DIP' if k == 0 else 'EARLY' if k <= 20 else 'MID' if k <= 60 else 'LATE'), k
 
 
+# 8.16.0 (VK1, 27 Nov 2026): smooth VIX weights instead of the three VIX boxes. Every past day of the same SPY phase counts,
+# weighted by how close its VIX was to today's: w = exp(-0.5 * (ln(VIX / VIX_now) / h)^2). h starts at 0.10 (in log VIX) and
+# widens along the ladder until the weights rest on at least 10 effective spells (runs of the same phase), as the frozen VK1
+# design (adaptive width). Out of sample (113 dips since 2001) as accurate as the boxes, with no jumps at the box edges;
+# adopted by Fabio as a display choice (the frozen non-inferiority margin was not shown for the fast drop).
+KERNEL_LADDER = (0.10, 0.125, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50, 0.75, 1.0)
+KERNEL_MIN_ESS = 10.0
+
+
+def _wq(v, w, qs):
+    """Weighted quantiles: cumulative weight at each value's midpoint, linear interpolation (as VK1)."""
+    v = np.asarray(v, float); w = np.asarray(w, float)
+    m = np.isfinite(v) & (w > 0)
+    v, w = v[m], w[m]
+    if not len(v):
+        return [np.nan for _ in qs]
+    o = np.argsort(v); v, w = v[o], w[o]
+    cw = (np.cumsum(w) - 0.5 * w) / w.sum()
+    return [float(np.interp(q, cw, v)) for q in qs]
+
+
+def vix_weights(vix_past, spell, vix_now):
+    """(weights, h, day ESS, spell ESS) for past days with VIX levels vix_past and spell ids spell."""
+    lx = np.log(np.asarray(vix_past, float)); x0 = np.log(float(vix_now))
+    _, inv = np.unique(np.asarray(spell), return_inverse=True)
+    for h in KERNEL_LADDER:
+        w = np.exp(-0.5 * ((lx - x0) / h) ** 2)
+        ws = np.bincount(inv, weights=w)
+        ess_sp = float(ws.sum() ** 2 / (ws ** 2).sum()) if (ws ** 2).sum() > 0 else 0.0
+        if ess_sp >= KERNEL_MIN_ESS:
+            break
+    ess_d = float(w.sum() ** 2 / (w ** 2).sum()) if (w ** 2).sum() > 0 else 0.0
+    return w, h, ess_d, ess_sp
+
+
+def _wst(g, w):
+    p10, p50, p90 = _wq(g['f20'].values, w, [0.10, 0.50, 0.90])
+    sw = w.sum()
+    return dict(n=len(g), p10=p10, p50=p50, p90=p90, up5=float((w * (g['f20'].values > .05)).sum() / sw),
+                dn5=float((w * (g['f20'].values < -.05)).sum() / sw), fast=float((w * (g['mae20'].values <= -.07)).sum() / sw))
+
+
 def v8_cell(d: pd.DataFrame, ph_hist: pd.Series, vix_hist: pd.Series, code_now: int, vix_now: float, use_long: bool = True) -> dict:
     """20-session stats for today's v8 cell (SPY phase x VIX width); falls back to the phase alone when the cell has fewer
     than MIN_CELL_DAYS days. 8.6.0: S&P 500 since 1990 (risk_long.csv); without it, SPY since 2008 as before."""
@@ -254,6 +296,20 @@ def v8_cell(d: pd.DataFrame, ph_hist: pd.Series, vix_hist: pd.Series, code_now: 
         x, src = d.dropna(subset=['f20']).copy(), 'SPY since 2008'
         x['ph'] = ph_hist.reindex(x.index).ffill() if ph_hist is not None else np.nan
         x['vb'] = vix_hist.reindex(x.index).ffill().map(vol_band) if vix_hist is not None else np.nan
+    if L is not None and 'vix' in x and _fin(vix_now):     # 8.16.0: smooth VIX weights (VK1), no box edges
+        x = x.reset_index(drop=True)
+        x['spell'] = (x['ph'] != x['ph'].shift()).cumsum()
+        cell = x[(x['ph'] == code_now) & x['vix'].gt(0)]
+        if len(cell) >= 20:
+            w, h, ess_d, ess_sp = vix_weights(cell['vix'].values, cell['spell'].values, vix_now)
+            def st(g):
+                return dict(n=len(g), p10=g['f20'].quantile(.1), p50=g['f20'].median(), p90=g['f20'].quantile(.9),
+                            up5=(g['f20'] > .05).mean(), dn5=(g['f20'] < -.05).mean(), fast=(g['mae20'] <= -.07).mean())
+            out = dict(scope='kernel', code=code_now, vb=vb_now, vix=vix_now, cell=_wst(cell, w), all=st(x), dz=st(x[x['ph'] == 0]),
+                       src=src, kernel=dict(h=h, ess_days=ess_d, ess_spells=ess_sp, ratio=vix_now / VIX_MEDIAN),
+                       f_cell=cell['f20'][w >= 0.5].round(5).tolist(), f_all=x['f20'].round(5).tolist())
+            out['fan'] = fan_stats(cell, x, w)
+            return out
     cell = x[(x['ph'] == code_now) & (x['vb'] == vb_now)]
     scope = 'cell'
     if len(cell) < MIN_CELL_DAYS:
@@ -286,12 +342,17 @@ def fan_inputs(spy: pd.DataFrame) -> dict:
                 lv={'200-day': float(cc.rolling(200).mean().iloc[-1]), 'dip line': float(cc.rolling(50).mean().iloc[-1] - atr.iloc[-1])})
 
 
-def fan_stats(cell: pd.DataFrame, allx: pd.DataFrame):
-    """8.15.0: percentiles of the 1..20-session paths (close vs the start close) for the cell, and P10 / P90 for all days."""
+def fan_stats(cell: pd.DataFrame, allx: pd.DataFrame, w=None):
+    """8.15.0: percentiles of the 1..20-session paths (close vs the start close) for the cell, and P10 / P90 for all days.
+    8.16.0: with weights w (smooth VIX weights), the cell's percentiles are weighted."""
     if not all(k in cell.columns for k in RCOLS) or len(cell) < 20:
         return None
     P, A = cell[RCOLS].to_numpy(float), allx[RCOLS].to_numpy(float)
-    f = {f'c{q}': np.nanpercentile(P, q, axis=0).round(5).tolist() for q in (10, 25, 50, 75, 90)}
+    if w is None:
+        f = {f'c{q}': np.nanpercentile(P, q, axis=0).round(5).tolist() for q in (10, 25, 50, 75, 90)}
+    else:
+        Q = np.array([_wq(P[:, j], w, [0.10, 0.25, 0.50, 0.75, 0.90]) for j in range(P.shape[1])])
+        f = {f'c{q}': np.round(Q[:, k], 5).tolist() for k, q in enumerate((10, 25, 50, 75, 90))}
     f.update({f'a{q}': np.nanpercentile(A, q, axis=0).round(5).tolist() for q in (10, 90)})
     f['n'] = int(len(P))
     return f
@@ -823,7 +884,7 @@ def panel_v9_html(snap: dict) -> str:
     if v8.get('cell'):
         c, a = v8['cell'], v8['all']
         vb = v8.get('vb'); vcol = TEAL if vb == 'CALM' else ORANGE
-        scope = '' if v8['scope'] == 'cell' else ' <span style="color:#f8d6b4">(phase only)</span>'
+        scope = '' if v8['scope'] in ('cell', 'kernel') else ' <span style="color:#f8d6b4">(phase only)</span>'
         fan_ok = bool(v8.get('fan')) and _fin(v8.get('spy_now'))
         pic = (fan_svg(v8['fan'], v8.get('recent'), v8['spy_now'], v8.get('lv'), src=v8.get('src', 'S&P 500 since 1990'),
                        start_lbl=v8.get('recent_start')) if fan_ok
@@ -835,7 +896,9 @@ def panel_v9_html(snap: dict) -> str:
         t2 = (f'<div class="atn-tile"><div class="atn-tl">This state · next 20 sessions{" from today" + chr(39) + "s close" if fan_ok else ""}, '
               f'{_e(v8.get("src", "SPY since 2008"))} {ui.tag("Descriptive")}</div>'
               f'<div class="atn-sm" style="margin-bottom:2px"><b style="color:#f3ece2">SPY {PH_TXT.get(v8["code"], "?")}</b> · VIX '
-              f'<b style="color:{vcol}">{(v8["vix"] if _fin(v8["vix"]) else float("nan")):.1f} {_e(vb)}</b>{scope} · {c["n"]:,} days'
+              f'<b style="color:{vcol}">{(v8["vix"] if _fin(v8["vix"]) else float("nan")):.1f} {_e(vb)}</b>{scope} · '
+              + (f'{c["n"]:,} days weighted by VIX closeness (≈ {v8["kernel"]["ess_days"]:,.0f} effective)' if v8.get('kernel')
+                 else f'{c["n"]:,} days')
               + (f' · anchor {v8["spy_now"]:.2f}' if fan_ok else '') + '</div>'
               f'{pic}'
               f'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px 14px;margin-top:6px">'
@@ -844,7 +907,10 @@ def panel_v9_html(snap: dict) -> str:
               + '</div>' + near + '<div class="atn-sm" style="font-size:11px;margin-top:2px">bars: share of days in this state · ended = where it '
               'closed 20 sessions later; fast drop = at any point in the 20 sessions · white pin = all days. Out of sample (every dip '
               'since 2001, with the data known then): the fast-drop odds forecast better than the average day (Tested); the two '
-              '"ended" odds did not (a description of the state, not a forecast).</div></div>')
+              '"ended" odds did not (a description of the state, not a forecast).'
+              + (' Past days count by how close their VIX was to today\'s (full weight at today\'s level, about two thirds at 10% away, '
+                 'a fifth at 20%), so the odds move smoothly with the VIX instead of jumping at fixed VIX lines; out of sample as accurate '
+                 'as the fixed VIX buckets.' if v8.get('kernel') else '') + '</div></div>')
     else:
         t2 = '<div class="atn-tile"><div class="atn-tl">This state</div><div class="atn-sm">SPY phase not available right now.</div></div>'
     b = v8.get('bucket')
