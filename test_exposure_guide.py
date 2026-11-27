@@ -220,3 +220,4 @@ def test_df1b_line_lost_row_8121():
     assert '47%' in eg.risk_label(0, lost)['line'] and 'only 4 such dips' in eg.risk_label(0, flat)['line']
     up = dict(state='F-UP', close=750.0, sma=730.0, slope=5.0, need=731.0)
     assert 'line-lost row (47%)' in eg.drop_odds_html(up, in_dip=True)
+    assert 'Read this column as a floor' in h and '4 of 10' in h          # 8.15.0: SV1 note under the table

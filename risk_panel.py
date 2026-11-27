@@ -248,6 +248,8 @@ def v8_cell(d: pd.DataFrame, ph_hist: pd.Series, vix_hist: pd.Series, code_now: 
     L = long_hist() if use_long else None
     if L is not None:
         x, src = L.copy(), 'S&P 500 since 1990'
+        if 'vix' in x:          # 8.15.0: the stored VIX level, classified with the live median (not the build-date one)
+            x['vb'] = x['vix'].map(vol_band)
     else:
         x, src = d.dropna(subset=['f20']).copy(), 'SPY since 2008'
         x['ph'] = ph_hist.reindex(x.index).ffill() if ph_hist is not None else np.nan
@@ -259,8 +261,50 @@ def v8_cell(d: pd.DataFrame, ph_hist: pd.Series, vix_hist: pd.Series, code_now: 
     def st(g):
         return dict(n=len(g), p10=g['f20'].quantile(.1), p50=g['f20'].median(), p90=g['f20'].quantile(.9),
                     up5=(g['f20'] > .05).mean(), dn5=(g['f20'] < -.05).mean(), fast=(g['mae20'] <= -.07).mean())
-    return dict(scope=scope, code=code_now, vb=vb_now, vix=vix_now, cell=st(cell), all=st(x), dz=st(x[x['ph'] == 0]), src=src,
-                f_cell=cell['f20'].round(5).tolist(), f_all=x['f20'].round(5).tolist())   # 8.4.0: for the distribution picture
+    out = dict(scope=scope, code=code_now, vb=vb_now, vix=vix_now, cell=st(cell), all=st(x), dz=st(x[x['ph'] == 0]), src=src,
+               f_cell=cell['f20'].round(5).tolist(), f_all=x['f20'].round(5).tolist())   # 8.4.0: for the distribution picture
+    out['fan'] = fan_stats(cell, x)                       # 8.15.0: the fan chart (None without the r1..r20 columns)
+    nl = near_line(vix_now)
+    if nl is not None and scope == 'cell':                # 8.15.0: within 5% of a bucket line -> the neighbouring cell
+        other = x[(x['ph'] == code_now) & (x['vb'] == nl[1])]
+        if len(other) >= MIN_CELL_DAYS:
+            out['near'] = dict(line=nl[0], vb=nl[1], **st(other))
+    return out
+
+
+RCOLS = [f'r{k}' for k in range(1, 21)]
+
+
+def fan_inputs(spy: pd.DataFrame) -> dict:
+    """8.15.0: anchor = the last SPY close; the last 20 closes vs it; the 200-day and the dip line (SMA50 - 1 ATR(14), Wilder)."""
+    sp = spy.rename(columns=str.lower)[['high', 'low', 'close']].astype(float).dropna()
+    cc = sp['close']
+    tr = pd.concat([sp['high'] - sp['low'], (sp['high'] - cc.shift()).abs(), (sp['low'] - cc.shift()).abs()], axis=1).max(axis=1)
+    atr = tr.ewm(alpha=1 / 14, adjust=False).mean()
+    return dict(spy_now=float(cc.iloc[-1]), recent=(cc.iloc[-20:] / cc.iloc[-1] - 1).round(5).tolist(),
+                recent_start=pd.Timestamp(cc.index[-20]).strftime('%d %b'),
+                lv={'200-day': float(cc.rolling(200).mean().iloc[-1]), 'dip line': float(cc.rolling(50).mean().iloc[-1] - atr.iloc[-1])})
+
+
+def fan_stats(cell: pd.DataFrame, allx: pd.DataFrame):
+    """8.15.0: percentiles of the 1..20-session paths (close vs the start close) for the cell, and P10 / P90 for all days."""
+    if not all(k in cell.columns for k in RCOLS) or len(cell) < 20:
+        return None
+    P, A = cell[RCOLS].to_numpy(float), allx[RCOLS].to_numpy(float)
+    f = {f'c{q}': np.nanpercentile(P, q, axis=0).round(5).tolist() for q in (10, 25, 50, 75, 90)}
+    f.update({f'a{q}': np.nanpercentile(A, q, axis=0).round(5).tolist() for q in (10, 90)})
+    f['n'] = int(len(P))
+    return f
+
+
+def near_line(vix, tol: float = 0.05):
+    """8.15.0: (line, the bucket on the other side) when the VIX is within tol of the median or 1.5x the median."""
+    if not _fin(vix):
+        return None
+    for line, lo, hi in ((VIX_MEDIAN, 'CALM', 'WIDE'), (1.5 * VIX_MEDIAN, 'WIDE', 'STRESSED')):
+        if abs(vix / line - 1) <= tol:
+            return line, (hi if vix < line else lo)
+    return None
 
 
 def snapshot(d: pd.DataFrame, rho: float, neff: float, vix: float, vix3m: float, cost_hist: pd.Series) -> dict:
@@ -624,6 +668,10 @@ def build_snapshot(hist: pd.DataFrame, spy: pd.DataFrame, v3: pd.Series, closes:
                 v8['f200'] = bool(_c.iloc[-1] > _s.iloc[-1] and _s.iloc[-1] > _s.iloc[-21])
             except Exception:
                 v8['f200'] = None
+            try:   # 8.15.0: the fan chart's anchor, the last 20 closes and two levels
+                v8.update(fan_inputs(spy))
+            except Exception as _ef:
+                print(f'[risk panel fan] {_ef}')
             snap['v8'] = v8
     except Exception as _e8:
         print(f'[risk panel v8] {_e8}')
@@ -664,6 +712,59 @@ def density_svg(f_cell, f_all, W=520, H=170, src='since 2008') -> str:
     g.append('</svg>')
     key = ('<div class="atn-sm" style="font-size:11px"><span style="color:#f4a062">━</span> this state · '
            f'<span style="color:#9b958f">━</span> all days, {src}</div>')
+    return ''.join(g) + key
+
+
+def fan_svg(fan: dict, recent, anchor: float, levels: dict = None, W=780, H=250, src='S&P 500 since 1990', start_lbl=None) -> str:
+    """8.15.0: the next 20 sessions from today's close as a fan (this state's P10-P90 and P25-P75 paths, median, all days'
+    P10 / P90 dashed), the last 20 sessions of SPY on the left, SPY prices on the right axis, the 200-day and the dip line."""
+    rec = [v for v in (recent or []) if _fin(v)]
+    c10, c25, c50, c75, c90, a10, a90 = (fan[k] for k in ('c10', 'c25', 'c50', 'c75', 'c90', 'a10', 'a90'))
+    lv = {k: v / anchor - 1 for k, v in (levels or {}).items() if _fin(v) and abs(v / anchor - 1) <= 0.15}
+    vals = [*c10, *c90, *a10, *a90, *rec, *lv.values(), 0.0]
+    lo, hi = min(vals) - 0.01, max(vals) + 0.015
+    step = 0.05 if hi - lo > 0.12 else 0.025
+    L, R, Tp, B = 40, 52, 10, 20
+    x0, x1 = -(len(rec) - 1 if len(rec) > 1 else 0), 20
+    X = lambda k: L + (k - x0) / (x1 - x0) * (W - L - R)
+    Y = lambda v: Tp + (hi - v) / (hi - lo) * (H - Tp - B)
+    mono = 'font-family="IBM Plex Mono, monospace"'
+    g = [f'<svg class="mrs-fan" viewBox="0 0 {W} {H}" width="100%" style="display:block"><style>.mrs-fan text{{font-size:10.5px}}'
+         '@media (max-width:1900px){.mrs-fan text{font-size:13.5px}}</style>']     # text scales with the tile: larger on narrow screens
+    t = math.ceil(lo / step) * step
+    while t <= hi + 1e-9:
+        g.append(f'<line x1="{L}" x2="{W - R}" y1="{Y(t):.1f}" y2="{Y(t):.1f}" stroke="{"#3a3632" if abs(t) < 1e-9 else "#24211e"}"/>'
+                 f'<text x="{L - 5}" y="{Y(t) + 3.5:.1f}" text-anchor="end" fill="#6e675f" font-size="10.5" {mono}>{t * 100:+.0f}%</text>'
+                 f'<text x="{W - R + 5}" y="{Y(t) + 3.5:.1f}" fill="#6e675f" font-size="10.5" {mono}>{anchor * (1 + t):.0f}</text>')
+        t += step
+    def band(a, b, op):
+        pts = [(X(0), Y(0))] + [(X(k + 1), Y(v)) for k, v in enumerate(b)] + [(X(k + 1), Y(v)) for k, v in reversed(list(enumerate(a)))]
+        return f'<path d="M{" L".join(f"{x:.1f},{y:.1f}" for x, y in pts)} Z" fill="rgba(244,160,98,{op})"/>'
+    def line(a, col, w, dash=''):
+        pts = [(X(0), Y(0))] + [(X(k + 1), Y(v)) for k, v in enumerate(a)]
+        return (f'<polyline points="{" ".join(f"{x:.1f},{y:.1f}" for x, y in pts)}" fill="none" stroke="{col}" stroke-width="{w}"'
+                + (f' stroke-dasharray="{dash}"' if dash else '') + '/>')
+    g += [band(c10, c90, 0.15), band(c25, c75, 0.30), line(c50, '#f4a062', 2), line(a10, '#9b958f', 1.2, '4,4'), line(a90, '#9b958f', 1.2, '4,4')]
+    lvl = []
+    for name, v in lv.items():
+        col = '#85cac5' if name == '200-day' else '#a89f95'
+        lab = f'{name} {anchor * (1 + v):.1f}'
+        g.append(f'<line x1="{L}" x2="{W - R}" y1="{Y(v):.1f}" y2="{Y(v):.1f}" stroke="{col}" stroke-dasharray="2,3"/>')
+        lvl.append(f'<rect x="{L + 2}" y="{Y(v) - 16:.1f}" width="{len(lab) * 8.3 + 6:.0f}" height="13" fill="#161514" opacity="0.85"/>'
+                   f'<text x="{L + 5}" y="{Y(v) - 5:.1f}" fill="{col}" font-size="10.5" {mono}>{lab}</text>')
+    if len(rec) > 1:
+        g.append(f'<polyline points="{" ".join(f"{X(i + x0):.1f},{Y(v):.1f}" for i, v in enumerate(rec))}" fill="none" stroke="#f3ece2" stroke-width="1.8"/>')
+    g += lvl                                              # level labels on a plate, above the price path
+    g.append(f'<line x1="{X(0):.1f}" x2="{X(0):.1f}" y1="{Tp}" y2="{H - B}" stroke="#3a3632"/><circle cx="{X(0):.1f}" cy="{Y(0):.1f}" r="3.5" fill="#f3ece2"/>')
+    for v, lab in ((c90[-1], 'P90'), (c50[-1], 'P50'), (c10[-1], 'P10')):
+        g.append(f'<text x="{X(20) - 4:.1f}" y="{Y(v) - 5:.1f}" text-anchor="end" fill="#f4a062" font-size="10.5" {mono}>{lab} {anchor * (1 + v):.0f}</text>')
+    for k, lab, anc in ((x0, start_lbl or f'{x0} sessions', 'start'), (0, 'today', 'middle'), (10, '+10', 'middle'), (20, '+20 sessions', 'end')):
+        if k != x0 or x0 < 0:
+            g.append(f'<text x="{X(k):.1f}" y="{H - 5}" text-anchor="{anc}" fill="#6e675f" font-size="10.5">{lab}</text>')
+    g.append('</svg>')
+    key = ('<div class="atn-sm" style="font-size:11px">dark band P25–P75 · light band P10–P90 · <span style="color:#f4a062">━</span> median · '
+           f'<span style="color:#9b958f">╍</span> all days P10 / P90 ({_e(src)}) · <span style="color:#f3ece2">━</span> SPY, last 20 sessions · '
+           'right axis: SPY price from today\'s close</div>')
     return ''.join(g) + key
 
 
@@ -723,15 +824,27 @@ def panel_v9_html(snap: dict) -> str:
         c, a = v8['cell'], v8['all']
         vb = v8.get('vb'); vcol = TEAL if vb == 'CALM' else ORANGE
         scope = '' if v8['scope'] == 'cell' else ' <span style="color:#f8d6b4">(phase only)</span>'
-        t2 = (f'<div class="atn-tile"><div class="atn-tl">This state · next 20 sessions, {_e(v8.get("src", "SPY since 2008"))} {ui.tag("Descriptive")}</div>'
+        fan_ok = bool(v8.get('fan')) and _fin(v8.get('spy_now'))
+        pic = (fan_svg(v8['fan'], v8.get('recent'), v8['spy_now'], v8.get('lv'), src=v8.get('src', 'S&P 500 since 1990'),
+                       start_lbl=v8.get('recent_start')) if fan_ok
+               else density_svg(v8.get('f_cell', []), v8.get('f_all', []), W=620, H=170, src=v8.get('src', 'since 2008')))
+        nr = v8.get('near')
+        near = (f'<div class="atn-sm" style="font-size:11.5px;margin-top:4px;color:#f8d6b4">VIX within 5% of the bucket line at '
+                f'{nr["line"]:.1f}. On the other side ({_e(nr["vb"])}) this state read: ended ≥5% up {nr["up5"] * 100:.0f}% · down '
+                f'{nr["dn5"] * 100:.0f}% · fast drop {nr["fast"] * 100:.0f}% ({nr["n"]:,} days).</div>') if nr else ''
+        t2 = (f'<div class="atn-tile"><div class="atn-tl">This state · next 20 sessions{" from today" + chr(39) + "s close" if fan_ok else ""}, '
+              f'{_e(v8.get("src", "SPY since 2008"))} {ui.tag("Descriptive")}</div>'
               f'<div class="atn-sm" style="margin-bottom:2px"><b style="color:#f3ece2">SPY {PH_TXT.get(v8["code"], "?")}</b> · VIX '
-              f'<b style="color:{vcol}">{(v8["vix"] if _fin(v8["vix"]) else float("nan")):.1f} {_e(vb)}</b>{scope} · {c["n"]:,} days</div>'
-              f'{density_svg(v8.get("f_cell", []), v8.get("f_all", []), W=620, H=170, src=v8.get("src", "since 2008"))}'
+              f'<b style="color:{vcol}">{(v8["vix"] if _fin(v8["vix"]) else float("nan")):.1f} {_e(vb)}</b>{scope} · {c["n"]:,} days'
+              + (f' · anchor {v8["spy_now"]:.2f}' if fan_ok else '') + '</div>'
+              f'{pic}'
               f'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px 14px;margin-top:6px">'
               + _odds('ended ≥5% up', c['up5'], a['up5'], TEAL) + _odds('ended ≥5% down', c['dn5'], a['dn5'], ORANGE)
-              + _odds('7% fast drop', c['fast'], a['fast'], ORANGE)
-              + '</div><div class="atn-sm" style="font-size:11px;margin-top:2px">bars: share of days in this state · ended = where it '
-              'closed 20 sessions later; fast drop = at any point in the 20 sessions · white pin = all days</div></div>')
+              + _odds('7% fast drop ' + ui.tag('Tested'), c['fast'], a['fast'], ORANGE)
+              + '</div>' + near + '<div class="atn-sm" style="font-size:11px;margin-top:2px">bars: share of days in this state · ended = where it '
+              'closed 20 sessions later; fast drop = at any point in the 20 sessions · white pin = all days. Out of sample (every dip '
+              'since 2001, with the data known then): the fast-drop odds forecast better than the average day (Tested); the two '
+              '"ended" odds did not (a description of the state, not a forecast).</div></div>')
     else:
         t2 = '<div class="atn-tile"><div class="atn-tl">This state</div><div class="atn-sm">SPY phase not available right now.</div></div>'
     b = v8.get('bucket')

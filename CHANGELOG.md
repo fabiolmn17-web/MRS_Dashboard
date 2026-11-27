@@ -7,6 +7,14 @@ Versions follow `docs/PROCESS.md`:
 
 The current version is in `VERSION` and in the page footer. Entries before 6.3.1 were reconstructed from the commit history and the project notes on 13 Nov 2026.
 
+## 8.15.0 · 2026-11-27
+Card changes from the out-of-sample check of the card's odds (study SV1, 26–27 Nov). No rule, budget or stop changed.
+- **Fan chart in "This state":** the distribution picture, which only changed when the state changed, is replaced by the next 20 sessions drawn from today's close: this state's P10–P90 and P25–P75 paths (S&P 500 since 1990), the median, all days' P10 / P90 dashed, SPY's last 20 sessions on the left, SPY prices on the right axis, and the 200-day and the dip line (50-day − 1 ATR) as levels. The cone re-anchors at every close and changes shape when the state changes. Descriptive; the 20-session band was checked out of sample (P10–P90 held 77% of outcomes, misses leaning down). Without the new history columns the old picture is shown.
+- **Odds bars:** the 7% fast drop carries a TESTED tag (it forecast better than the average day on every dip since 2001); the caption says the two "ended ±5%" odds did not, so they describe the state rather than forecast it.
+- **Near a VIX line:** when the VIX is within 5% of the median or of 1.5× the median, a line under the bars gives the odds of the cell on the other side of the line (the odds jump at the line: on 24–25 Nov "ended ≥5% up" moved from 23% to 35% on a 0.4-point VIX move).
+- **"What dips did next, by the 200-day":** a note under the table says the "≥ 10% · 60d" column has run low since 2001 (29% of 113 dips vs 18% forecast; line lost 4 of 10; below a falling 200-day 63% vs 40%) and should be read as a floor. The numbers in the table are unchanged.
+- **History file:** `risk_long.csv` rebuilt to 28 Oct 2026 (S&P 500 to 25 Nov, IBKR index bars after 13 Nov) with the VIX level and the 1–20 session paths. The width bucket of past days is now classified with the live VIX median (before: the median at the build date). `build_risk_long.py` gains a Yahoo mode for a monthly rebuild by GitHub Actions (`workflows_8_15/risk_long_monthly.yml`, copy into `.github/workflows/`); it never replaces the file with a shorter or older one. New tests: `test_build_risk_long_8150.py`, and in `test_risk_panel_v8.py` / `test_exposure_guide.py`.
+
 ## 8.14.1 · 2026-11-26
 - **Chart legend on one row again:** since 8.13.1 the moving-average legend above each chart stacked one entry per line and took a large block of the chart panel (the ATR-strip labels carried a legend group, which makes a horizontal legend put every entry on its own row). The group is removed and the legend order fixed, and the legend names are shorter (52W hi, 21D hi, Deep dip, Dip-zone breakout, 50d reclaim, RSI < 35; the full explanation stays in the hover), so the legend takes two rows in the scanner panel instead of eight.
 

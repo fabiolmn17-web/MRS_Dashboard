@@ -766,6 +766,9 @@ DF1B = {'F-UP': dict(n=168, d=(0.36, 0.17, 0.08, 0.04), d60=0.12),
         'F-LOST': dict(n=30, d=(0.47, 0.37, 0.13, 0.07), d60=0.23),
         'F-DN': dict(n=55, d=(0.67, 0.44, 0.29, 0.16), d60=0.45),
         'ALL': dict(n=804, d=(0.39, 0.20, 0.09, 0.05), d60=0.14)}
+# 8.15.0 (27 Nov 2026, SV1 Part A: out of sample, 113 S&P 500 dip episodes 2001-26, each scored with the data known then):
+# the >= 10% within 60 sessions column ran low in both halves (2001-13 and 2014-26). Forecast vs observed, all dips and by row.
+DF1B_60_SINCE2001 = dict(n=113, fc=0.18, obs=0.29, lost=(4, 10), dn_fc=0.40, dn_obs=0.63)
 DF1B_ROWS = (('F-UP', 'Above a rising 200-day'), ('F-MIX', 'Mixed: line lost, or not rising'), ('F-DN', 'Below a falling 200-day'),
              ('ALL', 'Any day'))
 DF1B_NAMES = dict(DF1B_ROWS, **{'F-LOST': 'Line lost: below a still-rising 200-day',
@@ -816,8 +819,13 @@ def drop_odds_html(f200, in_dip: bool = True) -> str:
             txt += f' A close above {nd:,.2f} next session turns it ON.'
         else:
             txt += f' ON needs a close above {nd:,.2f}: the 200-day slope rules it out next session.'
+    k6 = DF1B_60_SINCE2001
+    note = (f'<div class="atn-sm" style="font-size:11px;margin-top:5px;padding-left:8px;border-left:2px solid {ORANGE};border-radius:0">'
+            f'≥ 10% · 60d has run low since 2001: of {k6["n"]} dips, {k6["obs"] * 100:.0f}% fell another 10% within 60 sessions against '
+            f'{k6["fc"] * 100:.0f}% forecast (line lost {k6["lost"][0]} of {k6["lost"][1]}; below a falling 200-day '
+            f'{k6["dn_obs"] * 100:.0f}% vs {k6["dn_fc"] * 100:.0f}%). Read this column as a floor.</div>')
     return (f'<div style="margin-top:8px"><div class="atn-tl" style="margin:0 0 2px 0">What dips did next, by the 200-day '
-            f'{ui.tag("Descriptive · SPX dips 1963–2026")}</div>{rows}'
+            f'{ui.tag("Descriptive · SPX dips 1963–2026")}</div>{rows}{note}'
             f'<div class="atn-sm" style="font-size:11px;margin-top:4px">{_e(txt)} The upside was about the same in every row: '
             f'losing the line mainly adds downside.</div></div>')
 
