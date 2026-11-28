@@ -922,8 +922,8 @@ with _today_slot.container():
                     _jv_c1, _jv_c2 = st.columns([1, 2.6])
                     with _jv_c1:
                         st.markdown(joint_view.lines_html('What the chart says', joint_view.filter_lines(_jv_t, _jv_fs),
-                                                          ui.tag('Tested · ON / OFF split: DF1, RB1, RB2') + ' '
-                                                          + ui.tag('Descriptive · days like today')), unsafe_allow_html=True)
+                                                          ui.tag('Tested · 1963–2026') + ' '
+                                                          + ui.tag('Descriptive')), unsafe_allow_html=True)
                     with _jv_c2:
                         st.plotly_chart(joint_view.figure_filter(_jv_L, _jv_t, _jv_fs), use_container_width=True,
                                         config=_JV_CFG)
@@ -1957,9 +1957,8 @@ if _scan_df is not None and len(_scan_df) > 0:
         if _cxh:
             st.markdown(f'<div style="font-size:0.76rem;color:#f3ece2;border-left:3px solid {_cxh[0]};padding:2px 8px;'
                         f'margin:-2px 0 8px 0;background:#0d0d0d;">{_html_mod.escape(_cxh[1])} '
-                        f'Setups mark where the trade is wrong, not an edge: the state decides the outcome. '
-                        f'<span style="color:#6e675f;">Survivorship-free S1 / S2 / S3; see the Today card.'
-                        f'</span></div>', unsafe_allow_html=True)
+                        f'Setups mark where the trade is wrong, not an edge: the state decides the outcome.'
+                        f'</div>', unsafe_allow_html=True)
 
     if _scan in _mask:
         _v = _sd[_mask[_scan]]

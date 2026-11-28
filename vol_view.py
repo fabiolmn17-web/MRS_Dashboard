@@ -279,7 +279,7 @@ def kicker_html(today: dict, prev: dict = None) -> str:
     src = SRC_NAME.get(today.get('src'), today.get('src', ''))
     return (f'<div class="atn-k" style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'
             f'<span>Vol surface <b>· SPY {float(today["spot"]):.2f} · {_e(src)} · {d:%a %d %b}{pv}</b></span>'
-            f'{ui.tag("Descriptive · what options price")}</div>')
+            f'{ui.tag("Descriptive · options-implied")}</div>')
 
 
 def read_html(today: dict, prev: dict = None, vix=None) -> str:

@@ -322,7 +322,7 @@ def kicker_html(today: dict) -> str:
     dt = f' · {pd.Timestamp(d):%a %d %b}' if d is not None else ''
     return (f'<div class="atn-k" style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'
             f'<span>Joint view <b>· two variables at once, today on top{dt}</b></span>'
-            f'{ui.tag("Descriptive · history, not a forecast")}</div>')
+            f'{ui.tag("Descriptive")}</div>')
 
 
 HOW_TO_MD = """

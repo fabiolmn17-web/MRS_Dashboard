@@ -347,7 +347,7 @@ def _clock_tile(bucket, n):
     segs = [(12, TEAL), (28, TEAL_D), (35, '#3a3632'), (25, '#5a4636')]
     lab = [(12, 'DIP'), (28, '1–20'), (35, '21–60'), (25, '60+')]
     nn = '' if n in (None, 0) else f' · {n}'
-    return (f'<div class="tile">{_tag("Per trade · above a rising 200-day")}<div class="k">Clock · sessions since the dip</div>'
+    return (f'<div class="tile">{_tag("Tested · 2001–26")}<div class="k">Clock · sessions since the dip</div>'
             f'<div class="val" style="color:{col};">{_e(bucket)}{nn}</div>{_bar(segs, f, lab)}</div>')
 
 
@@ -529,7 +529,7 @@ def _look(bucket):
     """(chips, tag) for Where to look: the RS line only inside the DIP ZONE."""
     if bucket == 'IN DIP':
         return LOOK_DIP, 'Tested · 2001–08'
-    return LOOK_ELSE, 'Tested (null)'
+    return LOOK_ELSE, 'Tested · no edge'
 
 
 def _look_tile(st_, bucket):

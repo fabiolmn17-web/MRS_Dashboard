@@ -7,6 +7,9 @@ Versions follow `docs/PROCESS.md`:
 
 The current version is in `VERSION` and in the page footer. Entries before 6.3.1 were reconstructed from the commit history and the project notes on 13 Nov 2026.
 
+## 8.16.4 · 2026-11-28
+- **Evidence tags trimmed:** grey notes next to the tags keep only the data range or a short source. Removed or shortened: "ON / OFF split: DF1, RB1, RB2" → 1963–2026 (joint view), "days like today" and "history, not a forecast" (DESCRIPTIVE already says it), "what options price" → options-implied (vol surface), "per trade · above a rising 200-day" → 2001–26 (clock tile), "(null)" → no edge (where to look). The scanner banner no longer ends with "Survivorship-free S1 / S2 / S3; see the Today card."
+
 ## 8.16.3 · 2026-11-28
 - **Risk label (stance card banner):** the grey note "plain-language label; the stance sets the size" next to the DESCRIPTIVE tag is removed; the tag stays.
 
