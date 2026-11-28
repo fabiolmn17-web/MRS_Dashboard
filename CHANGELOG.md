@@ -7,6 +7,9 @@ Versions follow `docs/PROCESS.md`:
 
 The current version is in `VERSION` and in the page footer. Entries before 6.3.1 were reconstructed from the commit history and the project notes on 13 Nov 2026.
 
+## 8.16.2 · 2026-11-28
+- **ETF ticker next to every sector and industry name** (Fabio's request): "Financials (XLF)", "Regional Banks (KRE)". In the "Since last session" list (leaders list, sector label changes, labels confirming), the sector-rotation map labels and its quadrant lists, the strongest / weakest industries, the Sector column of the scanner and of the leaders / industries tables, the scanner's Sector filter and the heat-score breakdown. Tables that already show an ETF column next to the name (sector table, leaders list) are unchanged. Stock-level industry groups have no ETF and stay as they are. Names and tickers come from the same table the nightly industry scan uses (`etf_names.py`).
+
 ## 8.16.1 · 2026-11-28
 - **Risk today fan chart, 200-day level fixed:** the fan drew the 200-day about 2.3 points too low (27 Nov: 731.0 against 733.34 on the stance card and on TradingView). The Risk today history is dividend-adjusted (total return, right for the odds), and the levels were taken from it. The 200-day, the dip line, the anchor and the 200-day filter used for the clock table now come from the card's SPY prices (not dividend-adjusted), so every level on the page agrees.
 

@@ -6,6 +6,7 @@ uses the dashboard's RS label and trend rules; the Ext-Mom zones are the 50-day 
 whose odds were measured on SPY and QQQ, not on single stocks.
 """
 import html as _html
+import etf_names                                       # 8.16.2: ETF ticker next to the sector
 import math
 import re
 
@@ -512,7 +513,7 @@ def _row(r, today, sec_label, sec_score, leader_hold, yf_to_sector, clickable=Fa
               f'<span style="display:inline-block;min-width:30px;border-radius:3px;padding:0 5px;font-family:IBM Plex Mono,'
               f'monospace;font-weight:700;color:{hc_};background:#24211e;border:1px solid #3a3632;">'
               f'{int(float(hs_))}</span></td>')   # v8.1.0: muted (describes leadership, no edge)
-    h += (f'<td class="l" data-s="{_e(sect)}"><span style="color:{_score_col(ssc)};">{_e(sect)}</span>'
+    h += (f'<td class="l" data-s="{_e(sect)}"><span style="color:{_score_col(ssc)};">{etf_names.html(sect)}</span>'
           f'{" <span class=sub>" + _e(sec_label.get(sect, "").title()) + "</span>" if sec_label.get(sect) else ""}</td>')
     cl = r.get('close')
     cl_txt = '—' if _nan(cl) else '${:,.2f}'.format(float(cl))

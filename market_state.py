@@ -14,6 +14,7 @@ Labels and numbers follow the MRS evidence audit v2 (studies/_framework/audit/*,
 Nothing here is a buy signal on its own. The shortlist says where to look first for longs.
 """
 import html as _html
+import etf_names                                       # 8.16.2: ETF ticker next to sector names
 import math
 
 import numpy as np
@@ -296,7 +297,7 @@ def leaders_html(short: pd.DataFrame, light: dict, hold_df: pd.DataFrame = None,
         h += '<tr>'
         h += f'<td class="l"><b>{_e(r["Industry"])}</b>{new}</td>'
         h += f'<td class="l" style="color:#a89f95;">{_e(r["ETF"])}</td>'
-        h += f'<td class="l" style="color:#a89f95;">{_e(r["Sector"])}</td>'
+        h += f'<td class="l" style="color:#a89f95;">{etf_names.html(r["Sector"])}</td>'
         h += f'<td class="l" style="color:{lc};font-weight:700;">{"+" if sc > 0 else ""}{sc:.1f} {_e(r["Label"])}{pend_txt}</td>'
         h += f'<td class="num" style="color:#a89f95;">{d_txt}</td>'
         for k in ('RS 1M', 'RS 3M', 'RS 6M', 'RS 1Y'):
@@ -526,7 +527,7 @@ def avoid_html(lag: pd.DataFrame, hold_df: pd.DataFrame = None, crash: bool = Fa
         h += '<tr>'
         h += f'<td class="l"><b>{_e(r["Industry"])}</b></td>'
         h += f'<td class="l" style="color:#a89f95;">{_e(r["ETF"])}</td>'
-        h += f'<td class="l" style="color:#a89f95;">{_e(r["Sector"])}</td>'
+        h += f'<td class="l" style="color:#a89f95;">{etf_names.html(r["Sector"])}</td>'
         h += f'<td class="l" style="color:{lc};font-weight:700;">{sc:+.1f} {_e(r["Label"])}</td>'
         h += f'<td class="num" style="color:{c1};">{_pct(v1)}</td>'
         h += f'<td class="l">{_rs_bar(r.get("RS 3M"))}</td>'

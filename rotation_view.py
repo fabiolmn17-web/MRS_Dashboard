@@ -53,6 +53,15 @@ HORIZONS = {
 }
 
 
+
+import etf_names                                       # 8.16.2: ETF ticker next to sector / industry names
+
+
+def _tk(r) -> str:
+    """' (XLF)' after a sector name in the text lists (8.16.2); '' when the row has no ETF."""
+    t = getattr(r, 'ETF', None)
+    return f' <span style="opacity:0.72;">({_e(t)})</span>' if isinstance(t, str) and t else ''
+
 def quadrant(rs6, rs3):
     if rs6 is None or rs3 is None or np.isnan(rs6) or np.isnan(rs3):
         return None
@@ -120,7 +129,7 @@ def _place_labels(pts, xr, yr, w_px=560, h_px=300, xc='rs6', yc='rs3'):
     out = {}
     dots = [((getattr(r, xc) * 100 - xr[0]) * sx, (yr[1] - getattr(r, yc) * 100) * sy) for r in pts.itertuples()]
     for r, (px, py) in sorted(zip(pts.itertuples(), dots), key=lambda t: t[1][1]):
-        lab = SHORT.get(r.Sector, r.Sector)
+        lab = SHORT.get(r.Sector, r.Sector) + (f' {r.ETF}' if isinstance(getattr(r, 'ETF', None), str) else '')   # 8.16.2
         w, h = 6.4 * len(lab) + 4, 14
         best = None
         for ax, ay, anc in cands:
@@ -197,7 +206,7 @@ def rotation_figure(points: pd.DataFrame, height: int = 300, horizon: str = 'sta
     pos = _place_labels(now, xr, yr, w_px=600, h_px=height - 44, xc=xc, yc=yc)
     for r in now.itertuples():
         ax, ay, anc = pos[r.Sector]
-        lab = SHORT.get(r.Sector, r.Sector)
+        lab = SHORT.get(r.Sector, r.Sector) + (f' <span style="color:#a89f95">{r.ETF}</span>' if isinstance(getattr(r, 'ETF', None), str) else '')   # 8.16.2
         if r.dir:
             lab += f' <span style="color:{DIR[r.dir][2]}">{DIR[r.dir][0]}</span>'
         fig.add_annotation(x=getattr(r, xc) * 100, y=getattr(r, yc) * 100, text=lab,
@@ -244,7 +253,7 @@ def rotation_summary_html(points: pd.DataFrame, ind_df, ind_as_of=None, n_ind: i
             if r.dir:
                 arrow, word, dcol = DIR[r.dir]
                 tag = f' <span style="color:{dcol};" title="{word}: {yl} {r.d5 * 100:+.1f} pts over 5 sessions">{arrow}</span>'
-            names.append(_e(SHORT.get(r.Sector, r.Sector)) + tag + moved)
+            names.append(_e(SHORT.get(r.Sector, r.Sector)) + _tk(r) + tag + moved)
         h += (f'<div><span style="display:inline-block;width:9px;height:9px;border-radius:50%;'
               f'background:{col};margin-right:7px;"></span><b style="color:{col};">{lbl}</b>'
               f'<span style="color:#9b958f;"> &nbsp;·&nbsp; </span>{", ".join(names) if names else "—"}</div>')
@@ -253,7 +262,7 @@ def rotation_summary_html(points: pd.DataFrame, ind_df, ind_as_of=None, n_ind: i
                ((now.q.isin(['FADING', 'LAGGING'])) & (now.dir == 'UP'))]
     turn = turn.reindex(turn['d5'].abs().sort_values(ascending=False).index).head(4)    # the 4 largest moves
     if len(turn):
-        items = [f'{_e(SHORT.get(r.Sector, r.Sector))} <span style="color:#a89f95;">{QUAD[r.q][0].lower()}</span> '
+        items = [f'{_e(SHORT.get(r.Sector, r.Sector))}{_tk(r)} <span style="color:#a89f95;">{QUAD[r.q][0].lower()}</span> '
                  f'<span style="color:{DIR[r.dir][2]};">{DIR[r.dir][0]} {DIR[r.dir][1]}</span> '
                  f'<span style="color:#9b958f;">({yl} {r.d5 * 100:+.1f} pts in 5 sessions)</span>' for r in turn.itertuples()]
         h += f'<div style="margin-top:6px;"><b style="color:#f3ece2;">Turning</b><span style="color:#9b958f;"> &nbsp;·&nbsp; </span>{", ".join(items)}</div>'
@@ -262,7 +271,7 @@ def rotation_summary_html(points: pd.DataFrame, ind_df, ind_as_of=None, n_ind: i
         d = ind_df.dropna(subset=[icol])
         top = d.nlargest(n_ind, icol)
         bot = d.nsmallest(n_ind, icol)
-        fmt = lambda t: ', '.join(f'{_e(r[0])} <span style="color:#a89f95;">{r[1] * 100:+.0f}%</span>'
+        fmt = lambda t: ', '.join(f'{etf_names.html(r[0])} <span style="color:#a89f95;">{r[1] * 100:+.0f}%</span>'
                                   for r in t[['Industry', icol]].itertuples(index=False))
         h += ('<div style="margin-top:10px;border-top:1px solid #2a2724;padding-top:8px;">'
               f'<div><b style="color:#85cac5;">Strongest industries</b> <span style="color:#9b958f;">({icol})</span>: {fmt(top)}</div>'

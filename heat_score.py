@@ -30,6 +30,11 @@ compute(row, sec_score) -> dict(score, parts=[(name, points, max, text)], missin
 Missing inputs score 0 and are listed; the score is not rescaled (a live lookup without an RS rating reads lower).
 """
 import math
+try:
+    import etf_names as _etfn                          # 8.16.2: ETF ticker next to the sector
+except Exception:
+    class _etfn:
+        plain = staticmethod(str)
 
 import pandas as pd
 
@@ -110,7 +115,7 @@ def compute(r, sec_score=None, yf_to_sector=None, leader_etf=None):
         parts.append(('Sector', 0, WEIGHTS['sector'], 'n/a'))
     else:
         parts.append(('Sector', 5 if ss >= 1.0 else 3 if ss >= 0.5 else 1 if ss > -0.5 else 0, WEIGHTS['sector'],
-                      f'{sect} {ss:+.1f}'))
+                      f'{_etfn.plain(sect)} {ss:+.1f}'))
 
     # 5. distance from the 52-week closing high
     p52 = _num(g('pct_from_52w_high'))

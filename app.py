@@ -45,6 +45,7 @@ import scan_view
 import heat_score
 import chart_view
 import watchlist
+import etf_names               # 8.16.2 (28 Nov 2026): ETF ticker next to every sector / industry name
 import theme_filter            # 8.12.0 (25 Nov 2026): scanner theme filter (sectors, industry groups)
 import tv_export               # 8.13.0 (26 Nov 2026): TradingView watchlist export (scanner list, watchlist)
 
@@ -686,15 +687,15 @@ try:
                          + (' (unchanged)' if _st_prev == _st_now else '') + f' · clock {_esc(_ck)}'))
 except Exception:
     pass
-_ld_moves = [f'<b style="color:#85cac5;">+ {_esc(x)}</b>' for x in _added['Industry']] if len(_added) else []
-_ld_moves += [f'<b style="color:#f4a062;">− {_esc(x)}</b>' for x in _dropped['Industry']] if len(_dropped) else []
+_ld_moves = [f'<b style="color:#85cac5;">+ {etf_names.html(x)}</b>' for x in _added['Industry']] if len(_added) else []
+_ld_moves += [f'<b style="color:#f4a062;">− {etf_names.html(x)}</b>' for x in _dropped['Industry']] if len(_dropped) else []
 if _ld_moves:
     _changes.append('Leaders list: ' + ', '.join(_ld_moves))
 if _sec_df is not None and len(_sec_df) and 'PrevScore' in _sec_df.columns:
     for _, _r in _sec_df.iterrows():
         if pd.notna(_r['PrevScore']) and float(_r['PrevScore']) != float(_r['Score']):
             _up = float(_r['Score']) > float(_r['PrevScore'])
-            _changes.append(f'Sector {_esc(_r["Sector"])}: {rs_labels.composite_label(float(_r["PrevScore"])).title()} → '
+            _changes.append(f'Sector {etf_names.html(_r["Sector"])}: {rs_labels.composite_label(float(_r["PrevScore"])).title()} → '
                             f'<b style="color:{"#85cac5" if _up else "#f4a062"};">{_esc(str(_r["Label"]).title())}</b>')
 # labels about to change: a label switches only after 3 sessions in a row at the new value
 _pend = []
@@ -705,8 +706,8 @@ for _d in (_sec_df, _ind_df):
             _pend.append((int(float(_r.get('PendingDays') or 0)), str(_r[_nm]), str(_r['PendingLabel']).title()))
 if _pend:
     _pend.sort(key=lambda x: -x[0])
-    _all = '; '.join(f'{n} → {l} ({k}/3)' for k, n, l in _pend)
-    _shown = ', '.join(f'{_esc(n)} → {_esc(l)} <span style="color:#a89f95;">{k}/3</span>' for k, n, l in _pend[:3])
+    _all = '; '.join(f'{etf_names.plain(n)} → {l} ({k}/3)' for k, n, l in _pend)
+    _shown = ', '.join(f'{etf_names.html(n)} → {_esc(l)} <span style="color:#a89f95;">{k}/3</span>' for k, n, l in _pend[:3])
     _more = len(_pend) - 3
     _changes.append(f'<span title="{_esc(_all)}">Labels confirming (3 sessions needed): {_shown}'
                     + (f' <span style="color:#a89f95;">+{_more} more ⓘ</span>' if _more > 0 else '') + '</span>')
@@ -1873,7 +1874,7 @@ if _scan_df is not None and len(_scan_df) > 0:
     _t0, _t1, _t2, _t3 = st.columns([1.6, 2.4, 0.9, 1.5])
     with _t0:
         _th_sec = st.multiselect('Sector', theme_filter.sector_options(_sd, YF_TO_SECTOR), key='ms_th_sec',
-                                 format_func=lambda s: f'{s}  ·  {_th_sec_n.get(s, 0)}', placeholder='All sectors',
+                                 format_func=lambda s: f'{etf_names.plain(s)}  ·  {_th_sec_n.get(s, 0)}', placeholder='All sectors',
                                  help='One or more sectors. The number is how many stocks of this scan sit in each.')
     with _t1:
         _th_ind = st.multiselect('Industry group',
