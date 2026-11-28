@@ -221,7 +221,7 @@ def risk_label_html(code, f200=None, vix=None) -> str:
             f'<span style="font-weight:700;font-size:13px;letter-spacing:.1em;padding:3px 10px;border-radius:4px;'
             f'white-space:nowrap;color:{r["col"]};border:1px solid {r["col"]};background:{r["col"]}18;">{_e(r["label"])}</span>'
             f'{width}<span style="color:{MUTED};font-size:13px;">{_e(r["line"])}</span>'
-            f'{ui.tag("Descriptive · plain-language label; the stance sets the size")}</div>')
+            f'{ui.tag("Descriptive")}</div>')
 
 
 def risk_label_md() -> str:

@@ -7,6 +7,9 @@ Versions follow `docs/PROCESS.md`:
 
 The current version is in `VERSION` and in the page footer. Entries before 6.3.1 were reconstructed from the commit history and the project notes on 13 Nov 2026.
 
+## 8.16.3 · 2026-11-28
+- **Risk label (stance card banner):** the grey note "plain-language label; the stance sets the size" next to the DESCRIPTIVE tag is removed; the tag stays.
+
 ## 8.16.2 · 2026-11-28
 - **ETF ticker next to every sector and industry name** (Fabio's request): "Financials (XLF)", "Regional Banks (KRE)". In the "Since last session" list (leaders list, sector label changes, labels confirming), the sector-rotation map labels and its quadrant lists, the strongest / weakest industries, the Sector column of the scanner and of the leaders / industries tables, the scanner's Sector filter and the heat-score breakdown. Tables that already show an ETF column next to the name (sector table, leaders list) are unchanged. Stock-level industry groups have no ETF and stay as they are. Names and tickers come from the same table the nightly industry scan uses (`etf_names.py`).
 
