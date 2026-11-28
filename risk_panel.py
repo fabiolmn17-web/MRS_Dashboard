@@ -702,10 +702,13 @@ def fetch_inputs(etfs, workers: int = 8):
 
 
 def build_snapshot(hist: pd.DataFrame, spy: pd.DataFrame, v3: pd.Series, closes: pd.DataFrame, label_fn,
-                   phase: pd.Series = None) -> dict:
+                   phase: pd.Series = None, levels: pd.DataFrame = None) -> dict:
     """hist = mrs_history (date, mrs_score, vix). Returns the snapshot for the last SPY session.
     phase (v8.2.0): today's SPY phase series as the MRS card has it (chart_view.spy_phase); the history of the phase for
-    the 20-session statistics is replayed here on the full SPY history."""
+    the 20-session statistics is replayed here on the full SPY history.
+    levels (8.16.1): the card's SPY frame (split-adjusted, not dividend-adjusted, as TradingView and the 200-day filter).
+    The 200-day, the dip line, the filter and the fan anchor come from it, so they match the card; `spy` here is
+    dividend-adjusted (total-return history for the statistics), which put the 200-day about 2.3 points low."""
     h = hist.dropna(subset=['mrs_score']).sort_values('date')
     mrs = pd.Series(h['mrs_score'].astype(float).values, index=pd.to_datetime(h['date']))
     d = spy_states(spy, mrs, label_fn)
@@ -724,13 +727,14 @@ def build_snapshot(hist: pd.DataFrame, spy: pd.DataFrame, v3: pd.Series, closes:
             v8 = v8_cell(d, ph_hist if ph_hist is not None else ph_now, vix_hist, int(ph_now.iloc[-1]), vix)
             v8['bucket'], v8['n_since'] = clock_of(ph_now)
             try:   # 8.6.0: the 200-day filter picks the clock table (ON: close > SMA200 and SMA200 up over 20 sessions)
-                _c = spy.rename(columns=str.lower)['close'].astype(float).dropna()
+                _lsrc = levels if levels is not None and len(levels) else spy      # 8.16.1: the card's frame
+                _c = _lsrc.rename(columns=str.lower)['close'].astype(float).dropna()
                 _s = _c.rolling(200).mean()
                 v8['f200'] = bool(_c.iloc[-1] > _s.iloc[-1] and _s.iloc[-1] > _s.iloc[-21])
             except Exception:
                 v8['f200'] = None
             try:   # 8.15.0: the fan chart's anchor, the last 20 closes and two levels
-                v8.update(fan_inputs(spy))
+                v8.update(fan_inputs(levels if levels is not None and len(levels) else spy))   # 8.16.1
             except Exception as _ef:
                 print(f'[risk panel fan] {_ef}')
             snap['v8'] = v8

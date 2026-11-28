@@ -118,6 +118,18 @@ def test_vix_kernel_8160():
     assert ext['kernel']['h'] > 0.10 and ext['kernel']['ess_spells'] >= rp.KERNEL_MIN_ESS
 
 
+
+def test_levels_from_card_frame_8161():
+    """8.16.1: the fan's 200-day, dip line, anchor and the filter come from the card's (unadjusted) frame when given."""
+    idx = pd.bdate_range('2025-01-01', periods=320)
+    c = pd.Series(np.linspace(600, 730, 320), index=idx)
+    raw = pd.DataFrame({'open': c, 'high': c + 2, 'low': c - 2, 'close': c})
+    adj = raw * np.linspace(0.985, 1.0, 320)[:, None]                # dividend-adjusted: older prices lower
+    lv_raw, lv_adj = rp.fan_inputs(raw)['lv']['200-day'], rp.fan_inputs(adj)['lv']['200-day']
+    assert lv_raw > lv_adj + 0.5
+    assert abs(lv_raw - float(c.rolling(200).mean().iloc[-1])) < 1e-9
+
+
 if __name__ == '__main__':
     for n, f in list(globals().items()):
         if n.startswith('test_'):

@@ -649,7 +649,7 @@ def _eg_spy():
     return chart_view.fetch('SPY')
 
 
-_v8, _eg_h, _eg_ph = {}, None, None
+_v8, _eg_h, _eg_ph, _eg_src = {}, None, None, None   # 8.16.1: _eg_src also feeds the Risk today levels
 try:
     _eg_h = _eg_spy()
     _eg_src = _eg_h if _eg_h is not None and len(_eg_h) else (load_alloc_inputs() or {}).get('SPY')
@@ -825,7 +825,8 @@ try:
     with st.spinner('Loading the risk panel…'):
         _rp_spy, _rp_v3, _rp_cl = load_risk_inputs(_rp_etfs)
     if _rp_spy is not None and len(_rp_spy):
-        _rp_snap = risk_panel.build_snapshot(hist, _rp_spy, _rp_v3, _rp_cl, pipeline.regime_label, phase=_eg_ph)
+        _rp_snap = risk_panel.build_snapshot(hist, _rp_spy, _rp_v3, _rp_cl, pipeline.regime_label, phase=_eg_ph,
+                                               levels=_eg_src)   # 8.16.1
         st.session_state['_spy_ext_atr'] = _rp_snap.get('ext_atr')     # 9 Nov 2026: depth context on Deep dip
 except Exception as _rp_err:
     print(f'[risk panel] {_rp_err}')

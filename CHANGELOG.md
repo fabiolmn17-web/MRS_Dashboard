@@ -7,6 +7,9 @@ Versions follow `docs/PROCESS.md`:
 
 The current version is in `VERSION` and in the page footer. Entries before 6.3.1 were reconstructed from the commit history and the project notes on 13 Nov 2026.
 
+## 8.16.1 · 2026-11-28
+- **Risk today fan chart, 200-day level fixed:** the fan drew the 200-day about 2.3 points too low (27 Nov: 731.0 against 733.34 on the stance card and on TradingView). The Risk today history is dividend-adjusted (total return, right for the odds), and the levels were taken from it. The 200-day, the dip line, the anchor and the 200-day filter used for the clock table now come from the card's SPY prices (not dividend-adjusted), so every level on the page agrees.
+
 ## 8.16.0 · 2026-11-27
 - **Risk today, smooth VIX weights (study VK1):** the odds, the 20-session P10 / P90 and the fan chart no longer come from one of three VIX buckets (CALM / WIDE / STRESSED). Every past day of the same SPY phase counts, weighted by how close its VIX was to today's (full weight at today's level, about two thirds at 10% away, a fifth at 20%, almost nothing at 30%). The odds now move smoothly with the VIX instead of jumping when it crosses a bucket line (25 Nov: 23% → 35% on a 0.4-point VIX move). At extreme VIX levels the weighting widens until it rests on at least 10 separate past spells.
 - Out of sample (every dip since 2001) the smooth weights were as accurate as the buckets; the pre-set "no worse" margin was not shown for the fast 7% drop, and the change was adopted as a display choice. The fast 7% drop keeps TESTED (it beats the average day under both methods).
